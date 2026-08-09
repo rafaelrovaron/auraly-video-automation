@@ -4,7 +4,7 @@
 **Status:** pronto para planejamento técnico e implementação
 **Data:** 2026-08-09
 **Responsável de produto:** Rafael Rovaron
-**Repositório:** `C:/Users/Rovaron/Documents/Auraly/pipeline`
+**Repositório:** `<AURALY_ROOT>/pipeline`
 **Documento de contexto:** `docs/PROJECT-MEMORY.md`
 
 ---

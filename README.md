@@ -25,8 +25,12 @@ O PRD amplia o escopo futuro da pipeline para campanhas com uma Copy/Voice Maste
 
 ## Preparação
 
+Defina `<AURALY_ROOT>` como a pasta raiz local do Auraly. O código usa
+`~/Documents/Auraly` por padrão; outro local pode ser definido com
+`AURALY_PROJECT_ROOT`.
+
 ```bash
-cd "C:/Users/Rovaron/Documents/Auraly/pipeline"
+cd "<AURALY_ROOT>/pipeline"
 uv sync --all-groups
 npm ci
 ```
@@ -102,7 +106,7 @@ schemas/edit.schema.json
 A biblioteca somente leitura fica fora do repositório:
 
 ```text
-C:/Users/Rovaron/Documents/Auraly/07 Validated Ads Knowledge/Top Ads - Auraly
+<AURALY_ROOT>/07 Validated Ads Knowledge/Top Ads - Auraly
 ```
 
 Verifique integridade e processamento:

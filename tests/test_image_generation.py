@@ -51,6 +51,12 @@ def _prepare(project: tuple[Path, Path, Path], **overrides):
     return prepare_generation(**kwargs)
 
 
+def _tamper_context(context_path: Path, **changes: str) -> None:
+    payload = json.loads(context_path.read_text(encoding="utf-8"))
+    payload.update(changes)
+    context_path.write_text(json.dumps(payload), encoding="utf-8")
+
+
 def test_resolve_project_relative_path(project: tuple[Path, Path, Path]) -> None:
     root, reference, _ = project
     assert resolve_project_path("03 Avatars/character-blueprint.png", root) == reference.resolve()
@@ -166,6 +172,82 @@ def test_explicit_extension_must_match_download(project: tuple[Path, Path, Path]
     downloaded = _png(downloads / "generated.png")
     with pytest.raises(ImageGenerationError, match="does not match"):
         finalize_generation(context_path, downloaded)
+
+
+@pytest.mark.parametrize(
+    "field",
+    ["projectRoot", "jobDir", "sourceDir", "manifestDir", "inspectionDir", "contextPath", "outputPath"],
+)
+def test_tampered_context_cannot_redirect_filesystem_paths(
+    project: tuple[Path, Path, Path], field: str
+) -> None:
+    root, _, _ = project
+    _, context_path = _prepare(project)
+    _tamper_context(context_path, **{field: str(root.parent / "outside")})
+
+    with pytest.raises(ImageGenerationError, match="context field"):
+        record_download_baseline(context_path)
+
+
+def test_finalize_rejects_image_outside_download_directory(
+    project: tuple[Path, Path, Path],
+) -> None:
+    root, _, _ = project
+    _, context_path = _prepare(project)
+    outside = _png(root.parent / "outside.png")
+
+    with pytest.raises(ImageGenerationError, match="downloaded image must be inside"):
+        finalize_generation(context_path, outside)
+
+
+def test_context_output_must_be_direct_child_of_source(
+    project: tuple[Path, Path, Path],
+) -> None:
+    root, _, _ = project
+    _, context_path = _prepare(project)
+    nested = root / "pipeline" / "work" / "existing-job" / "source" / "nested" / "scene.png"
+    _tamper_context(
+        context_path,
+        outputPath=str(nested),
+        outputFile=nested.relative_to(root).as_posix(),
+    )
+
+    with pytest.raises(ImageGenerationError, match="directly inside"):
+        record_download_baseline(context_path)
+
+
+def test_failure_result_redacts_sensitive_error_content(
+    project: tuple[Path, Path, Path],
+) -> None:
+    _, context_path = _prepare(project)
+    result = write_failure_result(
+        context_path,
+        failed_step="provider_request",
+        error=(
+            "Bearer secret-token-value "
+            "https://example.com/file?X-Amz-Signature=abc123&X-Amz-Credential=private "
+            r"C:\Users\Rovaron\private\cookie.txt"
+        ),
+    )
+
+    assert "secret-token-value" not in (result.error or "")
+    assert "X-Amz-Signature" not in (result.error or "")
+    assert "Rovaron" not in (result.error or "")
+    assert "[REDACTED]" in (result.error or "")
+
+
+def test_failure_result_rejects_screenshot_outside_inspection_directory(
+    project: tuple[Path, Path, Path],
+) -> None:
+    root, context_path = project[0], _prepare(project)[1]
+
+    with pytest.raises(ImageGenerationError, match="debug screenshot must be inside"):
+        write_failure_result(
+            context_path,
+            failed_step="provider_request",
+            error="safe error",
+            debug_screenshot=root.parent / "outside.png",
+        )
 
 
 def test_failure_result_is_structured_and_persisted(project: tuple[Path, Path, Path]) -> None:

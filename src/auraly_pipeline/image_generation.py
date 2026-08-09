@@ -48,6 +48,23 @@ AUTH_TEXT_MARKERS = (
     "Choose an account",
 )
 SECURITY_TEXT_MARKERS = ("CAPTCHA", "Verify it's you", "Security check", "unusual traffic")
+SENSITIVE_URL_RE = re.compile(r"https?://[^\s\"'<>?]+\?[^\s\"'<>]+", re.IGNORECASE)
+BEARER_RE = re.compile(r"(?i)\bBearer\s+[^\s,;]+")
+SECRET_ASSIGNMENT_RE = re.compile(
+    r"(?i)\b(api[_-]?key|secret|password|token|cookie)\s*[:=]\s*[^\s,;]+"
+)
+WINDOWS_USER_PATH_RE = re.compile(r"(?i)\b[A-Z]:[\\/]+Users[\\/]+[^\\/\s]+")
+
+
+def redact_sensitive_text(value: str) -> str:
+    """Remove credentials, signed URL queries, and user-home identifiers from diagnostics."""
+    redacted = SENSITIVE_URL_RE.sub(
+        lambda match: match.group(0).split("?", 1)[0] + "?[REDACTED]",
+        value,
+    )
+    redacted = BEARER_RE.sub("Bearer [REDACTED]", redacted)
+    redacted = SECRET_ASSIGNMENT_RE.sub(lambda match: f"{match.group(1)}=[REDACTED]", redacted)
+    return WINDOWS_USER_PATH_RE.sub("%USERPROFILE%", redacted)
 
 
 class ImageGenerationError(RuntimeError):
@@ -135,10 +152,110 @@ def _write_json(path: Path, payload: dict) -> Path:
     return path
 
 
+def _validate_loaded_context(context: GenerationContext, context_path: Path) -> GenerationContext:
+    resolved_context = context_path.resolve()
+    try:
+        inspection_dir = resolved_context.parent
+        job_dir = resolved_context.parents[2]
+        work_dir = resolved_context.parents[3]
+        pipeline_dir = resolved_context.parents[4]
+        project_root = resolved_context.parents[5]
+    except IndexError as exc:
+        raise ImageGenerationError(
+            "load_context", f"context path is outside the expected job layout: {resolved_context}"
+        ) from exc
+
+    if (
+        inspection_dir.name != "google-ai-studio"
+        or inspection_dir.parent.name != "inspection"
+        or work_dir.name != "work"
+        or pipeline_dir.name != "pipeline"
+        or not resolved_context.name.startswith("request_")
+        or resolved_context.suffix.casefold() != ".json"
+    ):
+        raise ImageGenerationError(
+            "load_context", f"context path is outside the expected job layout: {resolved_context}"
+        )
+
+    expected_paths = {
+        "project_root": project_root,
+        "job_dir": job_dir,
+        "source_dir": job_dir / "source",
+        "manifest_dir": job_dir / "manifest",
+        "inspection_dir": inspection_dir,
+        "context_path": resolved_context,
+    }
+    for field_name, expected in expected_paths.items():
+        actual = Path(getattr(context, field_name)).resolve()
+        if actual != expected.resolve():
+            raise ImageGenerationError(
+                "load_context",
+                f"context field {field_name} does not match the canonical job layout",
+            )
+
+    resolved_job_dir = job_dir.resolve()
+    for field_name in ("source_dir", "manifest_dir", "inspection_dir"):
+        resolved_child = Path(getattr(context, field_name)).resolve()
+        try:
+            resolved_child.relative_to(resolved_job_dir)
+        except ValueError as exc:
+            raise ImageGenerationError(
+                "load_context",
+                f"context field {field_name} resolves outside the job directory",
+            ) from exc
+
+    output_path = Path(context.output_path).resolve()
+    source_dir = expected_paths["source_dir"].resolve()
+    try:
+        output_path.relative_to(source_dir)
+    except ValueError as exc:
+        raise ImageGenerationError(
+            "load_context", "context field output_path escapes the job source directory"
+        ) from exc
+    if output_path.parent != source_dir:
+        raise ImageGenerationError(
+            "load_context", "context field output_path must be directly inside the job source directory"
+        )
+    expected_output_file = output_path.relative_to(project_root.resolve()).as_posix()
+    if context.output_file != expected_output_file:
+        raise ImageGenerationError(
+            "load_context", "context field output_file does not match output_path"
+        )
+
+    reference_path = Path(context.reference_image_path).resolve()
+    avatars_root = (project_root / AVATARS_ROOT_RELATIVE).resolve()
+    try:
+        reference_path.relative_to(avatars_root)
+    except ValueError as exc:
+        raise ImageGenerationError(
+            "load_context", "context field reference_image_path escapes the avatar library"
+        ) from exc
+    expected_reference = reference_path.relative_to(project_root.resolve()).as_posix()
+    if context.reference_image != expected_reference:
+        raise ImageGenerationError(
+            "load_context", "context field reference_image does not match reference_image_path"
+        )
+
+    downloads_dir = Path(context.downloads_dir).resolve()
+    if context.detected_download_path:
+        detected = Path(context.detected_download_path).resolve()
+        try:
+            detected.relative_to(downloads_dir)
+        except ValueError as exc:
+            raise ImageGenerationError(
+                "load_context", "context field detected_download_path escapes downloads_dir"
+            ) from exc
+    return context
+
+
 def _read_context(path: Path) -> GenerationContext:
     try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-        return GenerationContext.model_validate(payload)
+        resolved = path.resolve()
+        payload = json.loads(resolved.read_text(encoding="utf-8"))
+        context = GenerationContext.model_validate(payload)
+        return _validate_loaded_context(context, resolved)
+    except ImageGenerationError:
+        raise
     except (OSError, json.JSONDecodeError, ValueError) as exc:
         raise ImageGenerationError("load_context", f"invalid generation context: {path}: {exc}") from exc
 
@@ -418,6 +535,13 @@ def finalize_generation(
 ) -> ImageGenerationResult:
     context = _read_context(context_path)
     source = (downloaded_file or Path(context.detected_download_path or "")).resolve()
+    downloads_dir = Path(context.downloads_dir).resolve()
+    _require_within(
+        source,
+        downloads_dir,
+        "move_output_to_job",
+        "downloaded image",
+    )
     if not source.is_file():
         raise ImageGenerationError("move_output_to_job", f"downloaded image does not exist: {source}")
     detected_suffix = _detect_image_format(source)
@@ -491,6 +615,14 @@ def write_failure_result(
     context = _read_context(context_path)
     timestamp = _iso_now()
     screenshot = str(debug_screenshot.resolve()) if debug_screenshot else None
+    if debug_screenshot:
+        _require_within(
+            debug_screenshot.resolve(),
+            Path(context.inspection_dir),
+            "write_failure_result",
+            "debug screenshot",
+        )
+    sanitized_error = redact_sensitive_text(error)
     result = ImageGenerationResult(
         success=False,
         job_name=context.job_name,
@@ -499,7 +631,7 @@ def write_failure_result(
         prompt=context.prompt,
         timestamp=timestamp,
         failed_step=failed_step,
-        error=error,
+        error=sanitized_error,
         debug_screenshot=screenshot,
     )
     safe_step = re.sub(r"[^a-z0-9]+", "-", failed_step.casefold()).strip("-") or "unknown"
@@ -509,7 +641,7 @@ def write_failure_result(
     )
     result.diagnostic_path = str(diagnostic_path)
     _write_json(diagnostic_path, result.model_dump(by_alias=True, mode="json"))
-    LOGGER.error('[image-generation] FAILED step=%s error="%s"', failed_step, error)
+    LOGGER.error('[image-generation] FAILED step=%s error="%s"', failed_step, sanitized_error)
     return result
 
 

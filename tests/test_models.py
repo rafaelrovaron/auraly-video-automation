@@ -64,6 +64,29 @@ def test_manifest_rejects_paths_outside_reel_workspace() -> None:
         EditManifest.model_validate(data)
 
 
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("video", r"..\private.mp4"),
+        ("copy", r"C:private\copy.md"),
+    ],
+)
+def test_manifest_rejects_windows_path_traversal(field: str, value: str) -> None:
+    data = deepcopy(valid_manifest_data())
+    data["source"][field] = value
+
+    with pytest.raises(ValidationError, match="workspace-relative path"):
+        EditManifest.model_validate(data)
+
+
+def test_music_asset_must_be_workspace_relative() -> None:
+    data = deepcopy(valid_manifest_data())
+    data["music"] = {"asset": r"..\private.mp3"}
+
+    with pytest.raises(ValidationError, match="workspace-relative path"):
+        EditManifest.model_validate(data)
+
+
 def test_timeline_event_cannot_exceed_source_duration() -> None:
     data = deepcopy(valid_manifest_data())
     data["broll"] = [

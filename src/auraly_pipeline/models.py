@@ -16,7 +16,15 @@ def _workspace_path(value: str | None) -> str | None:
         return None
     posix = PurePosixPath(value)
     windows = PureWindowsPath(value)
-    if not value or posix.is_absolute() or windows.is_absolute() or ".." in posix.parts:
+    if (
+        not value
+        or "\x00" in value
+        or posix.is_absolute()
+        or windows.is_absolute()
+        or bool(windows.drive)
+        or ".." in posix.parts
+        or ".." in windows.parts
+    ):
         raise ValueError("expected a workspace-relative path")
     return value
 
@@ -108,6 +116,8 @@ class MusicSpec(ContractModel):
     duck_under_voice_db: float = -8
     fade_in_sec: float = Field(default=0.4, ge=0)
     fade_out_sec: float = Field(default=1.0, ge=0)
+
+    _validate_asset = field_validator("asset")(_workspace_path)
 
 
 class ReviewSpec(ContractModel):

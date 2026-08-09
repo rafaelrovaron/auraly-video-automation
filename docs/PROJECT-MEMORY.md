@@ -2,7 +2,7 @@
 
 **Status:** documento vivo
 **Última consolidação:** 2026-08-09
-**Projeto:** `C:/Users/Rovaron/Documents/Auraly/pipeline`
+**Projeto:** `<AURALY_ROOT>/pipeline`
 **Responsável de produto:** Rafael Rovaron
 **Uso:** contexto permanente para humanos, agentes de IA e futuras sessões de implementação.
 
@@ -541,7 +541,7 @@ O Hermes/IA deve receber respostas compactas, estruturadas e sem secrets. Saída
 O repositório já existe e não deve ser recriado:
 
 ```text
-C:/Users/Rovaron/Documents/Auraly/pipeline
+<AURALY_ROOT>/pipeline
 ```
 
 Implementado atualmente:

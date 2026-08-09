@@ -1,7 +1,7 @@
 # Auraly Pipeline — Relatório de Instalação
 
 **Data:** 2026-07-22 20:50:55 ESAST
-**Diretório:** `C:/Users/Rovaron/Documents/Auraly/pipeline`
+**Diretório:** `<AURALY_ROOT>/pipeline`
 **Escopo:** ambiente local isolado para pós-produção de vídeos HeyGen. Nenhum asset existente do Auraly foi alterado.
 
 ## Componentes instalados
@@ -58,13 +58,13 @@ O modelo é ignorado pelo Git e não será duplicado em commits.
 
 ### HyperFrames
 
-- Versão fixada: `0.7.66`
+- Versão fixada: `0.7.103`
 - Instalação: `pipeline/node_modules`
 - Lockfile: `pipeline/package-lock.json`
 - Telemetria: desativada
 - Chrome Headless Shell: `152.0.7928.2`
 - Executável:
-  `C:/Users/Rovaron/.cache/hyperframes/chrome/chrome-headless-shell/win64-152.0.7928.2/chrome-headless-shell-win64/chrome-headless-shell.exe`
+  `<USER_HOME>/.cache/hyperframes/chrome/chrome-headless-shell/win64-152.0.7928.2/chrome-headless-shell-win64/chrome-headless-shell.exe`
 
 Validações executadas:
 
@@ -87,7 +87,7 @@ Duração: 1,0 segundo
 Workers: 1
 Modo: low-memory / draft
 Tempo de renderização: 3,4 segundos
-Browser GPU: NVIDIA GeForce RTX 4060 Ti via Direct3D 11
+Browser GPU: aceleração disponível via Direct3D 11
 Resultado: OK
 ```
 
@@ -139,14 +139,14 @@ Auraly/pipeline/
 └── uv.lock
 ```
 
-O diretório foi inicializado como repositório Git, mas nenhum commit foi criado.
+O diretório foi inicializado como repositório Git. O código-fonte não inclui mídia, modelos, ambientes virtuais ou credenciais.
 
 ## Uso do ambiente
 
 Executar comandos Python:
 
 ```bash
-cd 'C:/Users/Rovaron/Documents/Auraly/pipeline'
+cd '<AURALY_ROOT>/pipeline'
 uv run python ...
 ```
 
@@ -166,19 +166,16 @@ Executar Auto-Editor:
 
 ## Alertas conhecidos
 
-O `npm audit` reporta cinco vulnerabilidades transitivas no HyperFrames `0.7.66`:
+O HyperFrames foi atualizado de `0.7.66` para `0.7.103`. Em 2026-08-09,
+`npm audit --omit=dev` reportou **zero vulnerabilidades conhecidas** no lockfile.
 
-- 1 moderada em `@hono/node-server`;
-- 4 altas relacionadas a `adm-zip`, `onnxruntime-node`, `sharp` e à agregação no pacote `hyperframes`;
-- nenhuma correção automática disponível para a versão auditada.
-
-Mitigação adotada para o piloto:
+Controles mantidos para o piloto:
 
 1. Studio e servidor somente em localhost;
 2. não expor porta do HyperFrames à rede;
 3. usar apenas imagens, vídeos e arquivos ZIP aprovados;
 4. manter o HyperFrames atrás de um adapter substituível;
-5. revisar uma futura atualização antes de trocar a versão fixada.
+5. executar `npm audit` em toda atualização do lockfile.
 
 O diagnóstico do HyperFrames também lista Docker, Whisper.cpp, Kokoro e MusicGen como ausentes. Eles são opcionais e foram deliberadamente excluídos desta pipeline porque:
 
@@ -210,7 +207,7 @@ O ambiente necessário para iniciar a implementação está instalado e validado
 - [x] ambiente Python isolado
 - [x] dependências Python fixadas
 - [x] faster-whisper small.en
-- [x] HyperFrames 0.7.66
+- [x] HyperFrames 0.7.103
 - [x] Chrome Headless Shell
 - [x] telemetria desativada
 - [x] Auto-Editor 31.3.2 com checksum validado
