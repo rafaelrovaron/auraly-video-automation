@@ -1,0 +1,42 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "auraly-video-pipeline"
+version = "0.1.0"
+description = "Local post-production pipeline for Auraly HeyGen reels"
+requires-python = ">=3.11,<3.12"
+dependencies = [
+  "pydantic>=2.11,<3",
+  "pydantic-settings>=2.10,<3",
+  "typer>=0.16,<1",
+  "rich>=14,<15",
+  "PyYAML>=6,<7",
+  "faster-whisper==1.2.1",
+  "pysubs2==1.8.1",
+]
+
+[project.scripts]
+auraly = "auraly_pipeline.cli:app"
+
+[dependency-groups]
+dev = [
+  "pytest>=8,<9",
+  "pytest-cov>=6,<7",
+  "ruff>=0.12,<1",
+  "mypy>=1.17,<2",
+  "jsonschema>=4,<5",
+]
+
+[tool.uv]
+package = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/auraly_pipeline"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100

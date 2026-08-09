@@ -1,0 +1,15 @@
+{
+  "name": "auraly-video-pipeline",
+  "version": "0.1.0",
+  "private": true,
+  "description": "HyperFrames renderer environment for Auraly HeyGen reels",
+  "scripts": {
+    "hf:doctor": "hyperframes doctor",
+    "hf:lint": "hyperframes lint",
+    "hf:check": "hyperframes check",
+    "hf:render": "hyperframes render"
+  },
+  "dependencies": {
+    "hyperframes": "0.7.103"
+  }
+}

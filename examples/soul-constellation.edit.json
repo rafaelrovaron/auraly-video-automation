@@ -1,0 +1,34 @@
+{
+  "schemaVersion": "1.0",
+  "project": {
+    "reelId": "soul-constellation-example",
+    "character": "soul-constellation",
+    "template": "soul-constellation-v1"
+  },
+  "source": {
+    "video": "source/heygen.mp4",
+    "copy": "source/copy.md",
+    "transcript": null,
+    "durationSec": 28
+  },
+  "canvas": {"width": 1080, "height": 1920, "fps": 30},
+  "headline": {
+    "text": "THIS CARD FOUND YOU FOR A REASON",
+    "start": 0,
+    "end": 3.5,
+    "spoken": false
+  },
+  "cuts": [],
+  "captions": [],
+  "punchIns": [{"start": 2, "end": 3.8, "scale": 1.05, "reason": "subtle card reveal"}],
+  "broll": [],
+  "music": {
+    "asset": null,
+    "volumeDb": -24,
+    "duckUnderVoiceDb": -8,
+    "fadeInSec": 0.8,
+    "fadeOutSec": 1.5
+  },
+  "render": {"width": 1080, "height": 1920, "fps": 30, "format": "mp4", "codec": "h264"},
+  "review": {"status": "draft", "warnings": [], "approvedBy": null, "approvedAt": null}
+}

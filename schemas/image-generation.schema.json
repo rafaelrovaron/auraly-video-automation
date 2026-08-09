@@ -1,0 +1,64 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Schemaversion",
+      "type": "string"
+    },
+    "provider": {
+      "const": "google_ai_studio",
+      "default": "google_ai_studio",
+      "title": "Provider",
+      "type": "string"
+    },
+    "skill": {
+      "const": "generate_google_ai_studio_image",
+      "default": "generate_google_ai_studio_image",
+      "title": "Skill",
+      "type": "string"
+    },
+    "jobName": {
+      "title": "Jobname",
+      "type": "string"
+    },
+    "modelName": {
+      "title": "Modelname",
+      "type": "string"
+    },
+    "referenceImage": {
+      "title": "Referenceimage",
+      "type": "string"
+    },
+    "prompt": {
+      "title": "Prompt",
+      "type": "string"
+    },
+    "outputFile": {
+      "title": "Outputfile",
+      "type": "string"
+    },
+    "generatedAt": {
+      "title": "Generatedat",
+      "type": "string"
+    },
+    "status": {
+      "const": "success",
+      "default": "success",
+      "title": "Status",
+      "type": "string"
+    }
+  },
+  "required": [
+    "jobName",
+    "modelName",
+    "referenceImage",
+    "prompt",
+    "outputFile",
+    "generatedAt"
+  ],
+  "title": "Auraly Image Generation Manifest v1",
+  "type": "object",
+  "$id": "https://auraly.local/schemas/image-generation.schema.v1.json"
+}

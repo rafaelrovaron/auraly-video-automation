@@ -1,0 +1,661 @@
+# Auraly Mass Video Pipeline — Memória do Projeto
+
+**Status:** documento vivo
+**Última consolidação:** 2026-08-09
+**Projeto:** `C:/Users/Rovaron/Documents/Auraly/pipeline`
+**Responsável de produto:** Rafael Rovaron
+**Uso:** contexto permanente para humanos, agentes de IA e futuras sessões de implementação.
+
+> Este documento registra decisões duráveis, convenções e aprendizados. Estados operacionais de campanhas, IDs remotos, tokens, URLs assinadas e progresso temporário pertencem ao banco de dados e aos manifests de cada job, não a este arquivo.
+
+---
+
+## 1. Visão
+
+Construir uma aplicação local para produção em massa de Reels orgânicos do Auraly. A unidade central será uma **campanha** composta por:
+
+- uma copy aprovada;
+- uma headline visual;
+- uma voz master gerada e tratada uma única vez;
+- um personagem/perfil social;
+- várias cenas em locais diferentes;
+- uma imagem aprovada por cena;
+- um talking avatar HeyGen Avatar III por imagem;
+- uma edição determinística por variante;
+- QC técnico e revisão visual antes da publicação.
+
+Exemplo de fan-out:
+
+```text
+Copy aprovada + Voice Master
+  ├── Lavanderia 24 horas → imagem → HeyGen → edição → QC
+  ├── Restaurante vazio   → imagem → HeyGen → edição → QC
+  ├── Estação de metrô    → imagem → HeyGen → edição → QC
+  └── Supermercado        → imagem → HeyGen → edição → QC
+```
+
+O objetivo é que a IA decida parâmetros criativos, chame a aplicação e interprete os relatórios. A aplicação deve executar as operações mecânicas de maneira repetível, retomável e auditável.
+
+---
+
+## 2. Princípio de separação de responsabilidades
+
+### 2.1 Responsabilidades da IA
+
+- pesquisar referências e padrões já validados;
+- definir ângulo, carta, cenário, personagem e headline;
+- escrever e revisar a copy;
+- criar a matriz de variantes e os prompts do Google Flow;
+- avaliar fidelidade visual, anatomia, semântica e identidade;
+- recomendar aprovação, rejeição ou regeneração;
+- avaliar interpretação emocional da voz quando necessário;
+- analisar exceções que não podem ser resolvidas por regras;
+- chamar a aplicação local e interpretar JSONs de resultado.
+
+### 2.2 Responsabilidades da aplicação
+
+- criar e versionar campanhas, variantes e jobs;
+- validar inputs, paths, formatos, dimensões e hashes;
+- gerar voz pela API oficial do ElevenLabs;
+- tratar e verificar áudio;
+- operar o Google Flow por Playwright;
+- operar o HeyGen pelo MCP oficial com OAuth;
+- criar/pollar/baixar talking avatars Avatar III;
+- criar captions, headline, zooms e mixagem;
+- renderizar por FFmpeg/renderer adapter;
+- executar QC técnico;
+- gerar proxies, crops, contact sheets e relatórios;
+- entregar para pasta sincronizada;
+- persistir estado e retomar após falhas.
+
+### 2.3 Gates humanos obrigatórios
+
+1. aprovação da copy e headline;
+2. aprovação da Voice Master;
+3. aprovação individual das imagens;
+4. aprovação do primeiro vídeo canário da campanha;
+5. aprovação final das variantes destinadas à publicação.
+
+O QC técnico pode ser automático; decisões de marca e qualidade visual permanecem humanas/IA.
+
+---
+
+## 3. Decisões tecnológicas
+
+### 3.1 Arquitetura
+
+- monólito modular orientado a jobs;
+- arquitetura hexagonal/ports and adapters;
+- state machine persistente por campanha e variante;
+- pipeline modelada como DAG com fan-out e fan-in;
+- backend, workers, CLI e interface usando a mesma camada de aplicação;
+- nada de microserviços no MVP.
+
+### 3.2 Stack recomendada
+
+#### Backend
+
+- Python `>=3.11,<3.12`;
+- FastAPI;
+- Pydantic;
+- SQLAlchemy 2;
+- Alembic;
+- Typer;
+- HTTPX;
+- pytest, Ruff e mypy;
+- logging estruturado em JSON.
+
+#### Persistência
+
+- SQLite em modo WAL no MVP;
+- PostgreSQL somente se houver necessidade multiusuário/multimáquina;
+- mídia no filesystem, nunca como BLOB no banco;
+- banco armazena paths, IDs, estados, hashes e metadados.
+
+#### Frontend
+
+- React + TypeScript;
+- Vite;
+- TanStack Query;
+- React Router;
+- componentes acessíveis, preferencialmente shadcn/ui ou equivalentes;
+- Server-Sent Events no MVP para atualizações em tempo real.
+
+#### Mídia
+
+- FFmpeg e ffprobe como base mecânica;
+- faster-whisper small.en CPU INT8 para ASR local quando necessário;
+- ASS/libass ou renderer adapter para captions;
+- HyperFrames permanece atrás de um adapter substituível.
+
+#### Distribuição
+
+- web app local em `127.0.0.1` primeiro;
+- Tauri poderá empacotar a aplicação futuramente;
+- não iniciar com Electron ou microserviços.
+
+---
+
+## 4. Integrações obrigatórias
+
+### 4.1 HeyGen
+
+**Obrigatório:** MCP oficial do HeyGen com OAuth gerenciado pelo Hermes.
+
+Fluxo esperado:
+
+```text
+OAuth/MCP preflight
+→ create_asset_upload
+→ PUT com headers assinados exatos
+→ complete_asset_upload
+→ create_photo_avatar
+→ poll get_avatar_look
+→ validar supported_api_engines
+→ create_video_from_avatar
+→ poll get_video
+→ download e QC
+```
+
+Regras duras:
+
+- usar explicitamente `engine.type = avatar_iii`;
+- nunca depender do engine default;
+- bloquear se o look não listar `avatar_iii` em `supported_api_engines`;
+- persistir IDs remotos antes de avançar;
+- não repetir POST pago em estado ambíguo;
+- nunca armazenar token OAuth, cookies ou URLs assinadas no job;
+- o OAuth fica no armazenamento MCP/Hermes;
+- não usar automação web no HeyGen quando o MCP oficial estiver disponível.
+
+Aprendizado de upload S3:
+
+- usar os headers retornados pelo HeyGen como fonte principal;
+- tratar nomes de headers sem diferenciar maiúsculas/minúsculas;
+- não duplicar `Content-Type`/`content-type`;
+- não adicionar headers `x-amz-*` que não estejam assinados;
+- verificar `complete_asset_upload` antes de criar look ou vídeo.
+
+### 4.2 ElevenLabs
+
+**Obrigatório:** API oficial do ElevenLabs, nunca automação web na pipeline de produção.
+
+Responsabilidades do adapter:
+
+- TTS com voice ID e model ID explícitos;
+- múltiplas alternativas configuráveis;
+- captura de metadados e consumo quando disponível;
+- download direto;
+- timestamps/alinhamento quando disponíveis;
+- STT opcional para validar o áudio final;
+- tratamento de rate limit e retry seguro.
+
+Para a mesma copy, gerar uma Voice Master e reutilizá-la em todas as variantes. O audio asset do HeyGen também deve ser reutilizado quando possível.
+
+### 4.3 Google Flow
+
+**Obrigatório:** automação por Playwright.
+
+Decisões:
+
+- Playwright Python no MVP;
+- worker dedicado;
+- perfil Chromium persistente e isolado;
+- login manual inicial;
+- não usar o perfil pessoal principal do Chrome;
+- download sempre em 2K;
+- concorrência inicial igual a 1;
+- capturar screenshot/checkpoints;
+- gerar trace em falhas;
+- centralizar seletores em módulo versionado;
+- parar com `human_intervention_required` quando a UI mudar em vez de clicar por coordenadas incertas.
+
+O programa executa prompts; a IA é responsável por escrevê-los.
+
+### 4.4 Entrega
+
+No MVP, copiar para a pasta local sincronizada com Google Drive, verificar tamanho e SHA-256 do destino e declarar apenas “copiado para a pasta sincronizada”. Não afirmar upload na nuvem sem evidência do sync ou da API.
+
+---
+
+## 5. Modelo de domínio
+
+### Campaign
+
+Agrupa decisões e recursos compartilhados:
+
+- conta/personagem;
+- Copy Master;
+- Voice Master;
+- carta/objeto de prova;
+- headline;
+- presets de edição;
+- música;
+- orçamento;
+- conjunto de Scene Variants.
+
+### CopyMaster
+
+- texto aprovado e imutável;
+- headline visual separada da narração;
+- hook, body e CTA;
+- hash e versão;
+- status de aprovação.
+
+### VoiceMaster
+
+- áudio bruto e processado;
+- voice ID, model ID e parâmetros;
+- transcript reconhecido;
+- duração, WPM, LUFS, true peak e hash;
+- aprovação humana.
+
+### SceneVariant
+
+Uma ramificação visual da campanha:
+
+- local;
+- horário;
+- ação;
+- objeto/carta;
+- prompt;
+- candidatas do Flow;
+- imagem aprovada;
+- look HeyGen;
+- source MP4;
+- edit manifest;
+- renders e QC.
+
+### ImageCandidate
+
+- arquivo original preservado;
+- prompt e índice da candidata;
+- dimensões, hash e metadados;
+- crops/contact sheet;
+- status de revisão;
+- desvios conhecidos;
+- nunca sobrescrever versões rejeitadas.
+
+### RemoteAsset / AvatarLook / HeyGenRender
+
+Recursos remotos duráveis com IDs persistidos. IDs não devem ser inferidos por nome de arquivo.
+
+### EditManifest
+
+Fonte de verdade editorial renderer-neutral:
+
+- headline;
+- captions;
+- música;
+- zoom/punch-ins;
+- safe zones;
+- duração;
+- render settings;
+- hashes dos inputs;
+- status de revisão.
+
+---
+
+## 6. Estados
+
+Estados mínimos:
+
+```text
+not_started
+queued
+running
+completed
+failed
+blocked
+retry_scheduled
+human_review_required
+human_approved
+human_approved_with_known_deviations
+rejected
+superseded
+cancelled
+```
+
+Fluxo de variante recomendado:
+
+```text
+not_started
+→ prompt_ready
+→ flow_queued
+→ flow_generating
+→ image_downloaded
+→ image_qc_pending
+→ human_review_required
+→ image_approved
+→ heygen_look_queued
+→ heygen_look_processing
+→ heygen_video_queued
+→ heygen_video_processing
+→ source_video_ready
+→ edit_queued
+→ rendering
+→ technical_qc
+→ final_review_required
+→ approved
+→ delivered
+```
+
+Toda transição deve:
+
+1. validar precondições;
+2. registrar início;
+3. executar uma operação idempotente ou com proteção contra duplicidade;
+4. persistir IDs/resultados imediatamente;
+5. verificar output real;
+6. registrar evento;
+7. avançar estado somente após verificação.
+
+---
+
+## 7. Produção em massa
+
+O pipeline deve compartilhar recursos por campanha:
+
+- copy: uma vez;
+- voz: uma vez;
+- processamento de áudio: uma vez;
+- upload do áudio para HeyGen: uma vez quando reutilizável;
+- fonts, música e presets: compartilhados;
+- imagem, look, vídeo e render: por variante.
+
+Concorrência inicial:
+
+```yaml
+google_flow: 1
+elevenlabs: 1
+heygen: 2
+local_render: 2
+```
+
+Ações pagas precisam de budget gate. Um resultado remoto ambíguo nunca autoriza retry cego.
+
+---
+
+## 8. Convenções editoriais Auraly
+
+### Gerais
+
+- conteúdo orgânico; não vender/nomear diretamente o app no Reel;
+- objetivo é levar ao quiz/leitura gratuita de um minuto;
+- headline visual não é falada;
+- uma imagem por Reel;
+- movimento apenas por talking avatar e zooms discretos;
+- música sutil;
+- captions centralizadas na faixa âmbar do canvas;
+- headlines somente:
+  - fundo branco + texto vermelho;
+  - fundo branco + texto preto;
+  - fundo vermelho + texto branco.
+
+### Soul Constellation
+
+- única conta masculina;
+- identidade canônica: Avatar 003;
+- voz oficial: Michael C. Vincent;
+- entrega firme/dinâmica, não calma/lenta;
+- sem southern-auntie slang;
+- CTA aponta para Stories e primeiro comentário fixado;
+- uma prova/objeto de autoridade ligado ao roteiro, sem clutter místico aleatório.
+
+### Google Flow
+
+- imagens sociais sempre 9:16;
+- downloads sempre 2K, nunca 1K;
+- preservar todas as versões;
+- registrar rejeições e desvios conhecidos.
+
+---
+
+## 9. QC obrigatório
+
+### Imagem
+
+Automático:
+
+- formato e corrupção;
+- resolução e proporção;
+- hash;
+- OCR indicativo;
+- faces extras indicativas;
+- crops de rosto/mãos/objeto;
+- contact sheet.
+
+Semântico por IA/humano:
+
+- identidade;
+- fidelidade da carta/objeto;
+- anatomia;
+- cenário;
+- pessoas extras;
+- marcas/textos;
+- safe zones;
+- coerência com a copy.
+
+### Voz
+
+- duração;
+- WPM;
+- silêncios;
+- LUFS;
+- true peak;
+- clipping;
+- transcript versus copy aprovada;
+- headline ausente da narração;
+- audição humana da Voice Master.
+
+### HeyGen source
+
+- engine Avatar III confirmado;
+- MP4 íntegro;
+- resolução/FPS/codec;
+- áudio presente;
+- full decode;
+- estabilidade visual por frames;
+- rosto, boca, mãos e objeto;
+- sem drift relevante de duração.
+
+### Render final
+
+- 1080×1920;
+- H.264 + AAC;
+- FPS constante;
+- faststart;
+- full decode;
+- captions dentro da safe zone;
+- headline correta e não narrada;
+- música sem mascarar voz;
+- loudness e true peak medidos no render final;
+- contact sheet e proxy;
+- hash do master.
+
+Regra FFmpeg crítica:
+
+```text
+amix=inputs=2:duration=first:dropout_transition=0:normalize=0
+```
+
+O `amix` normalizado por default pode reduzir a narração em aproximadamente 6 dB. Um render com peak/loudness inesperadamente baixo deve falhar no QC.
+
+---
+
+## 10. Interface de gestão desejada
+
+Web app local em `127.0.0.1`, com:
+
+- dashboard de campanhas;
+- wizard de campanha;
+- editor de copy/headline;
+- Voice Studio;
+- matriz de locais/variantes;
+- galeria de candidatas do Flow;
+- aprovação/rejeição/regeneração em lote;
+- fila do HeyGen;
+- visualização de jobs e logs;
+- editor de presets;
+- revisão de vídeo;
+- relatórios de QC;
+- entrega e histórico.
+
+CLI, frontend e ferramenta Hermes devem chamar a mesma camada de aplicação:
+
+```text
+CLI ──────────────┐
+React/FastAPI ────┼── Application Services → Orchestrator → Workers
+Hermes Tool ──────┘
+```
+
+A lógica não pode ser duplicada na interface.
+
+---
+
+## 11. Integração com Hermes
+
+A aplicação deve oferecer um contrato local estável, inicialmente por CLI JSON e depois por HTTP/tool wrapper.
+
+Ações desejadas:
+
+```text
+create_campaign
+run_campaign
+get_status
+approve_assets
+reject_assets
+resume
+pause
+cancel
+render_batch
+deliver_batch
+```
+
+O Hermes/IA deve receber respostas compactas, estruturadas e sem secrets. Saídas grandes ficam em relatórios locais referenciados por path.
+
+---
+
+## 12. Estado atual do repositório
+
+O repositório já existe e não deve ser recriado:
+
+```text
+C:/Users/Rovaron/Documents/Auraly/pipeline
+```
+
+Implementado atualmente:
+
+- projeto Python `auraly-video-pipeline` versão `0.1.0`;
+- Python 3.11 com uv;
+- Pydantic e Typer;
+- contrato inicial de `edit.json` e JSON Schema;
+- parser da copy canônica;
+- ingestão não destrutiva;
+- ffprobe JSON;
+- CLI `auraly`;
+- testes unitários/smoke;
+- faster-whisper small.en local;
+- FFmpeg/ffprobe;
+- HyperFrames fixado em `0.7.66` atrás de adapter;
+- Auto-Editor instalado e verificado.
+
+O README antigo descreve a pipeline principalmente como pós-produção de um MP4 do HeyGen. O novo escopo amplia a aplicação para geração em massa end-to-end. A implementação deve preservar compatibilidade com ingest/render existentes sempre que possível.
+
+---
+
+## 13. Lições da produção Eight of Cups / Laundromat
+
+- a imagem precisa de gate semântico mesmo quando o QC técnico passa;
+- numeral correto não garante iconografia fiel da carta;
+- aprovações com desvios devem registrar exatamente o que foi aceito;
+- browser automation manual consome muitas interações; Flow precisa de Playwright;
+- ElevenLabs web não serve para escala; usar API;
+- MCP HeyGen funciona com OAuth e deve ser encapsulado;
+- schemas MCP devem ser cacheados e limitados às ferramentas necessárias;
+- upload S3 precisa preservar headers assinados exatamente;
+- o áudio processado deve ser validado por transcrição;
+- captions devem usar copy aprovada para texto e timing verificado para sincronização;
+- solicitar SRT sidecar do HeyGen quando disponível;
+- sempre medir loudness do render final, não apenas dos stems;
+- `amix normalize=0` deve ser regra do renderer;
+- resultados de tentativas antigas não podem sobrescrever o estado atual;
+- cada job precisa persistir IDs e tentativas para notificações atrasadas não confundirem a operação.
+
+---
+
+## 14. Princípios de segurança
+
+- nenhum secret no Git, YAML de campanha, banco de job ou logs;
+- ElevenLabs API key em secret store local/Windows Credential Manager ou configuração segura fora do projeto;
+- OAuth do HeyGen permanece no Hermes/MCP;
+- cookies/sessão do Flow ficam no perfil Playwright isolado e ignorado pelo Git;
+- URLs assinadas somente em memória durante a operação;
+- logs devem ter redaction;
+- serviços web do MVP devem escutar apenas em `127.0.0.1`;
+- paid actions exigem budget gate;
+- finals são imutáveis e nunca sobrescritos.
+
+---
+
+## 15. Escopo do piloto MVP
+
+O piloto de aceitação será:
+
+```text
+1 copy aprovada
+1 Voice Master
+3 locais
+3 imagens aprovadas
+3 looks com Avatar III
+3 vídeos HeyGen
+3 renders finais
+```
+
+Locais sugeridos:
+
+1. lavanderia;
+2. restaurante;
+3. estação de metrô.
+
+O piloto deve demonstrar geração Flow por Playwright, ElevenLabs por API, HeyGen por MCP/OAuth, retomada, edição determinística e QC.
+
+---
+
+## 16. Itens deliberadamente fora do MVP
+
+- publicação automática em Facebook/Instagram;
+- otimização de performance baseada em métricas reais;
+- múltiplos usuários;
+- execução distribuída em várias máquinas;
+- mobile app;
+- timeline NLE completa;
+- microserviços;
+- troca automática para outro engine HeyGen;
+- decisão visual totalmente autônoma;
+- automação por web do ElevenLabs ou HeyGen.
+
+---
+
+## 17. Questões abertas para decisão durante o MVP
+
+- limites de budget/créditos por campanha no HeyGen;
+- parâmetros ElevenLabs que devem ser editáveis versus fixos por personagem;
+- se o primeiro MVP deve usar ASS/FFmpeg ou HyperFrames para captions/headline;
+- pasta final exata de entrega sincronizada;
+- política de retenção de traces e candidatos rejeitados;
+- número de candidatas por local;
+- se aprovação da imagem será exclusivamente humana ou IA recomenda + humano confirma;
+- regra de seleção da música por campanha;
+- porta local definitiva da interface;
+- formato do wrapper Hermes: plugin tool HTTP ou CLI JSON na primeira versão.
+
+---
+
+## 18. Documentos relacionados
+
+- `README.md` — capacidades atuais do repositório;
+- `INSTALLATION-REPORT.md` — ambiente instalado e validado;
+- `docs/PRD-MVP-MASS-VIDEO-AUTOMATION.md` — requisitos do MVP;
+- `schemas/edit.schema.json` — contrato editorial existente;
+- manifests em `work/<job>/manifest/` — estado e evidência por job.

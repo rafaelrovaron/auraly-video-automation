@@ -1,0 +1,522 @@
+{
+  "$defs": {
+    "BrollSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "start": {
+          "minimum": 0,
+          "title": "Start",
+          "type": "number"
+        },
+        "end": {
+          "exclusiveMinimum": 0,
+          "title": "End",
+          "type": "number"
+        },
+        "asset": {
+          "title": "Asset",
+          "type": "string"
+        },
+        "license": {
+          "minLength": 1,
+          "title": "License",
+          "type": "string"
+        },
+        "presentation": {
+          "default": "full-screen",
+          "enum": [
+            "full-screen",
+            "picture-in-picture",
+            "overlay"
+          ],
+          "title": "Presentation",
+          "type": "string"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reason"
+        }
+      },
+      "required": [
+        "start",
+        "end",
+        "asset",
+        "license"
+      ],
+      "title": "BrollSpec",
+      "type": "object"
+    },
+    "CanvasSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "width": {
+          "exclusiveMinimum": 0,
+          "title": "Width",
+          "type": "integer"
+        },
+        "height": {
+          "exclusiveMinimum": 0,
+          "title": "Height",
+          "type": "integer"
+        },
+        "fps": {
+          "exclusiveMinimum": 0,
+          "title": "Fps",
+          "type": "number"
+        }
+      },
+      "required": [
+        "width",
+        "height",
+        "fps"
+      ],
+      "title": "CanvasSpec",
+      "type": "object"
+    },
+    "CaptionSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "start": {
+          "minimum": 0,
+          "title": "Start",
+          "type": "number"
+        },
+        "end": {
+          "exclusiveMinimum": 0,
+          "title": "End",
+          "type": "number"
+        },
+        "words": {
+          "items": {
+            "$ref": "#/$defs/WordSpec"
+          },
+          "title": "Words",
+          "type": "array"
+        }
+      },
+      "required": [
+        "text",
+        "start",
+        "end"
+      ],
+      "title": "CaptionSpec",
+      "type": "object"
+    },
+    "CutSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "sourceStart": {
+          "minimum": 0,
+          "title": "Sourcestart",
+          "type": "number"
+        },
+        "sourceEnd": {
+          "exclusiveMinimum": 0,
+          "title": "Sourceend",
+          "type": "number"
+        },
+        "action": {
+          "enum": [
+            "keep",
+            "remove"
+          ],
+          "title": "Action",
+          "type": "string"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reason"
+        }
+      },
+      "required": [
+        "sourceStart",
+        "sourceEnd",
+        "action"
+      ],
+      "title": "CutSpec",
+      "type": "object"
+    },
+    "HeadlineSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "text": {
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        },
+        "start": {
+          "minimum": 0,
+          "title": "Start",
+          "type": "number"
+        },
+        "end": {
+          "exclusiveMinimum": 0,
+          "title": "End",
+          "type": "number"
+        },
+        "spoken": {
+          "const": false,
+          "default": false,
+          "title": "Spoken",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "text",
+        "start",
+        "end"
+      ],
+      "title": "HeadlineSpec",
+      "type": "object"
+    },
+    "MusicSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "asset": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Asset"
+        },
+        "volumeDb": {
+          "default": -22,
+          "title": "Volumedb",
+          "type": "number"
+        },
+        "duckUnderVoiceDb": {
+          "default": -8,
+          "title": "Duckundervoicedb",
+          "type": "number"
+        },
+        "fadeInSec": {
+          "default": 0.4,
+          "minimum": 0,
+          "title": "Fadeinsec",
+          "type": "number"
+        },
+        "fadeOutSec": {
+          "default": 1.0,
+          "minimum": 0,
+          "title": "Fadeoutsec",
+          "type": "number"
+        }
+      },
+      "title": "MusicSpec",
+      "type": "object"
+    },
+    "OutputSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "width": {
+          "exclusiveMinimum": 0,
+          "title": "Width",
+          "type": "integer"
+        },
+        "height": {
+          "exclusiveMinimum": 0,
+          "title": "Height",
+          "type": "integer"
+        },
+        "fps": {
+          "exclusiveMinimum": 0,
+          "title": "Fps",
+          "type": "number"
+        },
+        "format": {
+          "const": "mp4",
+          "default": "mp4",
+          "title": "Format",
+          "type": "string"
+        },
+        "codec": {
+          "const": "h264",
+          "default": "h264",
+          "title": "Codec",
+          "type": "string"
+        }
+      },
+      "required": [
+        "width",
+        "height",
+        "fps"
+      ],
+      "title": "OutputSpec",
+      "type": "object"
+    },
+    "ProjectSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "reelId": {
+          "title": "Reelid",
+          "type": "string"
+        },
+        "character": {
+          "enum": [
+            "susan-smith",
+            "soul-constellation"
+          ],
+          "title": "Character",
+          "type": "string"
+        },
+        "template": {
+          "title": "Template",
+          "type": "string"
+        }
+      },
+      "required": [
+        "reelId",
+        "character",
+        "template"
+      ],
+      "title": "ProjectSpec",
+      "type": "object"
+    },
+    "PunchInSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "start": {
+          "minimum": 0,
+          "title": "Start",
+          "type": "number"
+        },
+        "end": {
+          "exclusiveMinimum": 0,
+          "title": "End",
+          "type": "number"
+        },
+        "scale": {
+          "exclusiveMinimum": 1,
+          "maximum": 1.25,
+          "title": "Scale",
+          "type": "number"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reason"
+        }
+      },
+      "required": [
+        "start",
+        "end",
+        "scale"
+      ],
+      "title": "PunchInSpec",
+      "type": "object"
+    },
+    "ReviewSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "default": "draft",
+          "enum": [
+            "draft",
+            "pending",
+            "changes_requested",
+            "approved",
+            "rendered"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "warnings": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Warnings",
+          "type": "array"
+        },
+        "approvedBy": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Approvedby"
+        },
+        "approvedAt": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Approvedat"
+        }
+      },
+      "title": "ReviewSpec",
+      "type": "object"
+    },
+    "SourceSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "video": {
+          "title": "Video",
+          "type": "string"
+        },
+        "copy": {
+          "title": "Copy",
+          "type": "string"
+        },
+        "transcript": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Transcript"
+        },
+        "durationSec": {
+          "exclusiveMinimum": 0,
+          "title": "Durationsec",
+          "type": "number"
+        }
+      },
+      "required": [
+        "video",
+        "copy",
+        "durationSec"
+      ],
+      "title": "SourceSpec",
+      "type": "object"
+    },
+    "WordSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "start": {
+          "minimum": 0,
+          "title": "Start",
+          "type": "number"
+        },
+        "end": {
+          "exclusiveMinimum": 0,
+          "title": "End",
+          "type": "number"
+        }
+      },
+      "required": [
+        "text",
+        "start",
+        "end"
+      ],
+      "title": "WordSpec",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Schemaversion",
+      "type": "string"
+    },
+    "project": {
+      "$ref": "#/$defs/ProjectSpec"
+    },
+    "source": {
+      "$ref": "#/$defs/SourceSpec"
+    },
+    "canvas": {
+      "$ref": "#/$defs/CanvasSpec"
+    },
+    "headline": {
+      "$ref": "#/$defs/HeadlineSpec"
+    },
+    "cuts": {
+      "items": {
+        "$ref": "#/$defs/CutSpec"
+      },
+      "title": "Cuts",
+      "type": "array"
+    },
+    "captions": {
+      "items": {
+        "$ref": "#/$defs/CaptionSpec"
+      },
+      "title": "Captions",
+      "type": "array"
+    },
+    "punchIns": {
+      "items": {
+        "$ref": "#/$defs/PunchInSpec"
+      },
+      "title": "Punchins",
+      "type": "array"
+    },
+    "broll": {
+      "items": {
+        "$ref": "#/$defs/BrollSpec"
+      },
+      "title": "Broll",
+      "type": "array"
+    },
+    "music": {
+      "$ref": "#/$defs/MusicSpec"
+    },
+    "render": {
+      "$ref": "#/$defs/OutputSpec"
+    },
+    "review": {
+      "$ref": "#/$defs/ReviewSpec"
+    }
+  },
+  "required": [
+    "project",
+    "source",
+    "canvas",
+    "headline",
+    "render"
+  ],
+  "title": "Auraly Edit Manifest v1",
+  "type": "object",
+  "$id": "https://auraly.local/schemas/edit.schema.v1.json"
+}
