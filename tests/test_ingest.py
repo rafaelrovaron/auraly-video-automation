@@ -25,19 +25,19 @@ Take the one-minute reading now.
 
 def fake_probe() -> MediaProbe:
     return MediaProbe(
-        formatName="mov,mp4,m4a,3gp,3g2,mj2",
-        durationSec=10,
-        sizeBytes=64,
+        format_name="mov,mp4,m4a,3gp,3g2,mj2",
+        duration_sec=10,
+        size_bytes=64,
         video=VideoProbe(
             codec="h264",
             width=1080,
             height=1920,
             fps=30,
-            nominalFps=30,
-            isVfr=False,
+            nominal_fps=30,
+            is_vfr=False,
             rotation=0,
         ),
-        audio=AudioProbe(codec="aac", sampleRate=48000, channels=2),
+        audio=AudioProbe(codec="aac", sample_rate=48000, channels=2),
     )
 
 

@@ -2,11 +2,17 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from auraly_pipeline.image_generation import (
+    DEFAULT_DOWNLOADS_DIR,
+    DEFAULT_PROJECT_ROOT,
     ImageGenerationError,
+    configured_downloads_dir,
+    configured_project_root,
+    failure_screenshot_path,
     finalize_generation,
     prepare_generation,
     record_download_baseline,
@@ -26,7 +32,9 @@ def _png(path: Path) -> Path:
 
 
 @pytest.fixture
-def project(tmp_path: Path) -> tuple[Path, Path, Path]:
+def project(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> tuple[Path, Path, Path]:
     root = tmp_path / "Auraly"
     reference = _png(root / "03 Avatars" / "character-blueprint.png")
     job = root / "pipeline" / "work" / "existing-job"
@@ -34,12 +42,14 @@ def project(tmp_path: Path) -> tuple[Path, Path, Path]:
         (job / name).mkdir(parents=True, exist_ok=True)
     downloads = tmp_path / "Downloads"
     downloads.mkdir()
+    monkeypatch.setenv("AURALY_PROJECT_ROOT", str(root))
+    monkeypatch.setenv("AURALY_DOWNLOADS_DIR", str(downloads))
     return root, reference, downloads
 
 
 def _prepare(project: tuple[Path, Path, Path], **overrides):
     root, reference, downloads = project
-    kwargs = {
+    kwargs: dict[str, Any] = {
         "job_name": "existing-job",
         "reference_image_path": "03 Avatars/character-blueprint.png",
         "prompt": "Line one\nLine two — preserve exactly.",
@@ -200,6 +210,45 @@ def test_finalize_rejects_image_outside_download_directory(
         finalize_generation(context_path, outside)
 
 
+def test_tampered_downloads_directory_cannot_authorize_arbitrary_move(
+    project: tuple[Path, Path, Path],
+) -> None:
+    root, _, _ = project
+    _, context_path = _prepare(project)
+    private_dir = root.parent / "private"
+    victim = _png(private_dir / "victim.png")
+    _tamper_context(context_path, downloadsDir=str(private_dir))
+
+    with pytest.raises(ImageGenerationError, match="downloads_dir"):
+        finalize_generation(context_path, victim)
+
+    assert victim.is_file()
+
+
+def test_context_outside_trusted_project_root_cannot_authorize_move(
+    project: tuple[Path, Path, Path],
+) -> None:
+    root, _, downloads = project
+    outside_root = root.parent / "OutsideAuraly"
+    outside_reference = _png(outside_root / "03 Avatars" / "character-blueprint.png")
+    outside_job = outside_root / "pipeline" / "work" / "outside-job"
+    for name in ("source", "manifest", "inspection"):
+        (outside_job / name).mkdir(parents=True, exist_ok=True)
+    _, outside_context = prepare_generation(
+        job_name="outside-job",
+        reference_image_path=outside_reference.relative_to(outside_root),
+        prompt="Untrusted external context.",
+        project_root=outside_root,
+        downloads_dir=downloads,
+    )
+    downloaded = _png(downloads / "candidate.png")
+
+    with pytest.raises(ImageGenerationError, match="project_root"):
+        finalize_generation(outside_context, downloaded)
+
+    assert downloaded.is_file()
+
+
 def test_context_output_must_be_direct_child_of_source(
     project: tuple[Path, Path, Path],
 ) -> None:
@@ -216,7 +265,7 @@ def test_context_output_must_be_direct_child_of_source(
         record_download_baseline(context_path)
 
 
-def test_failure_result_redacts_sensitive_error_content(
+def test_failure_result_uses_allowlisted_error_message(
     project: tuple[Path, Path, Path],
 ) -> None:
     _, context_path = _prepare(project)
@@ -224,16 +273,55 @@ def test_failure_result_redacts_sensitive_error_content(
         context_path,
         failed_step="provider_request",
         error=(
-            "Bearer secret-token-value "
-            "https://example.com/file?X-Amz-Signature=abc123&X-Amz-Credential=private "
+            "SENSITIVE MULTI WORD VALUE "
+            "AUTHORIZATION MATERIAL MUST NOT APPEAR "
+            "https://example.com/file?signature-material "
             r"C:\Users\Rovaron\private\cookie.txt"
         ),
     )
 
-    assert "secret-token-value" not in (result.error or "")
-    assert "X-Amz-Signature" not in (result.error or "")
-    assert "Rovaron" not in (result.error or "")
-    assert "[REDACTED]" in (result.error or "")
+    assert result.error == "Image generation failed during provider_request."
+
+
+def test_failure_result_canonicalizes_untrusted_failed_step(
+    project: tuple[Path, Path, Path],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    _, context_path = _prepare(project)
+    sensitive_step = r"provider C:\Users\Private\signed?token=secret"
+
+    result = write_failure_result(
+        context_path,
+        failed_step=sensitive_step,
+        error="raw provider details",
+    )
+    screenshot_path = failure_screenshot_path(context_path, sensitive_step)
+
+    context_payload = json.loads(context_path.read_text(encoding="utf-8"))
+    manifests = list(Path(context_payload["inspectionDir"]).glob("failure_*_unknown.json"))
+    assert len(manifests) == 1
+    manifest = json.loads(manifests[0].read_text(encoding="utf-8"))
+    assert result.failed_step == "unknown"
+    assert screenshot_path.name.endswith("_unknown.png")
+    assert result.error == "Image generation failed during an approved workflow step."
+    assert manifest["failedStep"] == "unknown"
+    assert sensitive_step not in caplog.text
+
+
+def test_blank_downloads_environment_uses_safe_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AURALY_DOWNLOADS_DIR", "   ")
+
+    assert configured_downloads_dir() == DEFAULT_DOWNLOADS_DIR.resolve()
+
+
+def test_blank_project_environment_uses_safe_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AURALY_PROJECT_ROOT", "\t ")
+
+    assert configured_project_root() == DEFAULT_PROJECT_ROOT.resolve()
 
 
 def test_failure_result_rejects_screenshot_outside_inspection_directory(

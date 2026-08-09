@@ -27,7 +27,11 @@ O PRD amplia o escopo futuro da pipeline para campanhas com uma Copy/Voice Maste
 
 Defina `<AURALY_ROOT>` como a pasta raiz local do Auraly. O código usa
 `~/Documents/Auraly` por padrão; outro local pode ser definido com
-`AURALY_PROJECT_ROOT`.
+`AURALY_PROJECT_ROOT` ou `--project-root` em cada comando de geração de
+imagem. O diretório confiável de downloads usa `~/Downloads` por padrão e
+pode ser alterado com `AURALY_DOWNLOADS_DIR` ou com `--downloads-dir` em cada
+comando de geração de imagem. Os comandos de continuação rejeitam contextos
+que não correspondam a esses dois roots confiáveis.
 
 ```bash
 cd "<AURALY_ROOT>/pipeline"

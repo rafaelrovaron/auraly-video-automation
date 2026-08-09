@@ -10,15 +10,15 @@ import typer
 from pydantic import ValidationError
 
 from auraly_pipeline.image_generation import (
-    DEFAULT_DOWNLOADS_DIR,
     DEFAULT_MODEL_NAME,
     DEFAULT_RETRY_COUNT,
     DEFAULT_TIMEOUT_SECONDS,
-    ImageGenerationError,
     export_image_generation_schema,
     failure_screenshot_path,
     finalize_generation,
     prepare_generation,
+    public_image_error,
+    public_image_step,
     record_download_baseline,
     wait_for_download,
     write_failure_result,
@@ -159,7 +159,8 @@ def image_prepare_command(
     model_name: Annotated[str, typer.Option("--model-name")] = DEFAULT_MODEL_NAME,
     timeout_seconds: Annotated[int, typer.Option("--timeout-seconds", min=1)] = DEFAULT_TIMEOUT_SECONDS,
     retry_count: Annotated[int, typer.Option("--retry-count", min=0, max=5)] = DEFAULT_RETRY_COUNT,
-    downloads_dir: Annotated[Path, typer.Option("--downloads-dir")] = DEFAULT_DOWNLOADS_DIR,
+    downloads_dir: Annotated[Path | None, typer.Option("--downloads-dir")] = None,
+    project_root: Annotated[Path | None, typer.Option("--project-root")] = None,
 ) -> None:
     """Validate a request and write a browser-run context without generating an image."""
     _configure_image_logging()
@@ -174,9 +175,10 @@ def image_prepare_command(
             timeout_seconds=timeout_seconds,
             retry_count=retry_count,
             downloads_dir=downloads_dir,
+            project_root=project_root,
         )
-    except (ImageGenerationError, OSError, UnicodeError) as exc:
-        failed_step = exc.step if isinstance(exc, ImageGenerationError) else "read_prompt"
+    except Exception as exc:
+        failed_step = public_image_step(exc)
         _json_echo(
             {
                 "success": False,
@@ -184,7 +186,7 @@ def image_prepare_command(
                 "failedStep": failed_step,
                 "savedFilePath": None,
                 "timestamp": datetime.now(UTC).isoformat(),
-                "error": str(exc),
+                "error": public_image_error(exc),
             }
         )
         raise typer.Exit(code=1) from exc
@@ -196,13 +198,21 @@ def image_prepare_command(
 @app.command("image-download-baseline")
 def image_download_baseline_command(
     context: Annotated[Path, typer.Option("--context")],
+    downloads_dir: Annotated[Path | None, typer.Option("--downloads-dir")] = None,
+    project_root: Annotated[Path | None, typer.Option("--project-root")] = None,
 ) -> None:
     """Record the exact pre-download directory state immediately before clicking Download."""
     _configure_image_logging()
     try:
-        prepared = record_download_baseline(context)
-    except ImageGenerationError as exc:
-        _json_echo({"success": False, "failedStep": exc.step, "error": str(exc)})
+        prepared = record_download_baseline(context, downloads_dir, project_root)
+    except Exception as exc:
+        _json_echo(
+            {
+                "success": False,
+                "failedStep": public_image_step(exc),
+                "error": public_image_error(exc),
+            }
+        )
         raise typer.Exit(code=1) from exc
     _json_echo(
         {
@@ -218,13 +228,21 @@ def image_download_baseline_command(
 def image_wait_download_command(
     context: Annotated[Path, typer.Option("--context")],
     timeout_seconds: Annotated[int | None, typer.Option("--timeout-seconds", min=1)] = None,
+    downloads_dir: Annotated[Path | None, typer.Option("--downloads-dir")] = None,
+    project_root: Annotated[Path | None, typer.Option("--project-root")] = None,
 ) -> None:
     """Wait for exactly one new stable image file relative to the recorded baseline."""
     _configure_image_logging()
     try:
-        downloaded = wait_for_download(context, timeout_seconds)
-    except ImageGenerationError as exc:
-        _json_echo({"success": False, "failedStep": exc.step, "error": str(exc)})
+        downloaded = wait_for_download(context, timeout_seconds, downloads_dir, project_root)
+    except Exception as exc:
+        _json_echo(
+            {
+                "success": False,
+                "failedStep": public_image_step(exc),
+                "error": public_image_error(exc),
+            }
+        )
         raise typer.Exit(code=1) from exc
     _json_echo({"success": True, "downloadedFile": str(downloaded)})
 
@@ -233,13 +251,21 @@ def image_wait_download_command(
 def image_finalize_command(
     context: Annotated[Path, typer.Option("--context")],
     downloaded_file: Annotated[Path | None, typer.Option("--downloaded-file")] = None,
+    downloads_dir: Annotated[Path | None, typer.Option("--downloads-dir")] = None,
+    project_root: Annotated[Path | None, typer.Option("--project-root")] = None,
 ) -> None:
     """Move the correlated download into the job and write its success manifest."""
     _configure_image_logging()
     try:
-        result = finalize_generation(context, downloaded_file)
-    except ImageGenerationError as exc:
-        _json_echo({"success": False, "failedStep": exc.step, "error": str(exc)})
+        result = finalize_generation(context, downloaded_file, downloads_dir, project_root)
+    except Exception as exc:
+        _json_echo(
+            {
+                "success": False,
+                "failedStep": public_image_step(exc),
+                "error": public_image_error(exc),
+            }
+        )
         raise typer.Exit(code=1) from exc
     _json_echo(result.model_dump(by_alias=True, mode="json"))
 
@@ -248,12 +274,20 @@ def image_finalize_command(
 def image_screenshot_path_command(
     context: Annotated[Path, typer.Option("--context")],
     failed_step: Annotated[str, typer.Option("--failed-step")],
+    downloads_dir: Annotated[Path | None, typer.Option("--downloads-dir")] = None,
+    project_root: Annotated[Path | None, typer.Option("--project-root")] = None,
 ) -> None:
     """Reserve the canonical path for a diagnostic screenshot."""
     try:
-        path = failure_screenshot_path(context, failed_step)
-    except ImageGenerationError as exc:
-        _json_echo({"success": False, "failedStep": exc.step, "error": str(exc)})
+        path = failure_screenshot_path(context, failed_step, downloads_dir, project_root)
+    except Exception as exc:
+        _json_echo(
+            {
+                "success": False,
+                "failedStep": public_image_step(exc),
+                "error": public_image_error(exc),
+            }
+        )
         raise typer.Exit(code=1) from exc
     _json_echo({"success": True, "debugScreenshot": str(path)})
 
@@ -264,6 +298,8 @@ def image_failure_command(
     failed_step: Annotated[str, typer.Option("--failed-step")],
     error: Annotated[str, typer.Option("--error")],
     debug_screenshot: Annotated[Path | None, typer.Option("--debug-screenshot")] = None,
+    downloads_dir: Annotated[Path | None, typer.Option("--downloads-dir")] = None,
+    project_root: Annotated[Path | None, typer.Option("--project-root")] = None,
 ) -> None:
     """Write a structured, non-sensitive browser failure diagnostic."""
     _configure_image_logging()
@@ -273,9 +309,17 @@ def image_failure_command(
             failed_step=failed_step,
             error=error,
             debug_screenshot=debug_screenshot,
+            downloads_dir=downloads_dir,
+            project_root=project_root,
         )
-    except ImageGenerationError as exc:
-        _json_echo({"success": False, "failedStep": exc.step, "error": str(exc)})
+    except Exception as exc:
+        _json_echo(
+            {
+                "success": False,
+                "failedStep": public_image_step(exc),
+                "error": public_image_error(exc),
+            }
+        )
         raise typer.Exit(code=1) from exc
     _json_echo(result.model_dump(by_alias=True, mode="json"))
 

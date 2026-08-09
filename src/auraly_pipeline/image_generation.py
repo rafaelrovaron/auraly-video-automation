@@ -16,9 +16,9 @@ from auraly_pipeline.models import ContractModel
 
 LOGGER = logging.getLogger(__name__)
 
-PROJECT_ROOT = Path(
-    os.environ.get("AURALY_PROJECT_ROOT", str(Path.home() / "Documents" / "Auraly"))
-).resolve()
+DEFAULT_PROJECT_ROOT = Path.home() / "Documents" / "Auraly"
+_PROJECT_ROOT_ENV = os.environ.get("AURALY_PROJECT_ROOT", "").strip()
+PROJECT_ROOT = Path(_PROJECT_ROOT_ENV).resolve() if _PROJECT_ROOT_ENV else DEFAULT_PROJECT_ROOT.resolve()
 WORK_ROOT_RELATIVE = Path("pipeline/work")
 AVATARS_ROOT_RELATIVE = Path("03 Avatars")
 AI_STUDIO_IMAGE_URL = "https://aistudio.google.com/prompts/new_chat"
@@ -48,23 +48,70 @@ AUTH_TEXT_MARKERS = (
     "Choose an account",
 )
 SECURITY_TEXT_MARKERS = ("CAPTCHA", "Verify it's you", "Security check", "unusual traffic")
-SENSITIVE_URL_RE = re.compile(r"https?://[^\s\"'<>?]+\?[^\s\"'<>]+", re.IGNORECASE)
-BEARER_RE = re.compile(r"(?i)\bBearer\s+[^\s,;]+")
-SECRET_ASSIGNMENT_RE = re.compile(
-    r"(?i)\b(api[_-]?key|secret|password|token|cookie)\s*[:=]\s*[^\s,;]+"
+PUBLIC_IMAGE_ERRORS = {
+    "load_context": "Generation context is invalid or outside the approved job layout.",
+    "read_prompt": "The image prompt could not be read.",
+    "resolve_reference_image": "The reference image path is invalid.",
+    "validate_reference_image": "The reference image is invalid or unavailable.",
+    "validate_job": "The requested image-generation job is invalid or unavailable.",
+    "download_generated_image": "The generated image download failed.",
+    "move_output_to_job": "The generated image could not be saved to the approved job directory.",
+    "write_failure_result": "The failure diagnostic could not be written safely.",
+}
+PUBLIC_FAILURE_STEPS = frozenset(
+    {
+        "provider_request",
+        "upload_reference_image",
+        "select_image_model",
+        "generate_image",
+        "download_generated_image",
+        "move_output_to_job",
+    }
 )
-WINDOWS_USER_PATH_RE = re.compile(r"(?i)\b[A-Z]:[\\/]+Users[\\/]+[^\\/\s]+")
 
 
-def redact_sensitive_text(value: str) -> str:
-    """Remove credentials, signed URL queries, and user-home identifiers from diagnostics."""
-    redacted = SENSITIVE_URL_RE.sub(
-        lambda match: match.group(0).split("?", 1)[0] + "?[REDACTED]",
-        value,
-    )
-    redacted = BEARER_RE.sub("Bearer [REDACTED]", redacted)
-    redacted = SECRET_ASSIGNMENT_RE.sub(lambda match: f"{match.group(1)}=[REDACTED]", redacted)
-    return WINDOWS_USER_PATH_RE.sub("%USERPROFILE%", redacted)
+def configured_project_root(value: Path | None = None) -> Path:
+    """Return the trusted Auraly root from an explicit option or local configuration."""
+    if value is not None:
+        return value.resolve()
+    configured = os.environ.get("AURALY_PROJECT_ROOT", "").strip()
+    return Path(configured).resolve() if configured else DEFAULT_PROJECT_ROOT.resolve()
+
+
+def configured_downloads_dir(value: Path | None = None) -> Path:
+    """Return the trusted downloads root from an explicit option or local configuration."""
+    if value is not None:
+        return value.resolve()
+    configured = os.environ.get("AURALY_DOWNLOADS_DIR", "").strip()
+    return Path(configured).resolve() if configured else DEFAULT_DOWNLOADS_DIR.resolve()
+
+
+def public_image_step(exc: Exception) -> str:
+    """Return a stable allowlisted step name for CLI responses."""
+    if isinstance(exc, ImageGenerationError) and exc.step in PUBLIC_IMAGE_ERRORS:
+        return exc.step
+    return "image_generation"
+
+
+def public_image_error(exc: Exception) -> str:
+    """Return an allowlisted CLI-safe message without embedding exception details."""
+    if isinstance(exc, ImageGenerationError):
+        return PUBLIC_IMAGE_ERRORS.get(exc.step, "The image-generation operation failed safely.")
+    return "The image-generation operation failed safely."
+
+
+def canonical_failure_step(failed_step: str) -> str:
+    """Map untrusted workflow-step text to a stable persisted identifier."""
+    normalized = re.sub(r"[^a-z0-9_]+", "_", failed_step.casefold()).strip("_")
+    return normalized if normalized in PUBLIC_FAILURE_STEPS else "unknown"
+
+
+def public_failure_message(failed_step: str) -> str:
+    """Return a diagnostic message derived only from an allowlisted workflow step."""
+    canonical_step = canonical_failure_step(failed_step)
+    if canonical_step == "unknown":
+        return "Image generation failed during an approved workflow step."
+    return f"Image generation failed during {canonical_step}."
 
 
 class ImageGenerationError(RuntimeError):
@@ -152,7 +199,12 @@ def _write_json(path: Path, payload: dict) -> Path:
     return path
 
 
-def _validate_loaded_context(context: GenerationContext, context_path: Path) -> GenerationContext:
+def _validate_loaded_context(
+    context: GenerationContext,
+    context_path: Path,
+    trusted_downloads_dir: Path,
+    trusted_project_root: Path,
+) -> GenerationContext:
     resolved_context = context_path.resolve()
     try:
         inspection_dir = resolved_context.parent
@@ -164,6 +216,12 @@ def _validate_loaded_context(context: GenerationContext, context_path: Path) -> 
         raise ImageGenerationError(
             "load_context", f"context path is outside the expected job layout: {resolved_context}"
         ) from exc
+
+    if project_root.resolve() != trusted_project_root.resolve():
+        raise ImageGenerationError(
+            "load_context",
+            "context project_root does not match the trusted local configuration",
+        )
 
     if (
         inspection_dir.name != "google-ai-studio"
@@ -237,6 +295,11 @@ def _validate_loaded_context(context: GenerationContext, context_path: Path) -> 
         )
 
     downloads_dir = Path(context.downloads_dir).resolve()
+    if downloads_dir != trusted_downloads_dir.resolve():
+        raise ImageGenerationError(
+            "load_context",
+            "context field downloads_dir does not match the trusted local configuration",
+        )
     if context.detected_download_path:
         detected = Path(context.detected_download_path).resolve()
         try:
@@ -248,12 +311,21 @@ def _validate_loaded_context(context: GenerationContext, context_path: Path) -> 
     return context
 
 
-def _read_context(path: Path) -> GenerationContext:
+def _read_context(
+    path: Path,
+    downloads_dir: Path | None = None,
+    project_root: Path | None = None,
+) -> GenerationContext:
     try:
         resolved = path.resolve()
         payload = json.loads(resolved.read_text(encoding="utf-8"))
         context = GenerationContext.model_validate(payload)
-        return _validate_loaded_context(context, resolved)
+        return _validate_loaded_context(
+            context,
+            resolved,
+            configured_downloads_dir(downloads_dir),
+            configured_project_root(project_root),
+        )
     except ImageGenerationError:
         raise
     except (OSError, json.JSONDecodeError, ValueError) as exc:
@@ -355,8 +427,8 @@ def prepare_generation(
     model_name: str = DEFAULT_MODEL_NAME,
     timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
     retry_count: int = DEFAULT_RETRY_COUNT,
-    project_root: Path = PROJECT_ROOT,
-    downloads_dir: Path = DEFAULT_DOWNLOADS_DIR,
+    project_root: Path | None = None,
+    downloads_dir: Path | None = None,
 ) -> tuple[GenerationContext, Path]:
     if not prompt:
         raise ImageGenerationError("validate_prompt", "prompt is required and cannot be empty")
@@ -367,7 +439,7 @@ def prepare_generation(
     if not 0 <= retry_count <= 5:
         raise ImageGenerationError("validate_retry_count", "retry_count must be between 0 and 5")
 
-    root = project_root.resolve()
+    root = configured_project_root(project_root)
     job_dir = validate_job(job_name, root)
     reference = validate_reference_image(reference_image_path, root)
 
@@ -378,7 +450,7 @@ def prepare_generation(
     manifest_dir.mkdir(exist_ok=True)
     inspection_dir.mkdir(parents=True, exist_ok=True)
 
-    resolved_downloads = downloads_dir.resolve()
+    resolved_downloads = configured_downloads_dir(downloads_dir)
     if not resolved_downloads.is_dir():
         raise ImageGenerationError(
             "resolve_downloads", f"browser downloads directory does not exist: {resolved_downloads}"
@@ -439,8 +511,12 @@ def _download_inventory(downloads_dir: Path) -> dict[str, DownloadEntry]:
     return inventory
 
 
-def record_download_baseline(context_path: Path) -> GenerationContext:
-    context = _read_context(context_path)
+def record_download_baseline(
+    context_path: Path,
+    downloads_dir: Path | None = None,
+    project_root: Path | None = None,
+) -> GenerationContext:
+    context = _read_context(context_path, downloads_dir, project_root)
     downloads_dir = Path(context.downloads_dir)
     if not downloads_dir.is_dir():
         raise ImageGenerationError(
@@ -474,8 +550,13 @@ def _new_download_candidates(context: GenerationContext) -> list[Path]:
     return sorted(candidates, key=lambda item: item.name.casefold())
 
 
-def wait_for_download(context_path: Path, timeout_seconds: int | None = None) -> Path:
-    context = _read_context(context_path)
+def wait_for_download(
+    context_path: Path,
+    timeout_seconds: int | None = None,
+    downloads_dir: Path | None = None,
+    project_root: Path | None = None,
+) -> Path:
+    context = _read_context(context_path, downloads_dir, project_root)
     if context.download_started_at_ns is None:
         raise ImageGenerationError(
             "download_generated_image", "download baseline was not recorded before clicking Download"
@@ -532,8 +613,10 @@ def _manifest_path(manifest_dir: Path, generated_at: datetime) -> Path:
 def finalize_generation(
     context_path: Path,
     downloaded_file: Path | None = None,
+    downloads_dir: Path | None = None,
+    project_root: Path | None = None,
 ) -> ImageGenerationResult:
-    context = _read_context(context_path)
+    context = _read_context(context_path, downloads_dir, project_root)
     source = (downloaded_file or Path(context.detected_download_path or "")).resolve()
     downloads_dir = Path(context.downloads_dir).resolve()
     _require_within(
@@ -598,9 +681,14 @@ def finalize_generation(
     )
 
 
-def failure_screenshot_path(context_path: Path, failed_step: str) -> Path:
-    context = _read_context(context_path)
-    safe_step = re.sub(r"[^a-z0-9]+", "-", failed_step.casefold()).strip("-") or "unknown"
+def failure_screenshot_path(
+    context_path: Path,
+    failed_step: str,
+    downloads_dir: Path | None = None,
+    project_root: Path | None = None,
+) -> Path:
+    context = _read_context(context_path, downloads_dir, project_root)
+    safe_step = canonical_failure_step(failed_step)
     stamp = _now().strftime("%Y%m%d_%H%M%S")
     return unique_path(Path(context.inspection_dir) / f"error_{stamp}_{safe_step}.png")
 
@@ -611,9 +699,12 @@ def write_failure_result(
     failed_step: str,
     error: str,
     debug_screenshot: Path | None = None,
+    downloads_dir: Path | None = None,
+    project_root: Path | None = None,
 ) -> ImageGenerationResult:
-    context = _read_context(context_path)
+    context = _read_context(context_path, downloads_dir, project_root)
     timestamp = _iso_now()
+    canonical_step = canonical_failure_step(failed_step)
     screenshot = str(debug_screenshot.resolve()) if debug_screenshot else None
     if debug_screenshot:
         _require_within(
@@ -622,7 +713,7 @@ def write_failure_result(
             "write_failure_result",
             "debug screenshot",
         )
-    sanitized_error = redact_sensitive_text(error)
+    sanitized_error = public_failure_message(canonical_step)
     result = ImageGenerationResult(
         success=False,
         job_name=context.job_name,
@@ -630,18 +721,17 @@ def write_failure_result(
         reference_image_path=context.reference_image_path,
         prompt=context.prompt,
         timestamp=timestamp,
-        failed_step=failed_step,
+        failed_step=canonical_step,
         error=sanitized_error,
         debug_screenshot=screenshot,
     )
-    safe_step = re.sub(r"[^a-z0-9]+", "-", failed_step.casefold()).strip("-") or "unknown"
     stamp = _now().strftime("%Y%m%d_%H%M%S")
     diagnostic_path = unique_path(
-        Path(context.inspection_dir) / f"failure_{stamp}_{safe_step}.json"
+        Path(context.inspection_dir) / f"failure_{stamp}_{canonical_step}.json"
     )
     result.diagnostic_path = str(diagnostic_path)
     _write_json(diagnostic_path, result.model_dump(by_alias=True, mode="json"))
-    LOGGER.error('[image-generation] FAILED step=%s error="%s"', failed_step, sanitized_error)
+    LOGGER.error('[image-generation] FAILED step=%s error="%s"', canonical_step, sanitized_error)
     return result
 
 

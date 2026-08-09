@@ -125,3 +125,49 @@ def test_cli_knowledge_search_prints_document_snippet(monkeypatch, tmp_path: Pat
     assert result.exit_code == 0
     assert "doc-001" in result.stdout
     assert "horóscopo visual" in result.stdout.casefold()
+
+
+def test_image_cli_never_emits_raw_exception_details(monkeypatch, tmp_path: Path) -> None:
+    from auraly_pipeline.image_generation import ImageGenerationError
+
+    def fail(
+        _context: Path,
+        _downloads_dir: Path | None = None,
+        _project_root: Path | None = None,
+    ):
+        raise ImageGenerationError(
+            "load_context",
+            "SENSITIVE MULTI WORD VALUE C:\\Users\\Private\\context.json",
+        )
+
+    monkeypatch.setattr("auraly_pipeline.cli.record_download_baseline", fail)
+    result = runner.invoke(
+        app,
+        ["image-download-baseline", "--context", str(tmp_path / "request.json")],
+    )
+
+    assert result.exit_code == 1
+    assert "SENSITIVE MULTI WORD VALUE" not in result.stdout
+    assert "Users" not in result.stdout
+    assert "Generation context is invalid or outside the approved job layout." in result.stdout
+
+
+def test_image_cli_contains_unexpected_exceptions(monkeypatch, tmp_path: Path) -> None:
+    def fail(
+        _context: Path,
+        _downloads_dir: Path | None = None,
+        _project_root: Path | None = None,
+    ):
+        raise OSError(r"SENSITIVE C:\Users\Private\victim.png")
+
+    monkeypatch.setattr("auraly_pipeline.cli.record_download_baseline", fail)
+    result = runner.invoke(
+        app,
+        ["image-download-baseline", "--context", str(tmp_path / "request.json")],
+    )
+
+    assert result.exit_code == 1
+    assert "SENSITIVE" not in result.stdout
+    assert "Users" not in result.stdout
+    assert '"failedStep": "image_generation"' in result.stdout
+    assert "The image-generation operation failed safely." in result.stdout
