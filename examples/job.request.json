@@ -1,0 +1,10 @@
+{
+  "idempotencyKey": "example-local-success-v1",
+  "input": {
+    "operation": "deterministic-local-validation"
+  },
+  "jobType": "fake.success",
+  "maxAttempts": 3,
+  "priority": 0,
+  "retrySafety": "idempotent"
+}

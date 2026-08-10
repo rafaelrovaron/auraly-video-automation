@@ -26,6 +26,17 @@ from auraly_pipeline.image_generation import (
     write_failure_result,
 )
 from auraly_pipeline.ingest import IngestError, ingest_reel
+from auraly_pipeline.jobs.domain import Job, JobSubmit
+from auraly_pipeline.jobs.service import (
+    JobError,
+    JobHandlerNotFoundError,
+    JobIdempotencyConflictError,
+    JobNotFoundError,
+    JobReferenceError,
+    JobService,
+    JobTransitionError,
+)
+from auraly_pipeline.jobs.state_machine import JobStatus
 from auraly_pipeline.knowledge import default_knowledge_root, knowledge_status, search_knowledge
 from auraly_pipeline.models import EditManifest
 from auraly_pipeline.schema import export_schema
@@ -38,6 +49,8 @@ app = typer.Typer(
 )
 campaign_app = typer.Typer(help="Persist and inspect local campaign metadata.", no_args_is_help=True)
 app.add_typer(campaign_app, name="campaign")
+job_app = typer.Typer(help="Persist, execute, and inspect deterministic local jobs.", no_args_is_help=True)
+app.add_typer(job_app, name="job")
 
 
 @app.command("ingest")
@@ -236,6 +249,203 @@ def campaign_list_command(
             service.close()
     serialized = [campaign.model_dump(by_alias=True, mode="json") for campaign in campaigns]
     _json_echo({"success": True, "count": len(serialized), "campaigns": serialized})
+
+
+def _job_failure(code: str, message: str) -> None:
+    _json_echo({"success": False, "error": {"code": code, "message": message}})
+    raise typer.Exit(code=1)
+
+
+def _serialized_job(job: Job) -> dict[str, object]:
+    return job.model_dump(by_alias=True, mode="json")
+
+
+@job_app.command("submit")
+def job_submit_command(
+    input_path: Annotated[Path, typer.Option("--input", help="Job JSON request")],
+    database: Annotated[
+        Path,
+        typer.Option("--database", help="Local SQLite database"),
+    ] = default_database_path(),
+) -> None:
+    """Submit or reuse one idempotent deterministic local job."""
+    service: JobService | None = None
+    try:
+        payload = json.loads(
+            input_path.read_text(encoding="utf-8"),
+            parse_constant=_reject_non_standard_json_constant,
+        )
+        request = JobSubmit.model_validate(payload)
+        service = JobService.for_database(database)
+        job = service.submit_job(request)
+    except (OSError, ValueError, json.JSONDecodeError, ValidationError):
+        _job_failure("job_invalid", "Job input is invalid.")
+    except JobIdempotencyConflictError as exc:
+        _job_failure("job_conflict", exc.public_message)
+    except JobReferenceError as exc:
+        _job_failure("job_reference_invalid", exc.public_message)
+    except JobHandlerNotFoundError as exc:
+        _job_failure("job_type_invalid", exc.public_message)
+    except JobError:
+        _job_failure("job_operation_failed", "The job operation failed safely.")
+    except Exception:
+        _job_failure("job_operation_failed", "The job operation failed safely.")
+    finally:
+        if service is not None:
+            service.close()
+    _json_echo({"success": True, "job": _serialized_job(job)})
+
+
+@job_app.command("get")
+def job_get_command(
+    job_id: Annotated[str, typer.Argument(help="Persisted job ID")],
+    database: Annotated[
+        Path,
+        typer.Option("--database", help="Local SQLite database"),
+    ] = default_database_path(),
+) -> None:
+    """Retrieve one job with its complete attempt and event history."""
+    service: JobService | None = None
+    try:
+        service = JobService.for_database(database)
+        job = service.get_job(job_id)
+    except JobNotFoundError as exc:
+        _job_failure("job_not_found", exc.public_message)
+    except Exception:
+        _job_failure("job_operation_failed", "The job operation failed safely.")
+    finally:
+        if service is not None:
+            service.close()
+    _json_echo({"success": True, "job": _serialized_job(job)})
+
+
+@job_app.command("list")
+def job_list_command(
+    status: Annotated[JobStatus | None, typer.Option("--status")] = None,
+    campaign_id: Annotated[str | None, typer.Option("--campaign-id")] = None,
+    scene_variant_id: Annotated[str | None, typer.Option("--scene-variant-id")] = None,
+    database: Annotated[
+        Path,
+        typer.Option("--database", help="Local SQLite database"),
+    ] = default_database_path(),
+) -> None:
+    """List jobs in deterministic creation order with useful local filters."""
+    service: JobService | None = None
+    try:
+        service = JobService.for_database(database)
+        jobs = service.list_jobs(
+            status=status,
+            campaign_id=campaign_id,
+            scene_variant_id=scene_variant_id,
+        )
+    except Exception:
+        _job_failure("job_operation_failed", "The job operation failed safely.")
+    finally:
+        if service is not None:
+            service.close()
+    serialized = [_serialized_job(job) for job in jobs]
+    _json_echo({"success": True, "count": len(serialized), "jobs": serialized})
+
+
+@job_app.command("worker-once")
+def job_worker_once_command(
+    worker_id: Annotated[str, typer.Option("--worker-id")],
+    lease_seconds: Annotated[int, typer.Option("--lease-seconds", min=1, max=3600)] = 60,
+    database: Annotated[
+        Path,
+        typer.Option("--database", help="Local SQLite database"),
+    ] = default_database_path(),
+) -> None:
+    """Recover stale work, claim at most one job, and run its local handler."""
+    service: JobService | None = None
+    try:
+        service = JobService.for_database(database)
+        job = service.worker_once(worker_id, lease_seconds=lease_seconds)
+    except (JobError, ValueError):
+        _job_failure("job_worker_failed", "The local worker operation failed safely.")
+    except Exception:
+        _job_failure("job_worker_failed", "The local worker operation failed safely.")
+    finally:
+        if service is not None:
+            service.close()
+    _json_echo(
+        {
+            "success": True,
+            "worked": job is not None,
+            "job": None if job is None else _serialized_job(job),
+        }
+    )
+
+
+@job_app.command("cancel")
+def job_cancel_command(
+    job_id: Annotated[str, typer.Argument(help="Persisted job ID")],
+    database: Annotated[
+        Path,
+        typer.Option("--database", help="Local SQLite database"),
+    ] = default_database_path(),
+) -> None:
+    """Cancel queued, retry-scheduled, or blocked work safely."""
+    service: JobService | None = None
+    try:
+        service = JobService.for_database(database)
+        job = service.cancel_job(job_id)
+    except JobNotFoundError as exc:
+        _job_failure("job_not_found", exc.public_message)
+    except JobTransitionError as exc:
+        _job_failure("job_transition_invalid", exc.public_message)
+    except Exception:
+        _job_failure("job_operation_failed", "The job operation failed safely.")
+    finally:
+        if service is not None:
+            service.close()
+    _json_echo({"success": True, "job": _serialized_job(job)})
+
+
+@job_app.command("resume")
+def job_resume_command(
+    job_id: Annotated[str, typer.Argument(help="Persisted job ID")],
+    database: Annotated[
+        Path,
+        typer.Option("--database", help="Local SQLite database"),
+    ] = default_database_path(),
+) -> None:
+    """Explicitly requeue blocked or retry-scheduled work."""
+    service: JobService | None = None
+    try:
+        service = JobService.for_database(database)
+        job = service.resume_job(job_id)
+    except JobNotFoundError as exc:
+        _job_failure("job_not_found", exc.public_message)
+    except JobTransitionError as exc:
+        _job_failure("job_transition_invalid", exc.public_message)
+    except Exception:
+        _job_failure("job_operation_failed", "The job operation failed safely.")
+    finally:
+        if service is not None:
+            service.close()
+    _json_echo({"success": True, "job": _serialized_job(job)})
+
+
+@job_app.command("recover")
+def job_recover_command(
+    database: Annotated[
+        Path,
+        typer.Option("--database", help="Local SQLite database"),
+    ] = default_database_path(),
+) -> None:
+    """Recover expired running leases and record auditable recovery events."""
+    service: JobService | None = None
+    try:
+        service = JobService.for_database(database)
+        jobs = service.recover_stale_jobs()
+    except Exception:
+        _job_failure("job_operation_failed", "The job operation failed safely.")
+    finally:
+        if service is not None:
+            service.close()
+    serialized = [_serialized_job(job) for job in jobs]
+    _json_echo({"success": True, "count": len(serialized), "jobs": serialized})
 
 
 @app.command("image-prepare")

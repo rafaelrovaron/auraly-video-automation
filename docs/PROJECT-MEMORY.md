@@ -580,6 +580,13 @@ Implementado atualmente:
 - `CopyMaster` com source preservado, SHA-256 canônico, versão e aprovação;
 - headline excluída de `spokenText` e triggers SQLite que impedem update/delete de copy aprovada;
 - metadados de budget/config rejeitam chaves de secrets, tokens, cookies e URLs assinadas;
+- Persistent Job Orchestration: `Job`, `JobAttempt` e `JobEvent` persistidos em SQLite;
+- state machine explícita `queued/running/completed/failed/blocked/retry_scheduled/cancelled`;
+- fila local com claim atômico, leases renováveis, fencing por attempt number, recovery de lease expirado e eventos append-only;
+- idempotency key global única com fingerprint do contrato e conflito para reuse incompatível;
+- retry safety persistida (`idempotent`, `manual_only`, `reconcile_before_retry`) e validada contra a capability do handler;
+- retries lineares determinísticos, max attempts, falhas retryable/terminal e cancelamento seguro;
+- CLI JSON `job submit/get/list/worker-once/cancel/resume/recover` e handlers exclusivamente fake;
 - testes unitários/smoke;
 - faster-whisper small.en local;
 - FFmpeg/ffprobe;
@@ -599,14 +606,21 @@ dedicado, verifica seletores, gera candidatas, confirma o download 2K, produz tr
 gate de QC/review. A existência dos contratos não deve ser interpretada como automação Flow
 funcional.
 
-Configuração operacional da Campaign Foundation:
+Configuração operacional da Campaign Foundation e da Persistent Job Orchestration:
 
 - banco padrão fora do repositório: `~/.auraly/auraly.db`;
 - override por `AURALY_DATABASE_PATH` ou `--database`;
-- migrations executadas antes do acesso pela application service;
+- migrations executadas antes do acesso pela application service e serializadas por lock de arquivo entre processos;
 - banco guarda somente estado/metadados, nunca mídia BLOB, secrets, cookies, profiles ou URLs assinadas;
 - revisões de CopyMaster aprovado são novos inserts versionados; versões aprovadas não aceitam update/delete;
-- próximo milestone: `Goal 2 — Persistent Job Orchestration`.
+- jobs guardam apenas JSON seguro e metadados pequenos; mídia/BLOB, data URLs, credentials e URLs assinadas são rejeitados;
+- jobs podem referenciar Campaign e, opcionalmente, SceneVariant, sem exigir referência para jobs globais; triggers rejeitam pares incompatíveis;
+- uma tentativa `running` pode ser finalizada uma vez e então se torna imutável; tentativas finalizadas e eventos não aceitam update, delete ou replace;
+- `worker-once` recupera leases expirados, ativa retries vencidos e executa no máximo um handler local;
+- cancelamento de job running é rejeitado; este Goal não simula interrupção arbitrária de operação ativa;
+- completion/renewal exigem worker, attempt number e lease ainda válido; attempt number funciona como fencing token;
+- recovery registra `job.recovered` e finaliza a tentativa interrompida antes de retry, bloqueio por safety ou falha terminal;
+- próximo milestone: `Goal 3 — Voice Master`.
 
 O README antigo descreve a pipeline principalmente como pós-produção de um MP4 do HeyGen. O novo escopo amplia a aplicação para geração em massa end-to-end. A implementação deve preservar compatibilidade com ingest/render existentes sempre que possível.
 

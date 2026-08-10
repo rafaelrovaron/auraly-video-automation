@@ -2,93 +2,13 @@ from __future__ import annotations
 
 import hashlib
 import json
-import math
 from datetime import datetime
 from typing import Literal, Self
 
 from pydantic import ConfigDict, Field, JsonValue, computed_field, model_validator
 
+from auraly_pipeline.metadata_security import validate_goal_1_campaign_metadata
 from auraly_pipeline.models import ContractModel
-
-_SENSITIVE_METADATA_KEYS = {
-    "apikey",
-    "auth",
-    "authorization",
-    "browserprofile",
-    "cookie",
-    "cookies",
-    "oauthtoken",
-    "password",
-    "refreshtoken",
-    "secret",
-    "signedurl",
-    "storagestate",
-    "token",
-    "accesstoken",
-}
-
-
-_SENSITIVE_METADATA_SUFFIXES = (
-    "accesskey",
-    "apikey",
-    "cookie",
-    "credential",
-    "credentials",
-    "password",
-    "privatekey",
-    "secret",
-    "secretkey",
-    "signedurl",
-    "token",
-)
-
-
-def _contains_sensitive_key(value: JsonValue) -> bool:
-    if isinstance(value, dict):
-        for key, child in value.items():
-            normalized = "".join(character for character in key.casefold() if character.isalnum())
-            if (
-                normalized in _SENSITIVE_METADATA_KEYS
-                or normalized.endswith(_SENSITIVE_METADATA_SUFFIXES)
-                or _contains_sensitive_key(child)
-            ):
-                return True
-    if isinstance(value, list):
-        return any(_contains_sensitive_key(child) for child in value)
-    return False
-
-
-def _contains_sensitive_value(value: JsonValue) -> bool:
-    if isinstance(value, str):
-        normalized = value.casefold()
-        return any(
-            marker in normalized
-            for marker in (
-                "?x-amz-signature=",
-                "&x-amz-signature=",
-                "?x-goog-signature=",
-                "&x-goog-signature=",
-                "?signature=",
-                "&signature=",
-                "?sig=",
-                "&sig=",
-            )
-        )
-    if isinstance(value, dict):
-        return any(_contains_sensitive_value(child) for child in value.values())
-    if isinstance(value, list):
-        return any(_contains_sensitive_value(child) for child in value)
-    return False
-
-
-def _contains_non_finite_number(value: JsonValue) -> bool:
-    if isinstance(value, float):
-        return not math.isfinite(value)
-    if isinstance(value, dict):
-        return any(_contains_non_finite_number(child) for child in value.values())
-    if isinstance(value, list):
-        return any(_contains_non_finite_number(child) for child in value)
-    return False
 
 
 class CampaignContract(ContractModel):
@@ -164,18 +84,8 @@ class CampaignCreate(CampaignContract):
 
     @model_validator(mode="after")
     def reject_sensitive_metadata(self) -> Self:
-        if _contains_sensitive_key(self.budget):
-            raise ValueError("budget contains a forbidden sensitive key")
-        if _contains_sensitive_key(self.config):
-            raise ValueError("config contains a forbidden sensitive key")
-        if _contains_sensitive_value(self.budget):
-            raise ValueError("budget contains forbidden sensitive data")
-        if _contains_sensitive_value(self.config):
-            raise ValueError("config contains forbidden sensitive data")
-        if _contains_non_finite_number(self.budget):
-            raise ValueError("budget contains a non-finite number")
-        if _contains_non_finite_number(self.config):
-            raise ValueError("config contains a non-finite number")
+        validate_goal_1_campaign_metadata(self.budget, "budget")
+        validate_goal_1_campaign_metadata(self.config, "config")
         return self
 
     @model_validator(mode="after")

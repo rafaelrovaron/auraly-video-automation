@@ -17,6 +17,9 @@ Pipeline local, determinística, retomável e auditável para produção em mass
 - persistência local SQLite em WAL via SQLAlchemy 2 e migrações Alembic;
 - camada repository/application service e CLI JSON `campaign create/get/list`;
 - proteção de imutabilidade para CopyMaster aprovado e persistência após restart;
+- orquestração local durável com `Job`, tentativas imutáveis após finalização e eventos append-only;
+- fila SQLite, idempotência, claim atômico, leases renováveis, retries e recuperação auditável;
+- CLI JSON `job submit/get/list/worker-once/cancel/resume/recover` e handlers fake determinísticos;
 - contratos Google Flow v1.1 e schema de manifesto;
 - trusted project/download roots, validação canônica de contexto e paths;
 - correlação segura de downloads, partial-download handling, finalização não destrutiva,
@@ -32,7 +35,7 @@ uma imagem foi gerada automaticamente ou que o QC 2K foi concluído.
 
 ### Planejado
 
-Orquestração durável, ElevenLabs API, runtime Google Flow, HeyGen MCP/OAuth, edição final,
+ElevenLabs API, runtime Google Flow, HeyGen MCP/OAuth, edição final,
 canário end-to-end e API/UI local estão sequenciados em `docs/GOAL-ROADMAP.md`. Cortes,
 transcrição, captions, B-roll, música e render editorial também permanecem planejados; nenhuma
 dessas capacidades deve ser inferida apenas por constar no PRD.
@@ -119,6 +122,57 @@ Para criar ou atualizar explicitamente um banco por Alembic:
 ```bash
 AURALY_DATABASE_PATH=~/.auraly/auraly.db uv run alembic upgrade head
 ```
+
+## Persistent Job Orchestration
+
+Goal 2 persiste toda a informação necessária para entender e retomar trabalho local sem contexto
+conversacional. Jobs podem ser globais, vinculados a uma campanha ou vinculados a uma
+`SceneVariant`. A mesma `idempotencyKey` retorna o job existente quando o contrato é idêntico e
+falha com conflito quando é reutilizada para outra operação.
+
+```bash
+uv run auraly job submit \
+  --input examples/job.request.json \
+  --database ~/.auraly/auraly.db
+
+uv run auraly job list --status queued --database ~/.auraly/auraly.db
+uv run auraly job get <job-id> --database ~/.auraly/auraly.db
+uv run auraly job worker-once --worker-id local-worker-1 \
+  --database ~/.auraly/auraly.db
+uv run auraly job cancel <job-id> --database ~/.auraly/auraly.db
+uv run auraly job resume <job-id> --database ~/.auraly/auraly.db
+uv run auraly job recover --database ~/.auraly/auraly.db
+```
+
+`worker-once` é deliberadamente limitado: recupera leases expirados, promove retries vencidos,
+faz claim atômico de no máximo um job e executa um handler local registrado. O número da tentativa
+é o fencing token: completion e renewal exigem o mesmo worker, a mesma tentativa e um lease ainda
+válido. Os handlers
+disponíveis neste Goal são `fake.success`, `fake.retry-once`, `fake.retry-always`,
+`fake.permanent-failure`, `fake.blocked` e `fake.crash`. Nenhum deles realiza rede ou chama um
+provider externo.
+
+Estados suportados:
+
+```text
+queued -> running | cancelled
+running -> completed | retry_scheduled | failed | blocked
+retry_scheduled -> queued | cancelled
+blocked -> queued | cancelled
+completed | failed | cancelled -> terminal
+```
+
+O contrato persiste `retrySafety`: `idempotent` autoriza retry automático, `manual_only` bloqueia
+até `job resume` explícito, e `reconcile_before_retry` permanece bloqueado até um futuro fluxo de
+reconciliação dedicado. A capability declarada pelo handler precisa coincidir com a policy do job.
+
+O cancelamento de job `running` é rejeitado, pois este Goal não finge interromper uma operação em
+execução. O lease pode ser renovado pela camada de aplicação e, quando expira, a tentativa ativa é
+finalizada como `interrupted`; o job recebe `job.recovered` e vai para retry automático apenas se a
+policy for idempotente, fica blocked quando requer autorização/reconciliação, ou falha se o budget
+de tentativas foi esgotado. Migrations de startup usam lock de arquivo entre processos. A associação
+Campaign/SceneVariant também é validada por triggers SQLite. Inputs, outputs e eventos aceitam apenas metadados JSON seguros:
+secrets, cookies, profiles, URLs assinadas, data URLs e mídia/BLOB são rejeitados.
 
 ## Ingestão
 
@@ -249,6 +303,5 @@ uv run python -m auraly_pipeline.schema
 
 ## Próximo Goal
 
-O próximo trabalho é `Goal 2 — Persistent Job Orchestration`, conforme
-`docs/GOAL-ROADMAP.md`. Ele adicionará jobs retomáveis, estado explícito, tentativas, eventos e
-idempotência usando handlers fake, sem providers externos ou operações pagas.
+O próximo trabalho é `Goal 3 — Voice Master`, conforme `docs/GOAL-ROADMAP.md`. Goal 3 não está
+implementado e qualquer canário real continuará exigindo aprovação explícita.

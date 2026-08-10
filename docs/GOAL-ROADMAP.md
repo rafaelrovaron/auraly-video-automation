@@ -134,9 +134,9 @@ Provide durable, resumable, idempotent execution without integrating external pr
 ### Included
 
 - `Job` model, explicit state machine, attempts, events/audit trail;
-- persistent local queue and worker lease semantics;
+- persistent local queue, cross-process migration lock, worker lease semantics, and attempt fencing;
 - idempotency keys and duplicate protection;
-- resume, cancellation, retryable/terminal failure states;
+- persisted retry-safety policy, resume, cancellation, retryable/terminal failure states;
 - deterministic fake handlers and restart/crash recovery tests.
 
 ### Explicitly excluded
@@ -161,8 +161,9 @@ Goals 0–1.
 Run the common baseline plus:
 
 ```bash
-uv run pytest tests/test_jobs.py tests/test_job_state_machine.py \
-  tests/test_job_idempotency.py tests/test_job_restart.py
+uv run pytest tests/test_jobs.py tests/test_job_state_machine.py tests/test_job_handlers.py \
+  tests/test_job_service.py tests/test_job_concurrency.py tests/test_job_migrations.py \
+  tests/test_migration_lock.py tests/test_cli.py tests/test_migrations.py
 ```
 
 ---

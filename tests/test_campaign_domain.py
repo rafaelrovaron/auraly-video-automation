@@ -178,6 +178,23 @@ def test_campaign_metadata_rejects_non_finite_numbers(non_finite: float) -> None
         CampaignCreate.model_validate(data)
 
 
+@pytest.mark.parametrize(
+    "config",
+    [
+        {"media": "caption-style"},
+        {"notes": "A" * 1_024},
+        {"notes": "x" * 70_000},
+    ],
+)
+def test_goal_2_metadata_hardening_preserves_goal_1_campaign_contract(config: dict) -> None:
+    data = deepcopy(valid_campaign_data())
+    data["config"] = config
+
+    campaign = CampaignCreate.model_validate(data)
+
+    assert campaign.config == config
+
+
 @pytest.mark.parametrize("campaign_id", ["Uppercase", "contains space", "../escape", ""])
 def test_campaign_rejects_invalid_campaign_id(campaign_id: str) -> None:
     data = deepcopy(valid_campaign_data())
