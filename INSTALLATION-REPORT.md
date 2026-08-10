@@ -32,6 +32,7 @@ Dependências principais:
 - `rich==14.3.4`
 - `PyYAML==6.0.3`
 - `pysubs2==1.8.1`
+- `playwright==1.62.0`
 - `pytest==8.4.2`
 - `pytest-cov==6.3.0`
 - `ruff==0.15.22`
@@ -58,7 +59,7 @@ O modelo é ignorado pelo Git e não será duplicado em commits.
 
 ### HyperFrames
 
-- Versão fixada: `0.7.103`
+- Versão stable mais recente compatível e fixada: `0.7.104`
 - Instalação: `pipeline/node_modules`
 - Lockfile: `pipeline/package-lock.json`
 - Telemetria: desativada
@@ -69,12 +70,14 @@ O modelo é ignorado pelo Git e não será duplicado em commits.
 Validações executadas:
 
 ```text
+hyperframes doctor: 0.7.104 (latest), runtime base compatível
 hyperframes lint: 0 errors, 0 warnings
 hyperframes check --strict: aprovado
 Runtime: 0 errors, 0 warnings
 Layout: 0 issues
 Motion: 0 errors, 0 warnings
-WCAG AA: 6/6 verificações aprovadas
+WCAG AA: 10/10 verificações aprovadas
+npm audit --omit=dev --audit-level=high: 0 vulnerabilidades
 ```
 
 Render canário real:
@@ -85,15 +88,15 @@ Resolução: 1080×1920
 FPS: 30
 Duração: 1,0 segundo
 Workers: 1
-Modo: low-memory / draft
-Tempo de renderização: 3,4 segundos
+Modo: draft (low-memory desativado)
+Tempo de renderização: 2,8 segundos
 Browser GPU: aceleração disponível via Direct3D 11
 Resultado: OK
 ```
 
 Artefato temporário:
 
-`pipeline/work/install-smoke/hyperframes-canary.mp4`
+`pipeline/work/install-smoke/hyperframes-canary-0.7.104.mp4`
 
 ### Auto-Editor
 
@@ -166,8 +169,10 @@ Executar Auto-Editor:
 
 ## Alertas conhecidos
 
-O HyperFrames foi atualizado de `0.7.66` para `0.7.103`. Em 2026-08-09,
-`npm audit --omit=dev` reportou **zero vulnerabilidades conhecidas** no lockfile.
+Histórico: o ambiente já usou `0.7.66` e `0.7.103`; essas versões não são pins atuais nem
+requisitos arquiteturais. O pin validado agora é `0.7.104`, selecionado porque o registry npm o
+marca como stable/latest e seu requisito Node `>=22` é satisfeito pelo Node `22.23.0` local.
+Após a atualização, `npm audit --omit=dev --audit-level=high` reportou **zero vulnerabilidades**.
 
 Controles mantidos para o piloto:
 
@@ -183,6 +188,11 @@ O diagnóstico do HyperFrames também lista Docker, Whisper.cpp, Kokoro e MusicG
 - o HeyGen fornece a voz e o talking head;
 - músicas virão da biblioteca licenciada;
 - Docker não é necessário para o render local.
+
+Playwright Python `1.62.0` está declarado no `pyproject.toml`, resolvido no `uv.lock` e instalado.
+O runtime Google Flow, o browser Playwright dedicado, o perfil Chromium persistente e o login
+manual inicial ainda não foram implementados ou validados; a dependência instalada não deve ser
+interpretada como automação Flow pronta.
 
 ## Consumo de disco
 
@@ -207,7 +217,7 @@ O ambiente necessário para iniciar a implementação está instalado e validado
 - [x] ambiente Python isolado
 - [x] dependências Python fixadas
 - [x] faster-whisper small.en
-- [x] HyperFrames 0.7.103
+- [x] HyperFrames 0.7.104
 - [x] Chrome Headless Shell
 - [x] telemetria desativada
 - [x] Auto-Editor 31.3.2 com checksum validado

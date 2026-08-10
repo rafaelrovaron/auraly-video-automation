@@ -21,8 +21,7 @@ _PROJECT_ROOT_ENV = os.environ.get("AURALY_PROJECT_ROOT", "").strip()
 PROJECT_ROOT = Path(_PROJECT_ROOT_ENV).resolve() if _PROJECT_ROOT_ENV else DEFAULT_PROJECT_ROOT.resolve()
 WORK_ROOT_RELATIVE = Path("pipeline/work")
 AVATARS_ROOT_RELATIVE = Path("03 Avatars")
-AI_STUDIO_IMAGE_URL = "https://aistudio.google.com/prompts/new_chat"
-DEFAULT_MODEL_NAME = "Nano Banana Pro"
+GOOGLE_FLOW_URL = "https://labs.google/fx/tools/flow"
 DEFAULT_TIMEOUT_SECONDS = 180
 DEFAULT_RETRY_COUNT = 2
 DEFAULT_DOWNLOADS_DIR = Path.home() / "Downloads"
@@ -30,24 +29,7 @@ SUPPORTED_REFERENCE_EXTENSIONS = frozenset({".png", ".jpg", ".jpeg", ".webp"})
 SUPPORTED_OUTPUT_EXTENSIONS = SUPPORTED_REFERENCE_EXTENSIONS
 PARTIAL_DOWNLOAD_EXTENSIONS = frozenset({".crdownload", ".part", ".tmp"})
 
-# Keep volatile UI assumptions in one place. The skill tries the exact runtime
-# model name first, then these accessible-label candidates.
-UI_LABELS: dict[str, tuple[str, ...]] = {
-    "model_picker": ("Model", "Select model", "Choose model"),
-    "upload": ("Add files", "Upload image", "Upload file", "Attach files", "Attach"),
-    "prompt": ("Enter a prompt", "Prompt", "Describe your image", "Ask Gemini"),
-    "generate": ("Run", "Generate", "Submit", "Send"),
-    "download": ("Download", "Download image", "Save image"),
-    "attachment_ready": ("Remove attachment", "Image attached", "Attachment"),
-}
-AUTH_URL_MARKERS = ("accounts.google.com", "/welcome")
-AUTH_TEXT_MARKERS = (
-    "Get started",
-    "Sign in",
-    "Use your Google Account",
-    "Choose an account",
-)
-SECURITY_TEXT_MARKERS = ("CAPTCHA", "Verify it's you", "Security check", "unusual traffic")
+
 PUBLIC_IMAGE_ERRORS = {
     "load_context": "Generation context is invalid or outside the approved job layout.",
     "read_prompt": "The image prompt could not be read.",
@@ -61,9 +43,12 @@ PUBLIC_IMAGE_ERRORS = {
 PUBLIC_FAILURE_STEPS = frozenset(
     {
         "provider_request",
+        "launch_flow",
+        "verify_flow_ui",
         "upload_reference_image",
-        "select_image_model",
-        "generate_image",
+        "generate_candidates",
+        "download_2k",
+        "capture_browser_trace",
         "download_generated_image",
         "move_output_to_job",
     }
@@ -128,15 +113,17 @@ class DownloadEntry(ContractModel):
 
 
 class GenerationContext(ContractModel):
-    schema_version: Literal["1.0"] = "1.0"
+    schema_version: Literal["1.1"] = "1.1"
     request_id: str
-    provider: Literal["google_ai_studio"] = "google_ai_studio"
-    skill: Literal["generate_google_ai_studio_image"] = "generate_google_ai_studio_image"
+    provider: Literal["google_flow"] = "google_flow"
+    executor: Literal["playwright_python"] = "playwright_python"
+    required_output_resolution: Literal["2K"] = "2K"
+    concurrency: Literal[1] = 1
+    browser_runtime_status: Literal["not_implemented"] = "not_implemented"
     project_root: str
     job_name: str
     job_dir: str
-    model_name: str
-    ai_studio_url: str
+    flow_url: str
     timeout_seconds: int = Field(gt=0)
     retry_count: int = Field(ge=0, le=5)
     reference_image_path: str
@@ -157,23 +144,25 @@ class GenerationContext(ContractModel):
 
 
 class ImageGenerationManifest(ContractModel):
-    schema_version: Literal["1.0"] = "1.0"
-    provider: Literal["google_ai_studio"] = "google_ai_studio"
-    skill: Literal["generate_google_ai_studio_image"] = "generate_google_ai_studio_image"
+    schema_version: Literal["1.1"] = "1.1"
+    provider: Literal["google_flow"] = "google_flow"
+    executor: Literal["playwright_python"] = "playwright_python"
+    required_output_resolution: Literal["2K"] = "2K"
+    image_qc_status: Literal["not_implemented"] = "not_implemented"
+    browser_runtime_status: Literal["not_implemented"] = "not_implemented"
     job_name: str
-    model_name: str
     reference_image: str
     prompt: str
     output_file: str
     generated_at: str
-    status: Literal["success"] = "success"
+    status: Literal["download_ingested"] = "download_ingested"
 
 
 class ImageGenerationResult(ContractModel):
     success: bool
     job_name: str
-    provider: Literal["google_ai_studio"] = "google_ai_studio"
-    model_name: str | None = None
+    provider: Literal["google_flow"] = "google_flow"
+    browser_runtime_status: Literal["not_implemented"] = "not_implemented"
     reference_image_path: str | None = None
     prompt: str | None = None
     saved_file_path: str | None = None
@@ -224,7 +213,7 @@ def _validate_loaded_context(
         )
 
     if (
-        inspection_dir.name != "google-ai-studio"
+        inspection_dir.name != "google-flow"
         or inspection_dir.parent.name != "inspection"
         or work_dir.name != "work"
         or pipeline_dir.name != "pipeline"
@@ -424,7 +413,6 @@ def prepare_generation(
     reference_image_path: str | Path,
     prompt: str,
     output_filename: str | None = None,
-    model_name: str = DEFAULT_MODEL_NAME,
     timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
     retry_count: int = DEFAULT_RETRY_COUNT,
     project_root: Path | None = None,
@@ -432,8 +420,7 @@ def prepare_generation(
 ) -> tuple[GenerationContext, Path]:
     if not prompt:
         raise ImageGenerationError("validate_prompt", "prompt is required and cannot be empty")
-    if not model_name.strip():
-        raise ImageGenerationError("select_image_model", "model_name cannot be empty")
+
     if timeout_seconds <= 0:
         raise ImageGenerationError("validate_timeout", "timeout_seconds must be greater than zero")
     if not 0 <= retry_count <= 5:
@@ -445,7 +432,7 @@ def prepare_generation(
 
     source_dir = job_dir / "source"
     manifest_dir = job_dir / "manifest"
-    inspection_dir = job_dir / "inspection" / "google-ai-studio"
+    inspection_dir = job_dir / "inspection" / "google-flow"
     source_dir.mkdir(exist_ok=True)
     manifest_dir.mkdir(exist_ok=True)
     inspection_dir.mkdir(parents=True, exist_ok=True)
@@ -474,8 +461,7 @@ def prepare_generation(
         project_root=str(root),
         job_name=job_name,
         job_dir=str(job_dir),
-        model_name=model_name,
-        ai_studio_url=AI_STUDIO_IMAGE_URL,
+        flow_url=GOOGLE_FLOW_URL,
         timeout_seconds=timeout_seconds,
         retry_count=retry_count,
         reference_image_path=str(reference),
@@ -659,7 +645,6 @@ def finalize_generation(
     output_relative = destination.relative_to(project_root).as_posix()
     manifest = ImageGenerationManifest(
         job_name=context.job_name,
-        model_name=context.model_name,
         reference_image=context.reference_image,
         prompt=context.prompt,
         output_file=output_relative,
@@ -672,7 +657,6 @@ def finalize_generation(
     return ImageGenerationResult(
         success=True,
         job_name=context.job_name,
-        model_name=context.model_name,
         reference_image_path=context.reference_image_path,
         prompt=context.prompt,
         saved_file_path=str(destination),
@@ -717,7 +701,6 @@ def write_failure_result(
     result = ImageGenerationResult(
         success=False,
         job_name=context.job_name,
-        model_name=context.model_name,
         reference_image_path=context.reference_image_path,
         prompt=context.prompt,
         timestamp=timestamp,
@@ -737,6 +720,6 @@ def write_failure_result(
 
 def export_image_generation_schema(output: Path) -> Path:
     schema = ImageGenerationManifest.model_json_schema(by_alias=True, mode="validation")
-    schema["$id"] = "https://auraly.local/schemas/image-generation.schema.v1.json"
-    schema["title"] = "Auraly Image Generation Manifest v1"
+    schema["$id"] = "https://auraly.local/schemas/image-generation.schema.v1.1.json"
+    schema["title"] = "Auraly Google Flow Image Manifest v1.1"
     return _write_json(output, schema)

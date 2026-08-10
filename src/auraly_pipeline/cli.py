@@ -10,7 +10,6 @@ import typer
 from pydantic import ValidationError
 
 from auraly_pipeline.image_generation import (
-    DEFAULT_MODEL_NAME,
     DEFAULT_RETRY_COUNT,
     DEFAULT_TIMEOUT_SECONDS,
     export_image_generation_schema,
@@ -137,7 +136,7 @@ def export_image_generation_schema_command(
         "schemas/image-generation.schema.json"
     ),
 ) -> None:
-    """Export the Google AI Studio image-generation manifest schema."""
+    """Export the Google Flow image-generation manifest schema."""
     path = export_image_generation_schema(output)
     typer.echo(f"Schema exported: {path}")
 
@@ -156,7 +155,6 @@ def image_prepare_command(
     reference_image: Annotated[str, typer.Option("--reference-image")],
     prompt_file: Annotated[Path, typer.Option("--prompt-file")],
     output_filename: Annotated[str | None, typer.Option("--output-filename")] = None,
-    model_name: Annotated[str, typer.Option("--model-name")] = DEFAULT_MODEL_NAME,
     timeout_seconds: Annotated[int, typer.Option("--timeout-seconds", min=1)] = DEFAULT_TIMEOUT_SECONDS,
     retry_count: Annotated[int, typer.Option("--retry-count", min=0, max=5)] = DEFAULT_RETRY_COUNT,
     downloads_dir: Annotated[Path | None, typer.Option("--downloads-dir")] = None,
@@ -171,7 +169,6 @@ def image_prepare_command(
             reference_image_path=reference_image,
             prompt=prompt,
             output_filename=output_filename,
-            model_name=model_name,
             timeout_seconds=timeout_seconds,
             retry_count=retry_count,
             downloads_dir=downloads_dir,

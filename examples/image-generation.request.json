@@ -3,6 +3,6 @@
   "referenceImagePath": "03 Avatars/soul-constellation-blueprint.png",
   "prompt": "Photorealistic UGC-style image of the same woman sitting at a wooden tarot table, looking directly at the camera, soft natural light",
   "outputFilename": "scene_001.png",
-  "modelName": "Nano Banana Pro",
+  "requiredOutputResolution": "2K",
   "timeoutSeconds": 180
 }

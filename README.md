@@ -1,25 +1,69 @@
 # Auraly Video Pipeline
 
-Pipeline local, determinística e não destrutiva para transformar MP4s do HeyGen em Reels verticais do Auraly.
+Pipeline local, determinística, retomável e auditável para produção em massa de Reels do Auraly.
 
 ## Estado atual
 
-A Fase 2 está implementada:
+### Implementado hoje
 
 - contrato Pydantic do `edit.json`;
 - JSON Schema versionado;
 - parser das copies canônicas;
 - inspeção de mídia com `ffprobe` JSON;
 - ingestão que copia, mas nunca move ou sobrescreve, os arquivos originais;
-- CLI `auraly`;
-- testes unitários e smoke test com MP4 sintético.
+- base de conhecimento local pesquisável;
+- CLI `auraly` e testes unitários/smoke;
+- contratos Google Flow v1.1 e schema de manifesto;
+- trusted project/download roots, validação canônica de contexto e paths;
+- correlação segura de downloads, partial-download handling, finalização não destrutiva,
+  manifests e diagnósticos sanitizados.
 
-Ainda não estão implementados cortes, transcrição, captions, B-roll, música ou render editorial.
+### Parcialmente implementado
+
+Os comandos `image-*` preparam e finalizam mecanicamente jobs de imagem. O runtime Playwright
+que abre o Flow, verifica a UI, gera/preserva candidatas, seleciona o download 2K e captura trace
+ainda não foi implementado nem validado. Os contratos registram explicitamente
+`browserRuntimeStatus=not_implemented` e `imageQcStatus=not_implemented`; eles não afirmam que
+uma imagem foi gerada automaticamente ou que o QC 2K foi concluído.
+
+### Planejado
+
+Campaign, persistência SQLite, orquestração durável, ElevenLabs API, runtime Google Flow,
+HeyGen MCP/OAuth, edição final, canário end-to-end e API/UI local estão sequenciados em
+`docs/GOAL-ROADMAP.md`. Cortes, transcrição, captions, B-roll, música e render editorial também
+permanecem planejados; nenhuma dessas capacidades deve ser inferida apenas por constar no PRD.
+
+## Arquitetura oficial de geração de imagens
+
+O único caminho suportado é:
+
+```text
+Prompt criado pela IA/Hermes
+→ Google Flow
+→ Playwright Python
+→ candidatas
+→ download 2K
+→ QC
+→ review
+→ approve/reject/regenerate
+```
+
+A IA/Hermes cria os prompts e toma decisões criativas. A aplicação executará o workflow de
+forma mecânica, auditável e retomável. O browser usará perfil Chromium persistente dedicado,
+concorrência 1, seletores verificáveis por roles/labels/texto/DOM, screenshots e trace em
+falhas relevantes. Se a UI não puder ser confirmada, o worker deverá parar com segurança,
+sem cliques cegos por coordenadas. As candidatas e versões rejeitadas serão preservadas.
+
+Google Flow + Playwright é o único provider/browser workflow ativo. Não há provider alternativo
+de geração de imagens. A dependência Playwright Python está declarada, mas o browser runtime
+continua planejado no PRD e não deve ser confundido com funcionalidade pronta.
 
 ## Documentação da automação em massa
 
 - `docs/PROJECT-MEMORY.md` — visão consolidada, decisões duráveis, integrações, convenções e aprendizados do projeto;
 - `docs/PRD-MVP-MASS-VIDEO-AUTOMATION.md` — PRD completo do MVP end-to-end com ElevenLabs API, Google Flow por Playwright, HeyGen MCP/OAuth, pós-produção, QC e interface local.
+- `docs/GOAL-ROADMAP.md` — sequência de Goals estreitos e verificáveis para implementação com Codex;
+- `AGENTS.md` — limites, fontes de verdade, regras de engenharia e checks obrigatórios para agentes.
 
 O PRD amplia o escopo futuro da pipeline para campanhas com uma Copy/Voice Master e múltiplas variantes visuais. As capacidades descritas ali são planejamento de produto e não devem ser confundidas com funcionalidades já implementadas.
 
@@ -166,12 +210,9 @@ uv run python -m auraly_pipeline.schema
 - somente personagens e formatos suportados são aceitos;
 - campos desconhecidos são rejeitados.
 
-## Próxima fase
+## Próximo Goal
 
-A próxima fase implementará cortes conservadores e revisáveis:
-
-1. detecção de silêncio com FFmpeg;
-2. geração de `cuts.plan.json`;
-3. comparação opcional com Auto-Editor;
-4. rough cut CFR de 30 fps;
-5. teste de sincronização de áudio e vídeo.
+Após o commit de alinhamento do Goal 0, o próximo trabalho é
+`Goal 1 — Campaign Foundation`, conforme `docs/GOAL-ROADMAP.md`. Ele inclui somente o domínio e
+a persistência local de `Campaign`, `CopyMaster` e `SceneVariant`, sem providers externos,
+orquestração completa, edição, API ou frontend.

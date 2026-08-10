@@ -194,7 +194,9 @@ Para a mesma copy, gerar uma Voice Master e reutilizá-la em todas as variantes.
 
 ### 4.3 Google Flow
 
-**Obrigatório:** automação por Playwright.
+**Decisão definitiva:** Google Flow + Playwright Python é o único caminho ativo de geração de
+imagens. Não existe provider alternativo em paralelo. Google AI Studio não faz parte da
+arquitetura ativa e não deve aparecer como provider, URL, skill ou workflow suportado.
 
 Decisões:
 
@@ -210,7 +212,24 @@ Decisões:
 - centralizar seletores em módulo versionado;
 - parar com `human_intervention_required` quando a UI mudar em vez de clicar por coordenadas incertas.
 
-O programa executa prompts; a IA é responsável por escrevê-los.
+Fluxo canônico:
+
+```text
+AI/Hermes prompt
+→ Google Flow
+→ Playwright
+→ candidatas
+→ download 2K
+→ QC
+→ review
+→ approve/reject/regenerate
+```
+
+A IA/Hermes escreve os prompts e toma as decisões criativas. A aplicação executa os prompts e
+as transições de estado mecanicamente, com evidências, auditoria e retomada. Roles, labels,
+texto e atributos DOM verificáveis têm preferência; mudanças inesperadas na UI exigem parada
+segura, screenshot e trace, nunca continuidade por cliques cegos em coordenadas. Candidatas e
+versões rejeitadas devem ser preservadas.
 
 ### 4.4 Entrega
 
@@ -557,8 +576,21 @@ Implementado atualmente:
 - testes unitários/smoke;
 - faster-whisper small.en local;
 - FFmpeg/ffprobe;
-- HyperFrames fixado em `0.7.66` atrás de adapter;
+- HyperFrames `0.7.104`, versão stable validada e fixada no lockfile, atrás de adapter;
 - Auto-Editor instalado e verificado.
+
+Parcialmente implementado para imagens:
+
+- contratos e schema Google Flow v1.1;
+- preparação mecânica de requests e diretórios de inspeção;
+- trusted project root e trusted downloads root;
+- validação de paths/contexto, detecção de downloads e partial downloads;
+- finalização não destrutiva, manifests e erros públicos sanitizados.
+
+Ainda planejado/não validado: runtime Playwright que abre o Flow, usa o perfil Chromium
+dedicado, verifica seletores, gera candidatas, confirma o download 2K, produz trace e executa o
+gate de QC/review. A existência dos contratos não deve ser interpretada como automação Flow
+funcional.
 
 O README antigo descreve a pipeline principalmente como pós-produção de um MP4 do HeyGen. O novo escopo amplia a aplicação para geração em massa end-to-end. A implementação deve preservar compatibilidade com ingest/render existentes sempre que possível.
 
@@ -657,5 +689,7 @@ O piloto deve demonstrar geração Flow por Playwright, ElevenLabs por API, HeyG
 - `README.md` — capacidades atuais do repositório;
 - `INSTALLATION-REPORT.md` — ambiente instalado e validado;
 - `docs/PRD-MVP-MASS-VIDEO-AUTOMATION.md` — requisitos do MVP;
+- `docs/GOAL-ROADMAP.md` — sequência operacional dos Codex Goals;
+- `AGENTS.md` — regras, limites, fontes de verdade e checks para agentes;
 - `schemas/edit.schema.json` — contrato editorial existente;
 - manifests em `work/<job>/manifest/` — estado e evidência por job.

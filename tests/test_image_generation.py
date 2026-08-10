@@ -120,6 +120,16 @@ def test_output_directory_and_path_construction(project: tuple[Path, Path, Path]
     assert Path(context.output_path) == expected.resolve()
     assert Path(context.context_path) == context_path
     assert context.prompt == "Line one\nLine two — preserve exactly."
+    assert context.provider == "google_flow"
+    assert context.executor == "playwright_python"
+    assert context.required_output_resolution == "2K"
+    assert context.concurrency == 1
+    assert context.browser_runtime_status == "not_implemented"
+    assert context_path.parent.name == "google-flow"
+    payload = context.model_dump(by_alias=True, mode="json")
+    assert "skill" not in payload
+    assert "modelName" not in payload
+    assert "aiStudioUrl" not in payload
 
 
 def test_timestamp_filename_when_output_omitted(project: tuple[Path, Path, Path]) -> None:
@@ -167,13 +177,16 @@ def test_finalize_moves_image_and_writes_manifest(project: tuple[Path, Path, Pat
     assert manifest_path.is_file()
 
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    assert manifest["provider"] == "google_ai_studio"
-    assert manifest["skill"] == "generate_google_ai_studio_image"
+    assert manifest["provider"] == "google_flow"
+    assert manifest["executor"] == "playwright_python"
+    assert manifest["requiredOutputResolution"] == "2K"
+    assert manifest["imageQcStatus"] == "not_implemented"
+    assert manifest["browserRuntimeStatus"] == "not_implemented"
     assert manifest["jobName"] == "existing-job"
     assert manifest["prompt"] == "Line one\nLine two — preserve exactly."
     assert manifest["referenceImage"] == "03 Avatars/character-blueprint.png"
     assert manifest["outputFile"] == saved.relative_to(root).as_posix()
-    assert manifest["status"] == "success"
+    assert manifest["status"] == "download_ingested"
 
 
 def test_explicit_extension_must_match_download(project: tuple[Path, Path, Path]) -> None:

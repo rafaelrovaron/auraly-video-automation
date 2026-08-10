@@ -2,29 +2,43 @@
   "additionalProperties": false,
   "properties": {
     "schemaVersion": {
-      "const": "1.0",
-      "default": "1.0",
+      "const": "1.1",
+      "default": "1.1",
       "title": "Schemaversion",
       "type": "string"
     },
     "provider": {
-      "const": "google_ai_studio",
-      "default": "google_ai_studio",
+      "const": "google_flow",
+      "default": "google_flow",
       "title": "Provider",
       "type": "string"
     },
-    "skill": {
-      "const": "generate_google_ai_studio_image",
-      "default": "generate_google_ai_studio_image",
-      "title": "Skill",
+    "executor": {
+      "const": "playwright_python",
+      "default": "playwright_python",
+      "title": "Executor",
+      "type": "string"
+    },
+    "requiredOutputResolution": {
+      "const": "2K",
+      "default": "2K",
+      "title": "Requiredoutputresolution",
+      "type": "string"
+    },
+    "imageQcStatus": {
+      "const": "not_implemented",
+      "default": "not_implemented",
+      "title": "Imageqcstatus",
+      "type": "string"
+    },
+    "browserRuntimeStatus": {
+      "const": "not_implemented",
+      "default": "not_implemented",
+      "title": "Browserruntimestatus",
       "type": "string"
     },
     "jobName": {
       "title": "Jobname",
-      "type": "string"
-    },
-    "modelName": {
-      "title": "Modelname",
       "type": "string"
     },
     "referenceImage": {
@@ -44,21 +58,20 @@
       "type": "string"
     },
     "status": {
-      "const": "success",
-      "default": "success",
+      "const": "download_ingested",
+      "default": "download_ingested",
       "title": "Status",
       "type": "string"
     }
   },
   "required": [
     "jobName",
-    "modelName",
     "referenceImage",
     "prompt",
     "outputFile",
     "generatedAt"
   ],
-  "title": "Auraly Image Generation Manifest v1",
+  "title": "Auraly Google Flow Image Manifest v1.1",
   "type": "object",
-  "$id": "https://auraly.local/schemas/image-generation.schema.v1.json"
+  "$id": "https://auraly.local/schemas/image-generation.schema.v1.1.json"
 }

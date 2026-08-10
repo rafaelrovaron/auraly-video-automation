@@ -28,6 +28,11 @@ O fluxo-alvo do piloto será:
 → entrega local versionada
 ```
 
+Para imagens, a sequência normativa é `AI/Hermes prompt → Google Flow → Playwright Python →
+2K image → QC → review → approve/reject/regenerate`. A IA/Hermes cria prompts e decide o que
+aprovar, rejeitar ou regenerar; a aplicação executa mecanicamente, registra evidências e retoma
+o workflow. Google Flow é o único provider de imagens do MVP, sem alternativa paralela.
+
 O MVP terá backend e workers em Python, persistência SQLite, CLI, API FastAPI e uma interface web local mínima para gestão da campanha, acompanhamento e gates de aprovação.
 
 ---
@@ -411,8 +416,10 @@ Cada variante contém local, horário, ação, prompt, objeto e estado independe
 **Prioridade:** P0
 
 - perfil persistente isolado;
+- nunca usar o perfil pessoal principal do Chrome;
 - login manual inicial;
 - browser worker separado;
+- concorrência inicial igual a 1;
 - preencher prompt;
 - iniciar geração;
 - esperar resultado;
@@ -420,9 +427,14 @@ Cada variante contém local, horário, ação, prompt, objeto e estado independe
 - selecionar candidata configurada;
 - aprimorar/download em 2K;
 - capturar download via Playwright;
+- preservar todas as candidatas e versões rejeitadas;
 - timeout e erro estruturado.
 
-**Aceitação:** não aceitar arquivo 1K quando `require_2k=true`.
+Seletores devem priorizar roles, labels, texto e atributos DOM verificáveis. Coordenadas cegas
+não são um mecanismo de continuidade aceitável.
+
+**Aceitação:** não aceitar arquivo 1K quando `require_2k=true`; uma UI não reconhecida para
+antes de qualquer ação irreversível e deixa screenshot/trace auditável.
 
 ### FR-009 — Detectar mudança da UI do Flow
 
@@ -1314,97 +1326,23 @@ Regras:
 
 ## 22. Plano de implementação
 
-### Milestone 0 — Baseline e ADRs
+O PRD especifica o produto-alvo, mas não mantém uma segunda sequência operacional. A ordem,
+os limites, as dependências, os critérios de saída e os comandos de verificação ficam em
+`docs/GOAL-ROADMAP.md`:
 
-- validar testes atuais;
-- documentar arquitetura em ADRs;
-- mapear código existente;
-- criar schema de Campaign/Variant;
-- definir migração sem quebrar ingest atual.
+1. Goal 0 — Repository Alignment;
+2. Goal 1 — Campaign Foundation;
+3. Goal 2 — Persistent Job Orchestration;
+4. Goal 3 — Voice Master;
+5. Goal 4 — Google Flow Campaign Integration;
+6. Goal 5 — HeyGen;
+7. Goal 6 — Deterministic Editing;
+8. Goal 7 — End-to-End Canary;
+9. Goal 8 — Local API/UI.
 
-**Saída:** baseline verde e ADRs aprovados.
-
-### Milestone 1 — Fundação
-
-- SQLite/SQLAlchemy/Alembic;
-- domain models;
-- state machine;
-- job queue;
-- CLI campaign/status/jobs;
-- logs/redaction;
-- dry-run;
-- testes de restart/idempotência.
-
-**Gate:** jobs locais retomáveis.
-
-### Milestone 2 — ElevenLabs
-
-- API adapter;
-- secret loading;
-- geração;
-- processamento/QC;
-- ASR/diff;
-- aprovação Voice Master;
-- fake server e canary.
-
-**Gate:** Voice Master real aprovada sem browser.
-
-### Milestone 3 — Google Flow Playwright
-
-- perfil persistente;
-- login setup;
-- selectors versionados;
-- geração/download 2K;
-- screenshot/trace;
-- image ingest/QC;
-- review gate.
-
-**Gate:** três imagens 2K obtidas e versionadas.
-
-### Milestone 4 — HeyGen MCP/OAuth
-
-- preflight;
-- MCP adapter;
-- upload helper testado;
-- audio asset reuse;
-- look creation/poll;
-- Avatar III gate;
-- video creation/poll/download;
-- sanitização e cost policy.
-
-**Gate:** um canário Avatar III completo e reconciliável.
-
-### Milestone 5 — Render/QC
-
-- captions;
-- headline;
-- edit manifest derivado;
-- música/zoom;
-- proxy/master;
-- QC técnico;
-- review/delivery.
-
-**Gate:** master canário com todos checks P0.
-
-### Milestone 6 — Interface web mínima
-
-- FastAPI routes;
-- React app;
-- dashboard;
-- campaign detail;
-- voice/image/video review;
-- SSE;
-- job/error views.
-
-**Gate:** operador consegue gerir o piloto sem CLI para tarefas normais.
-
-### Milestone 7 — Piloto de três variantes
-
-- executar campanha real;
-- medir tempo/intervenções;
-- corrigir falhas;
-- documentar operação;
-- aprovar/reprovar MVP.
+Essa separação impede que capacidades planejadas no PRD sejam interpretadas como já
+implementadas. O roadmap pode decompor requisitos em Goals menores sem alterar o escopo do MVP
+estabelecido neste documento.
 
 ---
 
@@ -1508,7 +1446,7 @@ Uma feature só está concluída quando:
 
 ## 26. Decisões que precisam de Rafael antes/durante a implementação
 
-Não bloqueiam Milestone 0–1, mas devem ser decididas antes dos respectivos adapters:
+Não bloqueiam Goals 0–2, mas devem ser decididas antes dos respectivos adapters:
 
 1. limite de renders pagos HeyGen no piloto;
 2. número de candidatas Flow por local;
@@ -1537,18 +1475,19 @@ pilot:
 
 ---
 
-## 27. Próximo passo de implementação
+## 27. Sequenciamento da implementação
 
-Começar pelo **Milestone 0**, produzindo:
+O PRD define o alvo do MVP; `docs/GOAL-ROADMAP.md` é a fonte operacional para sequenciar
+Codex Goals estreitos e verificáveis. O alinhamento do repositório é o Goal 0. Depois que seus
+checks e commit forem concluídos, o próximo trabalho será `Goal 1 — Campaign Foundation`:
 
-1. inventário do código atual;
-2. ADR-001: monólito modular + ports/adapters;
-3. ADR-002: SQLite job queue/state machine;
-4. ADR-003: provider contracts e secret boundaries;
-5. modelos Pydantic de Campaign, VoiceMaster e SceneVariant;
-6. primeira migração Alembic;
-7. comando `auraly campaign create`;
-8. comando `auraly campaign status`;
-9. testes de criação, duplicidade, paths e restart.
+1. modelos Pydantic de `Campaign`, `CopyMaster` e `SceneVariant`;
+2. SQLite, SQLAlchemy 2 e Alembic;
+3. repositories e application service;
+4. CLI create/get/list;
+5. persistência após restart;
+6. testes de criação, duplicidade, paths, migrations e restart.
 
-Nenhuma chamada paga é necessária para iniciar o Milestone 0–1.
+Goal 1 não inclui providers externos, job orchestrator completo, edição, FastAPI ou frontend.
+Cada Goal posterior deve obedecer aos limites, dependências e critérios de saída do roadmap.
+Nenhuma chamada paga é necessária para Goals 0–2.

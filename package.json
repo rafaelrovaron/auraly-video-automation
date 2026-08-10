@@ -10,6 +10,6 @@
     "hf:render": "hyperframes render"
   },
   "dependencies": {
-    "hyperframes": "0.7.103"
+    "hyperframes": "0.7.104"
   }
 }
