@@ -33,6 +33,8 @@ Dependências principais:
 - `PyYAML==6.0.3`
 - `pysubs2==1.8.1`
 - `playwright==1.62.0`
+- `sqlalchemy==2.0.51`
+- `alembic==1.19.1`
 - `pytest==8.4.2`
 - `pytest-cov==6.3.0`
 - `ruff==0.15.22`

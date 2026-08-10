@@ -9,6 +9,9 @@ from typing import Annotated, Literal
 import typer
 from pydantic import ValidationError
 
+from auraly_pipeline.campaigns.domain import CampaignCreate
+from auraly_pipeline.campaigns.persistence import default_database_path
+from auraly_pipeline.campaigns.service import CampaignError, CampaignService
 from auraly_pipeline.image_generation import (
     DEFAULT_RETRY_COUNT,
     DEFAULT_TIMEOUT_SECONDS,
@@ -33,6 +36,8 @@ app = typer.Typer(
     help="Deterministic local post-production pipeline for Auraly Reels.",
     no_args_is_help=True,
 )
+campaign_app = typer.Typer(help="Persist and inspect local campaign metadata.", no_args_is_help=True)
+app.add_typer(campaign_app, name="campaign")
 
 
 @app.command("ingest")
@@ -145,8 +150,92 @@ def _configure_image_logging() -> None:
     logging.basicConfig(level=logging.INFO, format="%(message)s")
 
 
-def _json_echo(payload: dict) -> None:
-    typer.echo(json.dumps(payload, indent=2, ensure_ascii=False))
+def _json_echo(payload: dict[str, object]) -> None:
+    typer.echo(json.dumps(payload, indent=2, ensure_ascii=False, sort_keys=True, allow_nan=False))
+
+
+def _reject_non_standard_json_constant(value: str) -> None:
+    raise ValueError(f"non-standard JSON constant: {value}")
+
+
+def _campaign_failure(code: str, message: str) -> None:
+    _json_echo({"success": False, "error": {"code": code, "message": message}})
+    raise typer.Exit(code=1)
+
+
+@campaign_app.command("create")
+def campaign_create_command(
+    input_path: Annotated[Path, typer.Option("--input", help="Campaign JSON request")],
+    database: Annotated[Path, typer.Option("--database", help="Local SQLite database")] = default_database_path(),
+) -> None:
+    """Create one campaign without overwriting an existing campaign ID."""
+    service: CampaignService | None = None
+    try:
+        payload = json.loads(
+            input_path.read_text(encoding="utf-8"),
+            parse_constant=_reject_non_standard_json_constant,
+        )
+        request = CampaignCreate.model_validate(payload)
+        service = CampaignService.for_database(database)
+        campaign = service.create_campaign(request)
+    except (OSError, ValueError, json.JSONDecodeError, ValidationError):
+        _campaign_failure("campaign_invalid", "Campaign input is invalid.")
+    except CampaignError as exc:
+        _campaign_failure("campaign_conflict", exc.public_message)
+    except Exception:
+        _campaign_failure("campaign_operation_failed", "The campaign operation failed safely.")
+    finally:
+        if service is not None:
+            service.close()
+    _json_echo(
+        {
+            "success": True,
+            "campaign": campaign.model_dump(by_alias=True, mode="json"),
+        }
+    )
+
+
+@campaign_app.command("get")
+def campaign_get_command(
+    campaign_id: Annotated[str, typer.Argument(help="Campaign slug")],
+    database: Annotated[Path, typer.Option("--database", help="Local SQLite database")] = default_database_path(),
+) -> None:
+    """Retrieve a campaign and all CopyMaster versions and SceneVariants."""
+    service: CampaignService | None = None
+    try:
+        service = CampaignService.for_database(database)
+        campaign = service.get_campaign(campaign_id)
+    except CampaignError as exc:
+        _campaign_failure("campaign_not_found", exc.public_message)
+    except Exception:
+        _campaign_failure("campaign_operation_failed", "The campaign operation failed safely.")
+    finally:
+        if service is not None:
+            service.close()
+    _json_echo(
+        {
+            "success": True,
+            "campaign": campaign.model_dump(by_alias=True, mode="json"),
+        }
+    )
+
+
+@campaign_app.command("list")
+def campaign_list_command(
+    database: Annotated[Path, typer.Option("--database", help="Local SQLite database")] = default_database_path(),
+) -> None:
+    """List campaigns in deterministic creation order."""
+    service: CampaignService | None = None
+    try:
+        service = CampaignService.for_database(database)
+        campaigns = service.list_campaigns()
+    except Exception:
+        _campaign_failure("campaign_operation_failed", "The campaign operation failed safely.")
+    finally:
+        if service is not None:
+            service.close()
+    serialized = [campaign.model_dump(by_alias=True, mode="json") for campaign in campaigns]
+    _json_echo({"success": True, "count": len(serialized), "campaigns": serialized})
 
 
 @app.command("image-prepare")

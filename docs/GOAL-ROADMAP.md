@@ -119,7 +119,8 @@ Run the common baseline plus Goal 1 migration and persistence tests, for example
 
 ```bash
 uv run alembic upgrade head
-uv run pytest tests/test_campaigns.py tests/test_campaign_cli.py tests/test_migrations.py
+uv run pytest tests/test_campaigns.py tests/test_campaign_domain.py tests/test_cli.py \
+  tests/test_migrations.py
 ```
 
 ---

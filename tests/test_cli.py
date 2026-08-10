@@ -1,8 +1,10 @@
 from pathlib import Path
+import json
 
 from typer.testing import CliRunner
 
 from auraly_pipeline.cli import app
+from tests.test_campaign_domain import valid_campaign_data
 
 
 runner = CliRunner()
@@ -171,3 +173,146 @@ def test_image_cli_contains_unexpected_exceptions(monkeypatch, tmp_path: Path) -
     assert "Users" not in result.stdout
     assert '"failedStep": "image_generation"' in result.stdout
     assert "The image-generation operation failed safely." in result.stdout
+
+
+def test_campaign_cli_create_get_and_list_survive_new_invocations(tmp_path: Path) -> None:
+    request_path = tmp_path / "campaign.json"
+    database_path = tmp_path / "state" / "auraly.db"
+    request_path.write_text(json.dumps(valid_campaign_data()), encoding="utf-8")
+
+    created = runner.invoke(
+        app,
+        [
+            "campaign",
+            "create",
+            "--input",
+            str(request_path),
+            "--database",
+            str(database_path),
+        ],
+    )
+    retrieved = runner.invoke(
+        app,
+        [
+            "campaign",
+            "get",
+            "eight-of-cups-pilot",
+            "--database",
+            str(database_path),
+        ],
+    )
+    listed = runner.invoke(
+        app,
+        ["campaign", "list", "--database", str(database_path)],
+    )
+
+    assert created.exit_code == 0
+    assert retrieved.exit_code == 0
+    assert listed.exit_code == 0
+    created_payload = json.loads(created.stdout)
+    retrieved_payload = json.loads(retrieved.stdout)
+    listed_payload = json.loads(listed.stdout)
+    assert created_payload["campaign"] == retrieved_payload["campaign"]
+    assert listed_payload["count"] == 1
+    assert listed_payload["campaigns"] == [created_payload["campaign"]]
+
+
+def test_campaign_cli_duplicate_and_not_found_errors_are_safe(tmp_path: Path) -> None:
+    request_path = tmp_path / "campaign.json"
+    database_path = tmp_path / "auraly.db"
+    request_path.write_text(json.dumps(valid_campaign_data()), encoding="utf-8")
+    arguments = [
+        "campaign",
+        "create",
+        "--input",
+        str(request_path),
+        "--database",
+        str(database_path),
+    ]
+    assert runner.invoke(app, arguments).exit_code == 0
+
+    duplicate = runner.invoke(app, arguments)
+    missing = runner.invoke(
+        app,
+        ["campaign", "get", "missing-campaign", "--database", str(database_path)],
+    )
+
+    assert duplicate.exit_code == 1
+    assert json.loads(duplicate.stdout) == {
+        "success": False,
+        "error": {
+            "code": "campaign_conflict",
+            "message": "A campaign with this ID already exists.",
+        },
+    }
+    assert missing.exit_code == 1
+    assert json.loads(missing.stdout)["error"] == {
+        "code": "campaign_not_found",
+        "message": "Campaign not found.",
+    }
+    assert str(database_path) not in duplicate.stdout + missing.stdout
+
+
+def test_campaign_cli_invalid_input_does_not_echo_sensitive_content(tmp_path: Path) -> None:
+    request_path = tmp_path / "private-campaign.json"
+    request_path.write_text(
+        json.dumps({"campaignId": "../escape", "password": "SENSITIVE VALUE"}),
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(
+        app,
+        ["campaign", "create", "--input", str(request_path), "--database", str(tmp_path / "db.sqlite")],
+    )
+
+    assert result.exit_code == 1
+    assert json.loads(result.stdout) == {
+        "success": False,
+        "error": {"code": "campaign_invalid", "message": "Campaign input is invalid."},
+    }
+    assert "SENSITIVE" not in result.stdout
+    assert "private-campaign" not in result.stdout
+
+
+def test_campaign_cli_rejects_non_standard_json_numbers(monkeypatch, tmp_path: Path) -> None:
+    request_path = tmp_path / "campaign.json"
+    raw_request = json.dumps(valid_campaign_data()).replace('"limitCents": 0', '"limitCents": NaN')
+    request_path.write_text(raw_request, encoding="utf-8")
+    monkeypatch.setattr(
+        "auraly_pipeline.cli.CampaignCreate.model_validate",
+        lambda _payload: (_ for _ in ()).throw(AssertionError("validation must not be reached")),
+    )
+
+    result = runner.invoke(
+        app,
+        ["campaign", "create", "--input", str(request_path), "--database", str(tmp_path / "db.sqlite")],
+    )
+
+    assert result.exit_code == 1
+    assert "NaN" not in result.stdout
+    assert json.loads(result.stdout) == {
+        "success": False,
+        "error": {"code": "campaign_invalid", "message": "Campaign input is invalid."},
+    }
+
+
+def test_campaign_cli_contains_unexpected_database_errors(monkeypatch, tmp_path: Path) -> None:
+    def fail(_database: Path):
+        raise OSError(r"SENSITIVE C:\\Users\\Private\\auraly.db")
+
+    monkeypatch.setattr("auraly_pipeline.cli.CampaignService.for_database", fail)
+    result = runner.invoke(
+        app,
+        ["campaign", "list", "--database", str(tmp_path / "auraly.db")],
+    )
+
+    assert result.exit_code == 1
+    assert json.loads(result.stdout) == {
+        "success": False,
+        "error": {
+            "code": "campaign_operation_failed",
+            "message": "The campaign operation failed safely.",
+        },
+    }
+    assert "SENSITIVE" not in result.stdout
+    assert "Users" not in result.stdout

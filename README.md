@@ -13,6 +13,10 @@ Pipeline local, determinística, retomável e auditável para produção em mass
 - ingestão que copia, mas nunca move ou sobrescreve, os arquivos originais;
 - base de conhecimento local pesquisável;
 - CLI `auraly` e testes unitários/smoke;
+- domínio `Campaign`, `CopyMaster` versionado e `SceneVariant` com invariantes Pydantic;
+- persistência local SQLite em WAL via SQLAlchemy 2 e migrações Alembic;
+- camada repository/application service e CLI JSON `campaign create/get/list`;
+- proteção de imutabilidade para CopyMaster aprovado e persistência após restart;
 - contratos Google Flow v1.1 e schema de manifesto;
 - trusted project/download roots, validação canônica de contexto e paths;
 - correlação segura de downloads, partial-download handling, finalização não destrutiva,
@@ -28,10 +32,10 @@ uma imagem foi gerada automaticamente ou que o QC 2K foi concluído.
 
 ### Planejado
 
-Campaign, persistência SQLite, orquestração durável, ElevenLabs API, runtime Google Flow,
-HeyGen MCP/OAuth, edição final, canário end-to-end e API/UI local estão sequenciados em
-`docs/GOAL-ROADMAP.md`. Cortes, transcrição, captions, B-roll, música e render editorial também
-permanecem planejados; nenhuma dessas capacidades deve ser inferida apenas por constar no PRD.
+Orquestração durável, ElevenLabs API, runtime Google Flow, HeyGen MCP/OAuth, edição final,
+canário end-to-end e API/UI local estão sequenciados em `docs/GOAL-ROADMAP.md`. Cortes,
+transcrição, captions, B-roll, música e render editorial também permanecem planejados; nenhuma
+dessas capacidades deve ser inferida apenas por constar no PRD.
 
 ## Arquitetura oficial de geração de imagens
 
@@ -81,6 +85,39 @@ que não correspondam a esses dois roots confiáveis.
 cd "<AURALY_ROOT>/pipeline"
 uv sync --all-groups
 npm ci
+```
+
+## Campaign Foundation
+
+O banco de metadados usa SQLite em modo WAL. Por padrão ele fica fora do repositório em
+`~/.auraly/auraly.db`; defina `AURALY_DATABASE_PATH` ou passe `--database` para escolher outro
+arquivo SQLite. Cada comando aplica as migrações Alembic pendentes antes de acessar os dados.
+Arquivos SQLite, WAL e SHM são ignorados pelo Git.
+
+Criar, consultar e listar uma campanha:
+
+```bash
+uv run auraly campaign create \
+  --input examples/campaign.request.json \
+  --database ~/.auraly/auraly.db
+
+uv run auraly campaign get eight-of-cups-pilot \
+  --database ~/.auraly/auraly.db
+
+uv run auraly campaign list \
+  --database ~/.auraly/auraly.db
+```
+
+As respostas são JSON estruturado. IDs duplicados falham sem overwrite; um `CopyMaster`
+aprovado não pode ser atualizado nem removido no banco e qualquer revisão é persistida como uma
+nova versão. As variantes exigem ao menos três locais distintos. A headline permanece visual-only
+e `spokenText` é derivado somente de hook, body e CTA. O banco armazena apenas estado e metadados
+— nunca mídia, cookies, tokens, profiles ou URLs assinadas.
+
+Para criar ou atualizar explicitamente um banco por Alembic:
+
+```bash
+AURALY_DATABASE_PATH=~/.auraly/auraly.db uv run alembic upgrade head
 ```
 
 ## Ingestão
@@ -212,7 +249,6 @@ uv run python -m auraly_pipeline.schema
 
 ## Próximo Goal
 
-Após o commit de alinhamento do Goal 0, o próximo trabalho é
-`Goal 1 — Campaign Foundation`, conforme `docs/GOAL-ROADMAP.md`. Ele inclui somente o domínio e
-a persistência local de `Campaign`, `CopyMaster` e `SceneVariant`, sem providers externos,
-orquestração completa, edição, API ou frontend.
+O próximo trabalho é `Goal 2 — Persistent Job Orchestration`, conforme
+`docs/GOAL-ROADMAP.md`. Ele adicionará jobs retomáveis, estado explícito, tentativas, eventos e
+idempotência usando handlers fake, sem providers externos ou operações pagas.

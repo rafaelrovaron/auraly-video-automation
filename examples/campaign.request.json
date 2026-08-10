@@ -1,0 +1,46 @@
+{
+  "campaignId": "eight-of-cups-pilot",
+  "character": "soul-constellation",
+  "proofObject": "Eight of Cups tarot card",
+  "voicePreset": "michael-c-vincent-v1",
+  "editPreset": "soul-constellation-v1",
+  "budget": {
+    "currency": "USD",
+    "limitCents": 0
+  },
+  "config": {
+    "targetVariants": 3
+  },
+  "copyMaster": {
+    "sourceText": "Original approved campaign copy.",
+    "headline": "HE RETURNS WHEN YOU WALK AWAY",
+    "hook": "You stopped chasing him.",
+    "body": "That changed the energy between you.",
+    "cta": "Take the one-minute reading.",
+    "approvalState": "approved",
+    "approvedBy": "rafael"
+  },
+  "sceneVariants": [
+    {
+      "variantId": "laundromat",
+      "location": "24-hour laundromat",
+      "timeAtmosphere": "After midnight",
+      "action": "Walk away from the machines",
+      "prompt": "Create the approved laundromat scene."
+    },
+    {
+      "variantId": "restaurant",
+      "location": "Empty restaurant",
+      "timeAtmosphere": "Closing time",
+      "action": "Leave the table",
+      "prompt": "Create the approved restaurant scene."
+    },
+    {
+      "variantId": "metro",
+      "location": "Metro station",
+      "timeAtmosphere": "Last train",
+      "action": "Step onto the train",
+      "prompt": "Create the approved metro scene."
+    }
+  ]
+}

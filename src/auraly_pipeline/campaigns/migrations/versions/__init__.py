@@ -1,0 +1,1 @@
+"""Campaign foundation migration revisions."""

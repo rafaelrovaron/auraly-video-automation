@@ -1,7 +1,7 @@
 # Auraly Mass Video Pipeline — Memória do Projeto
 
 **Status:** documento vivo
-**Última consolidação:** 2026-08-09
+**Última consolidação:** 2026-08-10
 **Projeto:** `<AURALY_ROOT>/pipeline`
 **Responsável de produto:** Rafael Rovaron
 **Uso:** contexto permanente para humanos, agentes de IA e futuras sessões de implementação.
@@ -573,6 +573,13 @@ Implementado atualmente:
 - ingestão não destrutiva;
 - ffprobe JSON;
 - CLI `auraly`;
+- Campaign Foundation: contratos Pydantic para `Campaign`, `CopyMaster` e `SceneVariant`;
+- SQLite em WAL com SQLAlchemy 2, migração Alembic, repository e application service;
+- CLI JSON `campaign create/get/list`, sem lógica de negócio nos comandos Typer;
+- IDs, timestamps UTC, uniqueness, restart persistence e três ou mais variantes por campanha;
+- `CopyMaster` com source preservado, SHA-256 canônico, versão e aprovação;
+- headline excluída de `spokenText` e triggers SQLite que impedem update/delete de copy aprovada;
+- metadados de budget/config rejeitam chaves de secrets, tokens, cookies e URLs assinadas;
 - testes unitários/smoke;
 - faster-whisper small.en local;
 - FFmpeg/ffprobe;
@@ -591,6 +598,15 @@ Ainda planejado/não validado: runtime Playwright que abre o Flow, usa o perfil 
 dedicado, verifica seletores, gera candidatas, confirma o download 2K, produz trace e executa o
 gate de QC/review. A existência dos contratos não deve ser interpretada como automação Flow
 funcional.
+
+Configuração operacional da Campaign Foundation:
+
+- banco padrão fora do repositório: `~/.auraly/auraly.db`;
+- override por `AURALY_DATABASE_PATH` ou `--database`;
+- migrations executadas antes do acesso pela application service;
+- banco guarda somente estado/metadados, nunca mídia BLOB, secrets, cookies, profiles ou URLs assinadas;
+- revisões de CopyMaster aprovado são novos inserts versionados; versões aprovadas não aceitam update/delete;
+- próximo milestone: `Goal 2 — Persistent Job Orchestration`.
 
 O README antigo descreve a pipeline principalmente como pós-produção de um MP4 do HeyGen. O novo escopo amplia a aplicação para geração em massa end-to-end. A implementação deve preservar compatibilidade com ingest/render existentes sempre que possível.
 
