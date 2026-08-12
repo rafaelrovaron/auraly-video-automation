@@ -733,6 +733,74 @@ def test_approval_and_different_paid_generation_are_serialized(
     inspected.close()
 
 
+def test_processing_voice_blocks_other_approval_until_it_is_final(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "processing-blocks-approval.db"
+    campaign_id, _, spoken_text = _campaign(database)
+    provider = FakeElevenLabs(_mp3(tmp_path), spoken_text)
+    service = VoiceMasterService.for_database(
+        database, work_root=tmp_path / "work", provider=provider
+    )
+
+    def request(voice_id: str) -> VoiceGenerateRequest:
+        return VoiceGenerateRequest(
+            campaign_id=campaign_id,
+            voice_id=voice_id,
+            model_id="eleven_multilingual_v2",
+            paid_request_approved=True,
+            paid_request_approved_by="rafael",
+            approved_budget_cents=1000,
+        )
+
+    voice_a = service.generate(request("voice-a"))
+    service.worker_once("voice-worker")
+    assert service.get(voice_a.voice_master.voice_master_id).status is VoiceMasterStatus.REVIEW_REQUIRED
+
+    voice_b = service.generate(request("voice-b"))
+    with service._sessions() as session:
+        row_b = session.get(VoiceMasterRow, voice_b.voice_master.voice_master_id)
+        assert row_b is not None
+        row_b.status = "processing"
+        row_b.provider_state = "response_received"
+        row_b.updated_at = datetime.now(UTC)
+        session.commit()
+
+    voices_before = [
+        voice.model_dump(mode="json") for voice in service.list(campaign_id=campaign_id)
+    ]
+    jobs_before = [
+        job.model_dump(mode="json")
+        for job in service._jobs.list_jobs(campaign_id=campaign_id)
+    ]
+
+    with pytest.raises(VoiceMasterConflictError) as raised:
+        service.approve(voice_a.voice_master.voice_master_id, approved_by="rafael")
+    assert raised.value.public_message == (
+        "The Voice Master request conflicts with persisted state."
+    )
+    assert service.get(voice_a.voice_master.voice_master_id).status is VoiceMasterStatus.REVIEW_REQUIRED
+    assert [
+        voice.model_dump(mode="json") for voice in service.list(campaign_id=campaign_id)
+    ] == voices_before
+    assert [
+        job.model_dump(mode="json")
+        for job in service._jobs.list_jobs(campaign_id=campaign_id)
+    ] == jobs_before
+
+    with service._sessions() as session:
+        row_b = session.get(VoiceMasterRow, voice_b.voice_master.voice_master_id)
+        assert row_b is not None
+        row_b.status = "failed"
+        row_b.failure_code = "processing_failed_safely"
+        row_b.updated_at = datetime.now(UTC)
+        session.commit()
+
+    approved = service.approve(voice_a.voice_master.voice_master_id, approved_by="rafael")
+    assert approved.status is VoiceMasterStatus.APPROVED
+    service.close()
+
+
 def test_approval_with_multiple_other_active_voices_fails_with_stable_conflict(
     tmp_path: Path,
 ) -> None:

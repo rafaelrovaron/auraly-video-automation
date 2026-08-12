@@ -62,7 +62,9 @@ class VoiceMasterRepository:
             .where(
                 VoiceMasterRow.campaign_id == campaign_id,
                 VoiceMasterRow.id != voice_master_id,
-                VoiceMasterRow.status.in_(("pending", "generating", "review_required")),
+                VoiceMasterRow.status.in_(
+                    ("pending", "generating", "processing", "review_required")
+                ),
             )
             .limit(1)
         ).scalar_one_or_none()
