@@ -35,10 +35,11 @@ uma imagem foi gerada automaticamente ou que o QC 2K foi concluído.
 
 ### Planejado
 
-ElevenLabs API, runtime Google Flow, HeyGen MCP/OAuth, edição final,
-canário end-to-end e API/UI local estão sequenciados em `docs/GOAL-ROADMAP.md`. Cortes,
-transcrição, captions, B-roll, música e render editorial também permanecem planejados; nenhuma
-dessas capacidades deve ser inferida apenas por constar no PRD.
+Runtime Google Flow, HeyGen MCP/OAuth, edição final,
+canário end-to-end e API/UI local estão sequenciados em `docs/GOAL-ROADMAP.md`. Captions, B-roll,
+música e render editorial também permanecem planejados; a integração oficial ElevenLabs, o
+processamento de Voice Master e transcript/QC já pertencem ao Goal 3 implementado. Nenhuma
+capacidade futura deve ser inferida apenas por constar no PRD.
 
 ## Arquitetura oficial de geração de imagens
 
@@ -123,6 +124,44 @@ Para criar ou atualizar explicitamente um banco por Alembic:
 AURALY_DATABASE_PATH=~/.auraly/auraly.db uv run alembic upgrade head
 ```
 
+## Voice Master
+
+Goal 3 adds a campaign-level `VoiceMaster` linked to one approved `CopyMaster` version. A logical voice request creates one durable `voice.generate` Job with `reconcile_before_retry`; every SceneVariant reuses the approved processed artifact.
+
+```bash
+uv run auraly voice generate CAMPAIGN_ID --voice-id VOICE_ID --model-id eleven_multilingual_v2 --approve-paid-request --paid-request-approved-by OPERATOR --approved-budget-cents 1000
+uv run auraly job worker-once --worker-id voice-worker
+uv run auraly voice get VOICE_MASTER_ID
+uv run auraly voice list --campaign-id CAMPAIGN_ID
+uv run auraly voice approve VOICE_MASTER_ID --approved-by OPERATOR
+uv run auraly voice reject VOICE_MASTER_ID --rejected-by OPERATOR --reason "Pacing requires regeneration"
+uv run auraly voice resolve-no-artifact VOICE_MASTER_ID --resolved-by OPERATOR --reason "Provider history confirms no artifact"
+```
+
+`voice generate` requires a positive Campaign `budget.limitCents`, a valid uppercase three-letter
+Campaign `budget.currency`, explicit `--approve-paid-request`, an explicit operator, and
+`--approved-budget-cents` no greater than the Campaign limit. The append-only authorization event
+records operator, timestamp, approved ceiling, Campaign limit, and authoritative currency. Ambiguous
+or `dispatching` outcomes without a raw artifact whose digest was already persisted remain blocked
+until `resolve-no-artifact` records an operator-confirmed reconciliation; the same Job is then resumed
+without bypassing its attempt or fencing history. Provider MP3 is accepted only when Xing/Info/VBRI
+metadata supplies an independently checkable frame count; formats without declared frame count fail
+closed rather than treating a clean frame boundary as proof of completeness.
+
+`ELEVENLABS_API_KEY` is loaded only by the worker from the environment. It is never accepted as CLI/job input or persisted. The official `POST /v1/text-to-speech/{voice_id}/with-timestamps` API is the only TTS path. The exact persisted `CopyMaster.spoken_text` is sent; `headline` remains visual-only.
+
+Artifacts are non-destructive under the configured work root:
+
+```text
+campaigns/<campaign-id>/voice/<voice-master-id>/
+  raw/provider.mp3
+  processed/voice-master.wav
+  inspection/transcript.json
+  manifest/voice-master.json
+```
+
+The raw response is created exclusively and never overwritten. FFmpeg produces separate mono 48 kHz PCM WAV using `silenceremove=start_periods=1:start_duration=0.1:start_threshold=-50dB,areverse,silenceremove=start_periods=1:start_duration=0.1:start_threshold=-50dB,areverse,loudnorm=I=-16:TP=-1.5:LRA=11`. Final LUFS, true peak, silence, duration, hashes, WPM and transcript comparison are persisted. Human approval is mandatory.
+
 ## Persistent Job Orchestration
 
 Goal 2 persiste toda a informação necessária para entender e retomar trabalho local sem contexto
@@ -147,10 +186,10 @@ uv run auraly job recover --database ~/.auraly/auraly.db
 `worker-once` é deliberadamente limitado: recupera leases expirados, promove retries vencidos,
 faz claim atômico de no máximo um job e executa um handler local registrado. O número da tentativa
 é o fencing token: completion e renewal exigem o mesmo worker, a mesma tentativa e um lease ainda
-válido. Os handlers
-disponíveis neste Goal são `fake.success`, `fake.retry-once`, `fake.retry-always`,
-`fake.permanent-failure`, `fake.blocked` e `fake.crash`. Nenhum deles realiza rede ou chama um
-provider externo.
+válido. Os handlers fake disponíveis são `fake.success`, `fake.retry-once`, `fake.retry-always`,
+`fake.permanent-failure`, `fake.blocked` e `fake.crash`; Goal 3 também registra o handler real
+`voice.generate`, cuja única chamada externa é a API oficial da ElevenLabs e cujo dispatch exige
+autorização paga persistida.
 
 Estados suportados:
 
@@ -163,8 +202,10 @@ completed | failed | cancelled -> terminal
 ```
 
 O contrato persiste `retrySafety`: `idempotent` autoriza retry automático, `manual_only` bloqueia
-até `job resume` explícito, e `reconcile_before_retry` permanece bloqueado até um futuro fluxo de
-reconciliação dedicado. A capability declarada pelo handler precisa coincidir com a policy do job.
+até `job resume` explícito, e `reconcile_before_retry` permanece bloqueado até reconciliação humana.
+Para `voice.generate`, `voice resolve-no-artifact` registra operador e razão em evento append-only e
+retoma o mesmo Job somente após confirmação de que nenhum artifact foi criado. A capability declarada
+pelo handler precisa coincidir com a policy do job.
 
 O cancelamento de job `running` é rejeitado, pois este Goal não finge interromper uma operação em
 execução. O lease pode ser renovado pela camada de aplicação e, quando expira, a tentativa ativa é
@@ -303,5 +344,5 @@ uv run python -m auraly_pipeline.schema
 
 ## Próximo Goal
 
-O próximo trabalho é `Goal 3 — Voice Master`, conforme `docs/GOAL-ROADMAP.md`. Goal 3 não está
-implementado e qualquer canário real continuará exigindo aprovação explícita.
+O próximo trabalho é `Goal 4 -- Google Flow Campaign Integration`, conforme `docs/GOAL-ROADMAP.md`.
+Goal 4 não está implementado e qualquer canário real continuará exigindo aprovação explícita.

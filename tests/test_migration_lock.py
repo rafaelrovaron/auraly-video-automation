@@ -45,7 +45,9 @@ def test_concurrent_first_startup_serializes_alembic_migration(tmp_path: Path) -
 
     deadline = time.monotonic() + 10
     while len(list(tmp_path.glob("ready-*"))) < len(processes):
-        assert time.monotonic() < deadline, "startup subprocesses did not reach the migration barrier"
+        assert time.monotonic() < deadline, (
+            "startup subprocesses did not reach the migration barrier"
+        )
         time.sleep(0.01)
     go.touch()
 
@@ -59,6 +61,6 @@ def test_concurrent_first_startup_serializes_alembic_migration(tmp_path: Path) -
     engine = create_engine(sqlite_url(database_path))
     with engine.connect() as connection:
         assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == (
-            "0002_persistent_job_orchestration"
+            "0003_voice_master"
         )
     engine.dispose()

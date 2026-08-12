@@ -586,7 +586,15 @@ Implementado atualmente:
 - idempotency key global única com fingerprint do contrato e conflito para reuse incompatível;
 - retry safety persistida (`idempotent`, `manual_only`, `reconcile_before_retry`) e validada contra a capability do handler;
 - retries lineares determinísticos, max attempts, falhas retryable/terminal e cancelamento seguro;
-- CLI JSON `job submit/get/list/worker-once/cancel/resume/recover` e handlers exclusivamente fake;
+- CLI JSON `job submit/get/list/worker-once/cancel/resume/recover` e handlers fake mais o handler real `voice.generate`;
+- Voice Master campaign-level ligado a uma versão aprovada de CopyMaster, com lifecycle `pending/generating/processing/review_required/approved/rejected/failed`;
+- migration `0003_voice_master`, um VoiceMaster aprovado por Campaign, finais imutáveis e regenerações históricas sem overwrite;
+- ElevenLabs somente pela API oficial `/v1/text-to-speech/{voice_id}/with-timestamps`, com voice/model/output explícitos e `ELEVENLABS_API_KEY` somente no ambiente do worker;
+- `voice.generate` usa `reconcile_before_retry`, chave lógica determinística e nunca recebe texto arbitrário ou headline no Job;
+- raw MP3 preservado por criação exclusiva e aceito somente com contagem de frames Xing/Info/VBRI verificável; WAV PCM 24-bit mono 48 kHz separado, processado com FFmpeg e medido para duração, LUFS, true peak e silêncios;
+- transcript prefere alignment ElevenLabs e cai para faster-whisper small.en CPU INT8; QC compara tokens e detecta headline falada;
+- CLI JSON `voice generate/get/list/approve/reject/resolve-no-artifact`, com aprovação humana obrigatória e flag explícita para ação paga;
+- o request pago exige `budget.limitCents > 0`, `budget.currency` autoritativa em três letras maiúsculas, `--approve-paid-request`, operador explícito e `--approved-budget-cents` não superior ao limite da Campaign; o evento append-only registra operador, timestamp, teto aprovado, limite e moeda;
 - testes unitários/smoke;
 - faster-whisper small.en local;
 - FFmpeg/ffprobe;
@@ -620,7 +628,7 @@ Configuração operacional da Campaign Foundation e da Persistent Job Orchestrat
 - cancelamento de job running é rejeitado; este Goal não simula interrupção arbitrária de operação ativa;
 - completion/renewal exigem worker, attempt number e lease ainda válido; attempt number funciona como fencing token;
 - recovery registra `job.recovered` e finaliza a tentativa interrompida antes de retry, bloqueio por safety ou falha terminal;
-- próximo milestone: `Goal 3 — Voice Master`.
+- próximo milestone: `Goal 4 -- Google Flow Campaign Integration`.
 
 O README antigo descreve a pipeline principalmente como pós-produção de um MP4 do HeyGen. O novo escopo amplia a aplicação para geração em massa end-to-end. A implementação deve preservar compatibilidade com ingest/render existentes sempre que possível.
 

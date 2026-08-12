@@ -39,7 +39,7 @@ def test_goal_one_database_upgrades_to_goal_two_without_rewriting_goal_one(tmp_p
     assert {"jobs", "job_attempts", "job_events"}.issubset(inspect(engine).get_table_names())
     with engine.connect() as connection:
         assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == (
-            GOAL_2_REVISION
+            "0003_voice_master"
         )
         assert connection.execute(text("PRAGMA journal_mode")).scalar_one().casefold() == "wal"
     engine.dispose()
@@ -79,7 +79,9 @@ def test_fresh_head_has_job_constraints_foreign_keys_and_no_blob_columns(tmp_pat
             "browser_profile",
         }.intersection(column["name"] for column in columns)
 
-    job_foreign_keys = {item["constrained_columns"][0]: item for item in inspector.get_foreign_keys("jobs")}
+    job_foreign_keys = {
+        item["constrained_columns"][0]: item for item in inspector.get_foreign_keys("jobs")
+    }
     assert job_foreign_keys["campaign_id"]["referred_table"] == "campaigns"
     assert job_foreign_keys["scene_variant_id"]["referred_table"] == "scene_variants"
     assert job_foreign_keys["campaign_id"]["options"].get("ondelete") == "RESTRICT"
@@ -118,7 +120,7 @@ def test_finished_attempts_and_events_are_immutable_audit_records(tmp_path: Path
         connection.execute(
             text(
                 "INSERT INTO job_events (id, job_id, event_type, timestamp, metadata_json) "
-                "VALUES ('event-1', 'job-1', 'job.created', :now, '{}')"
+                "VALUES ('00000000-0000-4000-8000-000000000001', 'job-1', 'job.created', :now, '{}')"
             ),
             {"now": now},
         )
@@ -131,10 +133,12 @@ def test_finished_attempts_and_events_are_immutable_audit_records(tmp_path: Path
             connection.execute(text("DELETE FROM job_attempts WHERE id='attempt-1'"))
     with pytest.raises(DBAPIError, match="job event history is immutable"):
         with engine.begin() as connection:
-            connection.execute(text("UPDATE job_events SET event_type='job.failed' WHERE id='event-1'"))
+            connection.execute(
+                text("UPDATE job_events SET event_type='job.failed' WHERE id='00000000-0000-4000-8000-000000000001'")
+            )
     with pytest.raises(DBAPIError, match="job event history is immutable"):
         with engine.begin() as connection:
-            connection.execute(text("DELETE FROM job_events WHERE id='event-1'"))
+            connection.execute(text("DELETE FROM job_events WHERE id='00000000-0000-4000-8000-000000000001'"))
     with pytest.raises(DBAPIError, match="job attempt history is immutable"):
         with engine.begin() as connection:
             connection.execute(
@@ -152,7 +156,7 @@ def test_finished_attempts_and_events_are_immutable_audit_records(tmp_path: Path
                 text(
                     "INSERT OR REPLACE INTO job_events "
                     "(id, job_id, event_type, timestamp, metadata_json) "
-                    "VALUES ('event-1', 'job-1', 'job.failed', :now, '{}')"
+                    "VALUES ('00000000-0000-4000-8000-000000000001', 'job-1', 'job.failed', :now, '{}')"
                 ),
                 {"now": now},
             )
@@ -160,9 +164,12 @@ def test_finished_attempts_and_events_are_immutable_audit_records(tmp_path: Path
         assert connection.execute(
             text("SELECT worker_id, status FROM job_attempts WHERE id='attempt-1'")
         ).one() == ("worker-1", "completed")
-        assert connection.execute(
-            text("SELECT event_type FROM job_events WHERE id='event-1'")
-        ).scalar_one() == "job.created"
+        assert (
+            connection.execute(
+                text("SELECT event_type FROM job_events WHERE id='00000000-0000-4000-8000-000000000001'")
+            ).scalar_one()
+            == "job.created"
+        )
     engine.dispose()
 
 

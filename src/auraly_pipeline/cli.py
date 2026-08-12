@@ -40,6 +40,12 @@ from auraly_pipeline.jobs.state_machine import JobStatus
 from auraly_pipeline.knowledge import default_knowledge_root, knowledge_status, search_knowledge
 from auraly_pipeline.models import EditManifest
 from auraly_pipeline.schema import export_schema
+from auraly_pipeline.voices.domain import VoiceGenerateRequest, VoiceMasterStatus
+from auraly_pipeline.voices.service import (
+    VoiceMasterError,
+    VoiceMasterNotFoundError,
+    VoiceMasterService,
+)
 
 
 app = typer.Typer(
@@ -47,10 +53,18 @@ app = typer.Typer(
     help="Deterministic local post-production pipeline for Auraly Reels.",
     no_args_is_help=True,
 )
-campaign_app = typer.Typer(help="Persist and inspect local campaign metadata.", no_args_is_help=True)
+campaign_app = typer.Typer(
+    help="Persist and inspect local campaign metadata.", no_args_is_help=True
+)
 app.add_typer(campaign_app, name="campaign")
-job_app = typer.Typer(help="Persist, execute, and inspect deterministic local jobs.", no_args_is_help=True)
+job_app = typer.Typer(
+    help="Persist, execute, and inspect deterministic local jobs.", no_args_is_help=True
+)
 app.add_typer(job_app, name="job")
+voice_app = typer.Typer(
+    help="Generate, inspect, and review campaign Voice Masters.", no_args_is_help=True
+)
+app.add_typer(voice_app, name="voice")
 
 
 @app.command("ingest")
@@ -102,7 +116,9 @@ def export_schema_command(
 
 @app.command("knowledge-status")
 def knowledge_status_command(
-    root: Annotated[Path, typer.Option("--root", help="Validated ads knowledge root")] = default_knowledge_root(),
+    root: Annotated[
+        Path, typer.Option("--root", help="Validated ads knowledge root")
+    ] = default_knowledge_root(),
 ) -> None:
     """Report whether the validated-ads reference library is ready."""
     status = knowledge_status(root)
@@ -113,7 +129,7 @@ def knowledge_status_command(
     typer.echo(f"Documents: {status['documents']}")
     typer.echo(f"Videos reviewed: {status['videosReviewed']}")
     typer.echo(f"Transcripts completed: {status['transcriptsCompleted']}")
-    failures = status['inventoryFailures'] + status['reviewFailures'] + status['transcriptFailures']
+    failures = status["inventoryFailures"] + status["reviewFailures"] + status["transcriptFailures"]
     typer.echo(f"Failures: {failures}")
     if not status["ready"]:
         raise typer.Exit(code=1)
@@ -122,7 +138,9 @@ def knowledge_status_command(
 @app.command("knowledge-search")
 def knowledge_search_command(
     query: Annotated[str, typer.Argument(help="Terms such as angle, hook, CTA, or filename")],
-    root: Annotated[Path, typer.Option("--root", help="Validated ads knowledge root")] = default_knowledge_root(),
+    root: Annotated[
+        Path, typer.Option("--root", help="Validated ads knowledge root")
+    ] = default_knowledge_root(),
     collection: Annotated[str | None, typer.Option("--collection")] = None,
     limit: Annotated[int, typer.Option("--limit", min=1, max=100)] = 10,
 ) -> None:
@@ -179,7 +197,9 @@ def _campaign_failure(code: str, message: str) -> None:
 @campaign_app.command("create")
 def campaign_create_command(
     input_path: Annotated[Path, typer.Option("--input", help="Campaign JSON request")],
-    database: Annotated[Path, typer.Option("--database", help="Local SQLite database")] = default_database_path(),
+    database: Annotated[
+        Path, typer.Option("--database", help="Local SQLite database")
+    ] = default_database_path(),
 ) -> None:
     """Create one campaign without overwriting an existing campaign ID."""
     service: CampaignService | None = None
@@ -211,7 +231,9 @@ def campaign_create_command(
 @campaign_app.command("get")
 def campaign_get_command(
     campaign_id: Annotated[str, typer.Argument(help="Campaign slug")],
-    database: Annotated[Path, typer.Option("--database", help="Local SQLite database")] = default_database_path(),
+    database: Annotated[
+        Path, typer.Option("--database", help="Local SQLite database")
+    ] = default_database_path(),
 ) -> None:
     """Retrieve a campaign and all CopyMaster versions and SceneVariants."""
     service: CampaignService | None = None
@@ -235,7 +257,9 @@ def campaign_get_command(
 
 @campaign_app.command("list")
 def campaign_list_command(
-    database: Annotated[Path, typer.Option("--database", help="Local SQLite database")] = default_database_path(),
+    database: Annotated[
+        Path, typer.Option("--database", help="Local SQLite database")
+    ] = default_database_path(),
 ) -> None:
     """List campaigns in deterministic creation order."""
     service: CampaignService | None = None
@@ -254,6 +278,198 @@ def campaign_list_command(
 def _job_failure(code: str, message: str) -> None:
     _json_echo({"success": False, "error": {"code": code, "message": message}})
     raise typer.Exit(code=1)
+
+
+def _voice_failure(code: str, message: str) -> None:
+    _json_echo({"success": False, "error": {"code": code, "message": message}})
+    raise typer.Exit(code=1)
+
+
+def _voice_service(database: Path) -> VoiceMasterService:
+    return VoiceMasterService.for_database(database)
+
+
+@voice_app.command("generate")
+def voice_generate_command(
+    campaign_id: Annotated[str, typer.Argument(help="Campaign ID")],
+    voice_id: Annotated[str, typer.Option("--voice-id")],
+    model_id: Annotated[str, typer.Option("--model-id")],
+    copy_master_version: Annotated[int | None, typer.Option("--copy-master-version", min=1)] = None,
+    output_format: Annotated[
+        Literal["mp3_44100_128"], typer.Option("--output-format")
+    ] = "mp3_44100_128",
+    approve_paid_request: Annotated[
+        bool,
+        typer.Option(
+            "--approve-paid-request", help="Authorize this potentially billable TTS request"
+        ),
+    ] = False,
+    paid_request_approved_by: Annotated[
+        str | None,
+        typer.Option("--paid-request-approved-by", help="Operator authorizing paid dispatch"),
+    ] = None,
+    transcript_match_threshold: Annotated[
+        float,
+        typer.Option("--transcript-match-threshold", min=0.9, max=1.0),
+    ] = 0.97,
+    approved_budget_cents: Annotated[
+        int | None,
+        typer.Option(
+            "--approved-budget-cents", min=1, help="Maximum approved spend for this request"
+        ),
+    ] = None,
+    database: Annotated[Path, typer.Option("--database")] = default_database_path(),
+) -> None:
+    service: VoiceMasterService | None = None
+    try:
+        request = VoiceGenerateRequest(
+            campaign_id=campaign_id,
+            copy_master_version=copy_master_version,
+            voice_id=voice_id,
+            model_id=model_id,
+            output_format=output_format,
+            paid_request_approved=approve_paid_request,
+            paid_request_approved_by=paid_request_approved_by,
+            transcript_match_threshold=transcript_match_threshold,
+            approved_budget_cents=approved_budget_cents,
+        )
+        service = _voice_service(database)
+        submission = service.generate(request)
+    except (ValueError, ValidationError):
+        _voice_failure("voice_invalid", "Voice Master input is invalid.")
+    except VoiceMasterError as exc:
+        _voice_failure("voice_operation_failed", exc.public_message)
+    except Exception:
+        _voice_failure("voice_operation_failed", "The Voice Master operation failed safely.")
+    finally:
+        if service is not None:
+            service.close()
+    _json_echo(
+        {
+            "success": True,
+            "voiceMaster": submission.voice_master.model_dump(by_alias=True, mode="json"),
+            "job": submission.job.model_dump(by_alias=True, mode="json"),
+        }
+    )
+
+
+@voice_app.command("get")
+def voice_get_command(
+    voice_master_id: Annotated[str, typer.Argument()],
+    database: Annotated[Path, typer.Option("--database")] = default_database_path(),
+) -> None:
+    service: VoiceMasterService | None = None
+    try:
+        service = _voice_service(database)
+        voice = service.get(voice_master_id)
+    except VoiceMasterNotFoundError as exc:
+        _voice_failure("voice_not_found", exc.public_message)
+    except Exception:
+        _voice_failure("voice_operation_failed", "The Voice Master operation failed safely.")
+    finally:
+        if service is not None:
+            service.close()
+    _json_echo({"success": True, "voiceMaster": voice.model_dump(by_alias=True, mode="json")})
+
+
+@voice_app.command("list")
+def voice_list_command(
+    campaign_id: Annotated[str | None, typer.Option("--campaign-id")] = None,
+    status: Annotated[VoiceMasterStatus | None, typer.Option("--status")] = None,
+    database: Annotated[Path, typer.Option("--database")] = default_database_path(),
+) -> None:
+    service: VoiceMasterService | None = None
+    try:
+        service = _voice_service(database)
+        voices = service.list(campaign_id=campaign_id, status=status)
+    except Exception:
+        _voice_failure("voice_operation_failed", "The Voice Master operation failed safely.")
+    finally:
+        if service is not None:
+            service.close()
+    serialized = [voice.model_dump(by_alias=True, mode="json") for voice in voices]
+    _json_echo({"success": True, "count": len(serialized), "voiceMasters": serialized})
+
+
+@voice_app.command("approve")
+def voice_approve_command(
+    voice_master_id: Annotated[str, typer.Argument()],
+    approved_by: Annotated[str, typer.Option("--approved-by")],
+    database: Annotated[Path, typer.Option("--database")] = default_database_path(),
+) -> None:
+    service: VoiceMasterService | None = None
+    try:
+        service = _voice_service(database)
+        voice = service.approve(voice_master_id, approved_by=approved_by)
+    except VoiceMasterNotFoundError as exc:
+        _voice_failure("voice_not_found", exc.public_message)
+    except VoiceMasterError as exc:
+        _voice_failure("voice_review_failed", exc.public_message)
+    except Exception:
+        _voice_failure("voice_operation_failed", "The Voice Master operation failed safely.")
+    finally:
+        if service is not None:
+            service.close()
+    _json_echo({"success": True, "voiceMaster": voice.model_dump(by_alias=True, mode="json")})
+
+
+@voice_app.command("reject")
+def voice_reject_command(
+    voice_master_id: Annotated[str, typer.Argument()],
+    rejected_by: Annotated[str, typer.Option("--rejected-by")],
+    reason: Annotated[str, typer.Option("--reason")],
+    database: Annotated[Path, typer.Option("--database")] = default_database_path(),
+) -> None:
+    service: VoiceMasterService | None = None
+    try:
+        service = _voice_service(database)
+        voice = service.reject(
+            voice_master_id,
+            rejected_by=rejected_by,
+            reason=reason,
+        )
+    except VoiceMasterNotFoundError as exc:
+        _voice_failure("voice_not_found", exc.public_message)
+    except (VoiceMasterError, ValueError) as exc:
+        message = (
+            exc.public_message
+            if isinstance(exc, VoiceMasterError)
+            else "Voice review input is invalid."
+        )
+        _voice_failure("voice_review_failed", message)
+    except Exception:
+        _voice_failure("voice_operation_failed", "The Voice Master operation failed safely.")
+    finally:
+        if service is not None:
+            service.close()
+    _json_echo({"success": True, "voiceMaster": voice.model_dump(by_alias=True, mode="json")})
+
+
+@voice_app.command("resolve-no-artifact")
+def voice_resolve_no_artifact_command(
+    voice_master_id: Annotated[str, typer.Argument()],
+    resolved_by: Annotated[str, typer.Option("--resolved-by")],
+    reason: Annotated[str, typer.Option("--reason")],
+    database: Annotated[Path, typer.Option("--database")] = default_database_path(),
+) -> None:
+    service: VoiceMasterService | None = None
+    try:
+        service = _voice_service(database)
+        voice = service.resolve_ambiguous_without_artifact(
+            voice_master_id,
+            resolved_by=resolved_by,
+            reason=reason,
+        )
+    except VoiceMasterError as exc:
+        _voice_failure("voice_reconciliation_failed", exc.public_message)
+    except (ValueError, ValidationError):
+        _voice_failure("voice_reconciliation_failed", "Voice reconciliation input is invalid.")
+    except Exception:
+        _voice_failure("voice_operation_failed", "The Voice Master operation failed safely.")
+    finally:
+        if service is not None:
+            service.close()
+    _json_echo({"success": True, "voiceMaster": voice.model_dump(by_alias=True, mode="json")})
 
 
 def _serialized_job(job: Job) -> dict[str, object]:
@@ -454,7 +670,9 @@ def image_prepare_command(
     reference_image: Annotated[str, typer.Option("--reference-image")],
     prompt_file: Annotated[Path, typer.Option("--prompt-file")],
     output_filename: Annotated[str | None, typer.Option("--output-filename")] = None,
-    timeout_seconds: Annotated[int, typer.Option("--timeout-seconds", min=1)] = DEFAULT_TIMEOUT_SECONDS,
+    timeout_seconds: Annotated[
+        int, typer.Option("--timeout-seconds", min=1)
+    ] = DEFAULT_TIMEOUT_SECONDS,
     retry_count: Annotated[int, typer.Option("--retry-count", min=0, max=5)] = DEFAULT_RETRY_COUNT,
     downloads_dir: Annotated[Path | None, typer.Option("--downloads-dir")] = None,
     project_root: Annotated[Path | None, typer.Option("--project-root")] = None,

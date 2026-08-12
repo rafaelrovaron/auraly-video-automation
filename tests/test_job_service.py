@@ -154,6 +154,50 @@ def test_service_wraps_unexpected_integrity_failure_without_database_details(
     service.close()
 
 
+def test_malformed_event_id_is_rejected_by_storage(tmp_path: Path) -> None:
+    database_path = tmp_path / "event-uuid.db"
+    service = JobService.for_database(database_path, clock=lambda: NOW)
+    submitted = service.submit_job(_local_job("fake.success", "event-uuid-storage"))
+    engine = create_sqlite_engine(database_path)
+    with pytest.raises(IntegrityError, match="valid UUID"):
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO job_events (id, job_id, event_type, timestamp, metadata_json) "
+                    "VALUES ('not-a-uuid', :job_id, 'job.recovered', :now, '{}')"
+                ),
+                {"job_id": submitted.job_id, "now": NOW},
+            )
+    engine.dispose()
+    service.close()
+
+
+def test_claim_rejects_legacy_malformed_event_before_persisting_running(tmp_path: Path) -> None:
+    database_path = tmp_path / "legacy-event.db"
+    service = JobService.for_database(database_path, clock=lambda: NOW)
+    submitted = service.submit_job(_local_job("fake.success", "legacy-event-boundary"))
+    engine = create_sqlite_engine(database_path)
+    with engine.begin() as connection:
+        connection.execute(text("DROP TRIGGER enforce_job_event_uuid_insert"))
+        connection.execute(
+            text(
+                "INSERT INTO job_events (id, job_id, event_type, timestamp, metadata_json) "
+                "VALUES ('not-a-uuid', :job_id, 'job.recovered', :now, '{}')"
+            ),
+            {"job_id": submitted.job_id, "now": NOW},
+        )
+    with pytest.raises(JobPersistenceError):
+        service.claim_next_job("worker-safe-boundary")
+    with engine.connect() as connection:
+        persisted = connection.execute(
+            text("SELECT status, attempt_count FROM jobs WHERE id=:job_id"),
+            {"job_id": submitted.job_id},
+        ).one()
+    assert persisted == ("queued", 0)
+    engine.dispose()
+    service.close()
+
+
 def test_service_refuses_to_emit_unsafe_metadata_from_tampered_database(tmp_path: Path) -> None:
     database_path = tmp_path / "auraly.db"
     service = JobService.for_database(database_path, clock=lambda: NOW)
@@ -220,6 +264,7 @@ def test_service_refuses_to_emit_tampered_invalid_event_id(
     submitted = service.submit_job(_local_job("fake.success", "tampered-event-id"))
     engine = create_sqlite_engine(database_path)
     with engine.begin() as connection:
+        connection.execute(text("DROP TRIGGER enforce_job_event_uuid_insert"))
         connection.execute(
             text(
                 "INSERT INTO job_events (id, job_id, event_type, timestamp, metadata_json) "
@@ -556,9 +601,7 @@ def test_worker_blocks_persisted_job_when_handler_disappears_after_restart(
 def test_max_attempts_and_permanent_failure_are_terminal(tmp_path: Path) -> None:
     clock = MutableClock()
     service = JobService.for_database(tmp_path / "auraly.db", clock=clock)
-    retry_job = service.submit_job(
-        _local_job("fake.retry-always", "max-attempts", max_attempts=2)
-    )
+    retry_job = service.submit_job(_local_job("fake.retry-always", "max-attempts", max_attempts=2))
     service.worker_once("worker-1")
     clock.advance(30)
     exhausted = service.worker_once("worker-1")
@@ -701,9 +744,7 @@ def test_crash_handler_leaves_durable_running_claim_for_lease_recovery(tmp_path:
 def test_stale_recovery_respects_max_attempts_and_becomes_terminal(tmp_path: Path) -> None:
     clock = MutableClock()
     service = JobService.for_database(tmp_path / "auraly.db", clock=clock)
-    submitted = service.submit_job(
-        _local_job("fake.success", "stale-max-attempt", max_attempts=1)
-    )
+    submitted = service.submit_job(_local_job("fake.success", "stale-max-attempt", max_attempts=1))
     service.claim_next_job("crashed-worker", lease_seconds=10)
     clock.advance(11)
 

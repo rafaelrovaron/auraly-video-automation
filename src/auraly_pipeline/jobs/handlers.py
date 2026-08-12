@@ -14,6 +14,7 @@ class JobExecutionContext:
     job_type: str
     input: dict[str, JsonValue]
     attempt_number: int
+    campaign_id: str = ""
 
 
 class JobHandler(Protocol):

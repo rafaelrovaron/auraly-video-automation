@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import datetime, timedelta
 from uuid import uuid4
 
@@ -32,7 +33,9 @@ class JobRepository:
     def get_by_id(self, job_id: str) -> JobRow | None:
         with self._session_factory() as session:
             return session.scalar(
-                select(JobRow).where(JobRow.id == job_id).options(selectinload(JobRow.attempts), selectinload(JobRow.events))
+                select(JobRow)
+                .where(JobRow.id == job_id)
+                .options(selectinload(JobRow.attempts), selectinload(JobRow.events))
             )
 
     def get_by_idempotency_key(self, idempotency_key: str) -> JobRow | None:
@@ -45,7 +48,10 @@ class JobRepository:
 
     def campaign_exists(self, campaign_id: str) -> bool:
         with self._session_factory() as session:
-            return session.scalar(select(CampaignRow.id).where(CampaignRow.id == campaign_id)) is not None
+            return (
+                session.scalar(select(CampaignRow.id).where(CampaignRow.id == campaign_id))
+                is not None
+            )
 
     def scene_matches_campaign(self, scene_variant_id: str, campaign_id: str) -> bool:
         with self._session_factory() as session:
@@ -59,7 +65,13 @@ class JobRepository:
                 is not None
             )
 
-    def create(self, request: JobSubmit, now: datetime) -> JobRow:
+    def create(
+        self,
+        request: JobSubmit,
+        now: datetime,
+        *,
+        before_commit: Callable[[Session, JobRow], None] | None = None,
+    ) -> JobRow:
         with self._session_factory() as session:
             row = JobRow(
                 id=str(uuid4()),
@@ -104,6 +116,8 @@ class JobRepository:
                 ]
             )
             session.add(row)
+            if before_commit is not None:
+                before_commit(session, row)
             try:
                 session.commit()
             except IntegrityError as exc:
@@ -113,6 +127,22 @@ class JobRepository:
                 raise
             return self._reload(session, row.id)
 
+    def apply(
+        self,
+        job_id: str,
+        *,
+        mutate: Callable[[Session, JobRow], None],
+    ) -> JobRow:
+        with self._session_factory() as session:
+            self._begin_immediate(session)
+            row = session.get(JobRow, job_id)
+            if row is None:
+                session.rollback()
+                raise JobClaimConflict
+            mutate(session, row)
+            session.commit()
+            return self._reload(session, job_id)
+
     def list_jobs(
         self,
         *,
@@ -120,7 +150,9 @@ class JobRepository:
         campaign_id: str | None = None,
         scene_variant_id: str | None = None,
     ) -> list[JobRow]:
-        statement: Select[tuple[JobRow]] = select(JobRow).options(selectinload(JobRow.attempts), selectinload(JobRow.events))
+        statement: Select[tuple[JobRow]] = select(JobRow).options(
+            selectinload(JobRow.attempts), selectinload(JobRow.events)
+        )
         if status is not None:
             statement = statement.where(JobRow.status == status)
         if campaign_id is not None:
@@ -131,7 +163,14 @@ class JobRepository:
         with self._session_factory() as session:
             return list(session.scalars(statement).all())
 
-    def claim_next(self, worker_id: str, now: datetime, lease_seconds: int) -> JobRow | None:
+    def claim_next(
+        self,
+        worker_id: str,
+        now: datetime,
+        lease_seconds: int,
+        *,
+        before_commit: Callable[[JobRow], None] | None = None,
+    ) -> JobRow | None:
         lease_expires_at = now + timedelta(seconds=lease_seconds)
         with self._session_factory() as session:
             candidate = (
@@ -199,8 +238,12 @@ class JobRepository:
                     ),
                 ]
             )
+            session.flush()
+            persisted = self._reload(session, row.id)
+            if before_commit is not None:
+                before_commit(persisted)
             session.commit()
-            return self._reload(session, row.id)
+            return persisted
 
     def finish_claim(
         self,
@@ -267,13 +310,10 @@ class JobRepository:
                 event_type = "job.retry_scheduled"
                 event_metadata["nextRetryAt"] = row.next_retry_at.isoformat()
             elif result.outcome == "blocked" or (
-                result.outcome == "retryable_failure"
-                and row.attempt_count < row.max_attempts
+                result.outcome == "retryable_failure" and row.attempt_count < row.max_attempts
             ):
                 target = JobStatus.BLOCKED
-                attempt.status = (
-                    "blocked" if result.outcome == "blocked" else "retryable_failure"
-                )
+                attempt.status = "blocked" if result.outcome == "blocked" else "retryable_failure"
                 attempt.error_code = result.error_code
                 attempt.error_message = result.error_message
                 row.last_error_code = result.error_code
@@ -403,6 +443,44 @@ class JobRepository:
             session.commit()
             return self._reload(session, row.id)
 
+    def resume_reconciled(self, job_id: str, now: datetime) -> JobRow | None:
+        """Resume a blocked reconcile-before-retry job after domain-level reconciliation."""
+        with self._session_factory() as session:
+            self._begin_immediate(session)
+            row = session.get(JobRow, job_id)
+            if row is None:
+                return None
+            if (
+                row.status != JobStatus.BLOCKED.value
+                or row.retry_safety != RetrySafety.RECONCILE_BEFORE_RETRY.value
+                or row.attempt_count >= row.max_attempts
+            ):
+                raise InvalidJobTransition("invalid reconciled job transition")
+            row.status = JobStatus.QUEUED.value
+            row.next_retry_at = None
+            row.queued_at = now
+            row.updated_at = now
+            session.add_all(
+                [
+                    JobEventRow(
+                        id=str(uuid4()),
+                        job_id=row.id,
+                        event_type="job.reconciled",
+                        timestamp=now,
+                        metadata_json={"previousStatus": "blocked"},
+                    ),
+                    JobEventRow(
+                        id=str(uuid4()),
+                        job_id=row.id,
+                        event_type="job.queued",
+                        timestamp=now,
+                        metadata_json={"reason": "provider_reconciled_no_dispatch"},
+                    ),
+                ]
+            )
+            session.commit()
+            return self._reload(session, row.id)
+
     def recover_stale(self, now: datetime) -> list[JobRow]:
         recovered_ids: list[str] = []
         with self._session_factory() as session:
@@ -419,15 +497,9 @@ class JobRepository:
                 ).all()
             )
             for row in rows:
-                running_attempts = [
-                    item for item in row.attempts if item.status == "running"
-                ]
+                running_attempts = [item for item in row.attempts if item.status == "running"]
                 attempt = next(
-                    (
-                        item
-                        for item in running_attempts
-                        if item.attempt_number == row.attempt_count
-                    ),
+                    (item for item in running_attempts if item.attempt_number == row.attempt_count),
                     None,
                 )
                 if attempt is None or len(running_attempts) != 1:
@@ -624,7 +696,9 @@ class JobRepository:
     def _reload(self, session: Session, job_id: str) -> JobRow:
         session.expire_all()
         row = session.scalar(
-            select(JobRow).where(JobRow.id == job_id).options(selectinload(JobRow.attempts), selectinload(JobRow.events))
+            select(JobRow)
+            .where(JobRow.id == job_id)
+            .options(selectinload(JobRow.attempts), selectinload(JobRow.events))
         )
         if row is None:  # pragma: no cover - guarded by transaction semantics
             raise RuntimeError("persisted job disappeared")

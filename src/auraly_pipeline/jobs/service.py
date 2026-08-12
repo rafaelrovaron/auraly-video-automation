@@ -4,6 +4,7 @@ from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 
+from pydantic import ValidationError
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
@@ -97,12 +98,31 @@ class JobService:
         migrate_database(database_path)
         engine = create_sqlite_engine(database_path)
         session_factory = sessionmaker(engine, expire_on_commit=False, class_=Session)
-        return cls(engine, JobRepository(session_factory), clock=clock, handlers=handlers)
+        resolved_handlers = handlers
+        if resolved_handlers is None:
+            from auraly_pipeline.voices.handler import VoiceGenerateHandler
+
+            resolved_handlers = default_fake_handlers()
+            resolved_handlers["voice.generate"] = VoiceGenerateHandler(
+                session_factory,
+                work_root=database_path.resolve().parent / "work",
+            )
+        return cls(
+            engine,
+            JobRepository(session_factory),
+            clock=clock,
+            handlers=resolved_handlers,
+        )
 
     def close(self) -> None:
         self._engine.dispose()
 
-    def submit_job(self, request: JobSubmit) -> Job:
+    def submit_job(
+        self,
+        request: JobSubmit,
+        *,
+        before_commit: Callable[[Session, JobRow], None] | None = None,
+    ) -> Job:
         handler = self._handlers.get(request.job_type)
         if handler is None:
             raise JobHandlerNotFoundError
@@ -111,9 +131,20 @@ class JobService:
         self._validate_references(request)
         existing = self._repository.get_by_idempotency_key(request.idempotency_key)
         if existing is not None:
+            if before_commit is not None:
+                raise JobPersistenceError
             return self._reuse_or_conflict(existing, request)
         try:
-            row = self._repository.create(request, self._as_utc(self._clock()))
+            timestamp = self._as_utc(self._clock())
+            row = (
+                self._repository.create(request, timestamp)
+                if before_commit is None
+                else self._repository.create(
+                    request,
+                    timestamp,
+                    before_commit=before_commit,
+                )
+            )
         except DuplicateIdempotencyRace:
             existing = self._repository.get_by_idempotency_key(request.idempotency_key)
             if existing is None:  # pragma: no cover - defensive transaction boundary
@@ -155,11 +186,15 @@ class JobService:
         now = self._as_utc(self._clock())
         self._repository.recover_stale(now)
         self._repository.activate_due_retries(now)
-        row = self._repository.claim_next(
-            worker_id,
-            now,
-            lease_seconds,
-        )
+        try:
+            row = self._repository.claim_next(
+                worker_id,
+                now,
+                lease_seconds,
+                before_commit=self._validate_persisted_row,
+            )
+        except (ValidationError, ValueError) as exc:
+            raise JobPersistenceError from exc
         return None if row is None else self._to_domain(row)
 
     def worker_once(
@@ -190,6 +225,7 @@ class JobService:
                     JobExecutionContext(
                         job_id=claimed.job_id,
                         job_type=claimed.job_type,
+                        campaign_id=claimed.campaign_id or "",
                         input=claimed.input,
                         attempt_number=claimed.attempt_count,
                     )
@@ -228,6 +264,15 @@ class JobService:
     def resume_job(self, job_id: str) -> Job:
         try:
             row = self._repository.resume(job_id, self._as_utc(self._clock()))
+        except InvalidJobTransition as exc:
+            raise JobTransitionError from exc
+        if row is None:
+            raise JobNotFoundError
+        return self._to_domain(row)
+
+    def resume_reconciled_job(self, job_id: str) -> Job:
+        try:
+            row = self._repository.resume_reconciled(job_id, self._as_utc(self._clock()))
         except InvalidJobTransition as exc:
             raise JobTransitionError from exc
         if row is None:
@@ -286,6 +331,10 @@ class JobService:
         if row.request_fingerprint != request.request_fingerprint:
             raise JobIdempotencyConflictError
         return self._to_domain(row)
+
+    @classmethod
+    def _validate_persisted_row(cls, row: JobRow) -> None:
+        cls._to_domain(row)
 
     @classmethod
     def _to_domain(cls, row: JobRow) -> Job:
