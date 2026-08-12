@@ -9,11 +9,12 @@ from pathlib import Path
 from typing import Literal, cast
 from uuid import uuid4
 
-from sqlalchemy import Engine
+from sqlalchemy import Engine, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 from auraly_pipeline.campaigns.persistence import create_sqlite_engine, migrate_database
+from auraly_pipeline.config_paths import configured_work_root
 from auraly_pipeline.jobs.db_models import JobEventRow, JobRow
 from auraly_pipeline.jobs.domain import Job, JobSubmit, RetrySafety
 from auraly_pipeline.jobs.handlers import default_fake_handlers
@@ -92,7 +93,7 @@ class VoiceMasterService:
     ) -> VoiceMasterService:
         migrate_database(database_path)
         engine = create_sqlite_engine(database_path)
-        root = work_root or database_path.resolve().parent / "work"
+        root = configured_work_root(work_root)
         return cls(engine, work_root=root, provider=provider, transcriber=transcriber)
 
     def close(self) -> None:
@@ -137,8 +138,9 @@ class VoiceMasterService:
                 or approved_budget > campaign_budget_limit_cents
             ):
                 raise VoiceMasterConflictError
-            voice.job_id = job.id
-            voice.updated_at = now
+            if voice.job_id is None:
+                voice.job_id = job.id
+                voice.updated_at = now
             existing_event = (
                 session.query(JobEventRow)
                 .filter_by(job_id=job.id, event_type="job.paid_authorized")
@@ -270,6 +272,42 @@ class VoiceMasterService:
                         voice_master=self._to_domain(existing),
                         job=job,
                     )
+            session.rollback()
+            session.execute(text("BEGIN IMMEDIATE"))
+            repository = VoiceMasterRepository(session)
+            if not force_new:
+                existing = repository.by_logical_key(base_logical_key)
+                if existing is not None:
+                    existing_id = existing.id
+                    existing_job_id = existing.job_id
+                    session.rollback()
+                    if existing_job_id is None:
+                        job = self._jobs.submit_job(
+                            JobSubmit(
+                                job_type="voice.generate",
+                                campaign_id=request.campaign_id,
+                                idempotency_key=f"voice.generate:{base_logical_key}",
+                                input={"voiceMasterId": existing_id},
+                                max_attempts=2,
+                                retry_safety=RetrySafety.RECONCILE_BEFORE_RETRY,
+                            ),
+                            before_commit=self._paid_authorization_mutation(
+                                voice_master_id=existing_id,
+                                campaign_budget_limit_cents=budget_limit,
+                                campaign_currency=budget_currency,
+                                now=now,
+                            ),
+                        )
+                    else:
+                        job = self._ensure_paid_authorization(
+                            voice_master_id=existing_id,
+                            job_id=existing_job_id,
+                            campaign_budget_limit_cents=budget_limit,
+                            campaign_currency=budget_currency,
+                        )
+                    return VoiceGenerationSubmission(self.get(existing_id), job)
+            if repository.approved_for_campaign(campaign.id) is not None:
+                raise VoiceMasterConflictError
             if force_new:
                 existing_rows = repository.list(campaign_id=campaign.id)
                 if existing_rows and existing_rows[-1].status not in {"rejected", "failed"}:
@@ -331,11 +369,30 @@ class VoiceMasterService:
                 created_at=now,
                 updated_at=now,
             )
+            job_request = JobSubmit(
+                job_type="voice.generate",
+                campaign_id=request.campaign_id,
+                idempotency_key=f"voice.generate:{logical_key}",
+                input={"voiceMasterId": voice_master_id},
+                max_attempts=2,
+                retry_safety=RetrySafety.RECONCILE_BEFORE_RETRY,
+            )
             try:
                 repository.add(row)
-                repository.commit()
+                job_row = self._jobs._repository.create_in_session(
+                    session,
+                    job_request,
+                    now,
+                    before_commit=self._paid_authorization_mutation(
+                        voice_master_id=voice_master_id,
+                        campaign_budget_limit_cents=budget_limit,
+                        campaign_currency=budget_currency,
+                        now=now,
+                    ),
+                )
+                session.commit()
             except IntegrityError as exc:
-                repository.rollback()
+                session.rollback()
                 if not force_new:
                     existing = repository.by_logical_key(logical_key)
                     if existing is not None and existing.job_id is not None:
@@ -350,23 +407,10 @@ class VoiceMasterService:
                             job=job,
                         )
                 raise VoiceMasterConflictError from exc
-        job = self._jobs.submit_job(
-            JobSubmit(
-                job_type="voice.generate",
-                campaign_id=request.campaign_id,
-                idempotency_key=f"voice.generate:{logical_key}",
-                input={"voiceMasterId": voice_master_id},
-                max_attempts=2,
-                retry_safety=RetrySafety.RECONCILE_BEFORE_RETRY,
-            ),
-            before_commit=self._paid_authorization_mutation(
-                voice_master_id=voice_master_id,
-                campaign_budget_limit_cents=budget_limit,
-                campaign_currency=budget_currency,
-                now=now,
-            ),
+            job_id = job_row.id
+        return VoiceGenerationSubmission(
+            self.get(voice_master_id), self._jobs.get_job(job_id)
         )
-        return VoiceGenerationSubmission(self.get(voice_master_id), job)
 
     def worker_once(self, worker_id: str, *, lease_seconds: int = 300) -> Job | None:
         return self._jobs.worker_once(worker_id, lease_seconds=lease_seconds)
@@ -394,6 +438,7 @@ class VoiceMasterService:
         validate_safe_identifier(approved_by, "approved_by", max_length=120)
         now = datetime.now(UTC)
         with self._sessions() as session:
+            session.execute(text("BEGIN IMMEDIATE"))
             repository = VoiceMasterRepository(session)
             row = repository.get(voice_master_id)
             if row is None:
@@ -426,7 +471,10 @@ class VoiceMasterService:
                 for path, digest in artifacts
             ):
                 raise VoiceMasterReviewError
-            if repository.approved_for_campaign(row.campaign_id) is not None:
+            if (
+                repository.approved_for_campaign(row.campaign_id) is not None
+                or repository.active_other_for_campaign(row.campaign_id, row.id) is not None
+            ):
                 raise VoiceMasterConflictError
             row.status = "approved"
             row.approved_by = approved_by

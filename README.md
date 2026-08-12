@@ -80,7 +80,10 @@ O PRD amplia o escopo futuro da pipeline para campanhas com uma Copy/Voice Maste
 Defina `<AURALY_ROOT>` como a pasta raiz local do Auraly. O código usa
 `~/Documents/Auraly` por padrão; outro local pode ser definido com
 `AURALY_PROJECT_ROOT` ou `--project-root` em cada comando de geração de
-imagem. O diretório confiável de downloads usa `~/Downloads` por padrão e
+imagem. Todos os artefatos de campanha (incluindo Voice Master e preparação de
+imagem) usam `<AURALY_ROOT>/pipeline/work`; o SQLite permanece independente em
+`~/.auraly/auraly.db` por padrão. O diretório confiável de downloads usa
+`~/Downloads` por padrão e
 pode ser alterado com `AURALY_DOWNLOADS_DIR` ou com `--downloads-dir` em cada
 comando de geração de imagem. Os comandos de continuação rejeitam contextos
 que não correspondam a esses dois roots confiáveis.
@@ -146,7 +149,11 @@ or `dispatching` outcomes without a raw artifact whose digest was already persis
 until `resolve-no-artifact` records an operator-confirmed reconciliation; the same Job is then resumed
 without bypassing its attempt or fencing history. Provider MP3 is accepted only when Xing/Info/VBRI
 metadata supplies an independently checkable frame count; formats without declared frame count fail
-closed rather than treating a clean frame boundary as proof of completeness.
+closed rather than treating a clean frame boundary as proof of completeness. Uma Campaign com VoiceMaster
+já aprovada rejeita qualquer nova logical generation antes de criar VoiceMaster, Job ou autorização
+paga; criação de VoiceMaster + Job + evento pago e a decisão concorrente com approval são serializadas
+em uma única transação SQLite. Replay exato da logical key existente continua idempotente. Replacement/supersede não faz
+parte deste Goal.
 
 `ELEVENLABS_API_KEY` is loaded only by the worker from the environment. It is never accepted as CLI/job input or persisted. The official `POST /v1/text-to-speech/{voice_id}/with-timestamps` API is the only TTS path. The exact persisted `CopyMaster.spoken_text` is sent; `headline` remains visual-only.
 
@@ -184,9 +191,11 @@ uv run auraly job recover --database ~/.auraly/auraly.db
 ```
 
 `worker-once` é deliberadamente limitado: recupera leases expirados, promove retries vencidos,
-faz claim atômico de no máximo um job e executa um handler local registrado. O número da tentativa
-é o fencing token: completion e renewal exigem o mesmo worker, a mesma tentativa e um lease ainda
-válido. Os handlers fake disponíveis são `fake.success`, `fake.retry-once`, `fake.retry-always`,
+faz claim atômico de no máximo um job e executa um handler local registrado. Enquanto o handler
+está ativo, um heartbeat interno renova aproximadamente a cada terço do lease e encerra antes da
+finalização; perda de worker/attempt fencing bloqueia completion com erro sanitizado. O número da
+tentativa é o fencing token: completion e renewal exigem o mesmo worker, a mesma tentativa e um
+lease ainda válido. Os handlers fake disponíveis são `fake.success`, `fake.retry-once`, `fake.retry-always`,
 `fake.permanent-failure`, `fake.blocked` e `fake.crash`; Goal 3 também registra o handler real
 `voice.generate`, cuja única chamada externa é a API oficial da ElevenLabs e cujo dispatch exige
 autorização paga persistida.

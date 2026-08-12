@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
+from threading import Event, Thread
 
 from pydantic import ValidationError
 from sqlalchemy.engine import Engine
@@ -10,6 +11,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 from auraly_pipeline.campaigns.persistence import create_sqlite_engine, migrate_database
+from auraly_pipeline.config_paths import configured_work_root
 from auraly_pipeline.jobs.db_models import JobAttemptRow, JobEventRow, JobRow
 from auraly_pipeline.jobs.domain import (
     Job,
@@ -72,6 +74,34 @@ class JobClaimError(JobError):
     public_message = "The worker does not own the active job lease."
 
 
+class _LeaseHeartbeat:
+    def __init__(self, renew: Callable[[], None], interval_seconds: float) -> None:
+        self._renew = renew
+        self._interval_seconds = interval_seconds
+        self._stop = Event()
+        self._failed = Event()
+        self._thread = Thread(target=self._run, name="auraly-job-heartbeat", daemon=True)
+
+    @property
+    def failed(self) -> bool:
+        return self._failed.is_set()
+
+    def start(self) -> None:
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop.set()
+        self._thread.join()
+
+    def _run(self) -> None:
+        while not self._stop.wait(self._interval_seconds):
+            try:
+                self._renew()
+            except Exception:
+                self._failed.set()
+                return
+
+
 class JobService:
     def __init__(
         self,
@@ -94,6 +124,7 @@ class JobService:
         *,
         clock: Callable[[], datetime] | None = None,
         handlers: Mapping[str, JobHandler] | None = None,
+        work_root: Path | None = None,
     ) -> JobService:
         migrate_database(database_path)
         engine = create_sqlite_engine(database_path)
@@ -105,7 +136,7 @@ class JobService:
             resolved_handlers = default_fake_handlers()
             resolved_handlers["voice.generate"] = VoiceGenerateHandler(
                 session_factory,
-                work_root=database_path.resolve().parent / "work",
+                work_root=configured_work_root(work_root),
             )
         return cls(
             engine,
@@ -202,43 +233,71 @@ class JobService:
         worker_id: str,
         *,
         lease_seconds: int = 60,
+        heartbeat_interval_seconds: float | None = None,
     ) -> Job | None:
+        interval = (
+            self._heartbeat_interval(lease_seconds)
+            if heartbeat_interval_seconds is None
+            else heartbeat_interval_seconds
+        )
+        if interval <= 0 or interval >= lease_seconds:
+            raise ValueError("heartbeat interval must be positive and below the lease duration")
         claimed = self.claim_next_job(worker_id, lease_seconds=lease_seconds)
         if claimed is None:
             return None
-        handler = self._handlers.get(claimed.job_type)
-        if handler is None:
-            result = JobExecutionResult(
-                outcome=JobExecutionOutcome.BLOCKED,
-                error_code="handler_not_registered",
-                error_message="No deterministic local handler is registered for this persisted job.",
+
+        def renew_heartbeat() -> None:
+            self.renew_lease(
+                claimed.job_id,
+                worker_id,
+                attempt_number=claimed.attempt_count,
+                lease_seconds=lease_seconds,
             )
-        elif getattr(handler, "retry_safety", None) != claimed.retry_safety:
-            result = JobExecutionResult(
-                outcome=JobExecutionOutcome.BLOCKED,
-                error_code="handler_retry_safety_mismatch",
-                error_message="The registered handler retry policy no longer matches the persisted job.",
-            )
-        else:
-            try:
-                result = handler.execute(
-                    JobExecutionContext(
-                        job_id=claimed.job_id,
-                        job_type=claimed.job_type,
-                        campaign_id=claimed.campaign_id or "",
-                        input=claimed.input,
-                        attempt_number=claimed.attempt_count,
-                    )
-                )
-                result = JobExecutionResult.model_validate(result.model_dump())
-            except SimulatedWorkerCrash:
-                raise
-            except Exception:
+
+        heartbeat = _LeaseHeartbeat(renew_heartbeat, interval)
+        heartbeat.start()
+        try:
+            handler = self._handlers.get(claimed.job_type)
+            if handler is None:
                 result = JobExecutionResult(
-                    outcome=JobExecutionOutcome.TERMINAL_FAILURE,
-                    error_code="handler_execution_failed",
-                    error_message="The deterministic local handler failed safely.",
+                    outcome=JobExecutionOutcome.BLOCKED,
+                    error_code="handler_not_registered",
+                    error_message=(
+                        "No deterministic local handler is registered for this persisted job."
+                    ),
                 )
+            elif getattr(handler, "retry_safety", None) != claimed.retry_safety:
+                result = JobExecutionResult(
+                    outcome=JobExecutionOutcome.BLOCKED,
+                    error_code="handler_retry_safety_mismatch",
+                    error_message=(
+                        "The registered handler retry policy no longer matches the persisted job."
+                    ),
+                )
+            else:
+                try:
+                    result = handler.execute(
+                        JobExecutionContext(
+                            job_id=claimed.job_id,
+                            job_type=claimed.job_type,
+                            campaign_id=claimed.campaign_id or "",
+                            input=claimed.input,
+                            attempt_number=claimed.attempt_count,
+                        )
+                    )
+                    result = JobExecutionResult.model_validate(result.model_dump())
+                except SimulatedWorkerCrash:
+                    raise
+                except Exception:
+                    result = JobExecutionResult(
+                        outcome=JobExecutionOutcome.TERMINAL_FAILURE,
+                        error_code="handler_execution_failed",
+                        error_message="The deterministic local handler failed safely.",
+                    )
+        finally:
+            heartbeat.stop()
+        if heartbeat.failed:
+            raise JobClaimError
         try:
             row = self._repository.finish_claim(
                 claimed.job_id,
@@ -305,6 +364,10 @@ class JobService:
         except JobClaimConflict as exc:
             raise JobClaimError from exc
         return self._to_domain(row)
+
+    @staticmethod
+    def _heartbeat_interval(lease_seconds: int) -> float:
+        return max(0.1, min(30.0, lease_seconds / 3.0))
 
     @staticmethod
     def _validate_worker(worker_id: str, lease_seconds: int) -> None:

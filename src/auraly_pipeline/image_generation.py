@@ -12,14 +12,17 @@ from typing import Literal
 
 from pydantic import Field
 
+from auraly_pipeline.config_paths import (
+    DEFAULT_PROJECT_ROOT as DEFAULT_PROJECT_ROOT,
+    WORK_ROOT_RELATIVE as WORK_ROOT_RELATIVE,
+    configured_project_root,
+    configured_work_root,
+)
 from auraly_pipeline.models import ContractModel
 
 LOGGER = logging.getLogger(__name__)
 
-DEFAULT_PROJECT_ROOT = Path.home() / "Documents" / "Auraly"
-_PROJECT_ROOT_ENV = os.environ.get("AURALY_PROJECT_ROOT", "").strip()
-PROJECT_ROOT = Path(_PROJECT_ROOT_ENV).resolve() if _PROJECT_ROOT_ENV else DEFAULT_PROJECT_ROOT.resolve()
-WORK_ROOT_RELATIVE = Path("pipeline/work")
+PROJECT_ROOT = configured_project_root()
 AVATARS_ROOT_RELATIVE = Path("03 Avatars")
 GOOGLE_FLOW_URL = "https://labs.google/fx/tools/flow"
 DEFAULT_TIMEOUT_SECONDS = 180
@@ -53,14 +56,6 @@ PUBLIC_FAILURE_STEPS = frozenset(
         "move_output_to_job",
     }
 )
-
-
-def configured_project_root(value: Path | None = None) -> Path:
-    """Return the trusted Auraly root from an explicit option or local configuration."""
-    if value is not None:
-        return value.resolve()
-    configured = os.environ.get("AURALY_PROJECT_ROOT", "").strip()
-    return Path(configured).resolve() if configured else DEFAULT_PROJECT_ROOT.resolve()
 
 
 def configured_downloads_dir(value: Path | None = None) -> Path:
@@ -332,9 +327,9 @@ def _is_windows_absolute(value: str) -> bool:
     return PureWindowsPath(value).is_absolute()
 
 
-def resolve_project_path(value: str | Path, project_root: Path = PROJECT_ROOT) -> Path:
+def resolve_project_path(value: str | Path, project_root: Path | None = None) -> Path:
     """Resolve a project-relative or absolute Windows path without requiring it to exist."""
-    root = project_root.resolve()
+    root = configured_project_root(project_root)
     raw = os.path.expandvars(os.path.expanduser(str(value).strip()))
     if not raw:
         raise ImageGenerationError("resolve_reference_image", "reference image path is empty")
@@ -351,11 +346,11 @@ def _require_within(path: Path, root: Path, step: str, label: str) -> None:
         raise ImageGenerationError(step, f"{label} must be inside {root.resolve()}: {path}") from exc
 
 
-def validate_job(job_name: str, project_root: Path = PROJECT_ROOT) -> Path:
+def validate_job(job_name: str, project_root: Path | None = None) -> Path:
     LOGGER.info("[image-generation] Validating job")
     if not job_name or job_name in {".", ".."} or "/" in job_name or "\\" in job_name:
         raise ImageGenerationError("validate_job", f"invalid job_name: {job_name!r}")
-    work_root = (project_root.resolve() / WORK_ROOT_RELATIVE).resolve()
+    work_root = configured_work_root(project_root=project_root)
     job_dir = (work_root / job_name).resolve()
     _require_within(job_dir, work_root, "validate_job", "job")
     if not job_dir.is_dir():
@@ -365,11 +360,12 @@ def validate_job(job_name: str, project_root: Path = PROJECT_ROOT) -> Path:
 
 def validate_reference_image(
     reference_image_path: str | Path,
-    project_root: Path = PROJECT_ROOT,
+    project_root: Path | None = None,
 ) -> Path:
     LOGGER.info("[image-generation] Resolving reference image")
-    path = resolve_project_path(reference_image_path, project_root)
-    avatars_root = (project_root.resolve() / AVATARS_ROOT_RELATIVE).resolve()
+    root = configured_project_root(project_root)
+    path = resolve_project_path(reference_image_path, root)
+    avatars_root = (root / AVATARS_ROOT_RELATIVE).resolve()
     _require_within(path, avatars_root, "validate_reference_image", "reference image")
     if not path.is_file():
         raise ImageGenerationError(

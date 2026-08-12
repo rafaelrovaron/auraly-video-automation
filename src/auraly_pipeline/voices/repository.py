@@ -54,6 +54,19 @@ class VoiceMasterRepository:
             )
         ).scalar_one_or_none()
 
+    def active_other_for_campaign(
+        self, campaign_id: str, voice_master_id: str
+    ) -> VoiceMasterRow | None:
+        return self._session.execute(
+            select(VoiceMasterRow)
+            .where(
+                VoiceMasterRow.campaign_id == campaign_id,
+                VoiceMasterRow.id != voice_master_id,
+                VoiceMasterRow.status.in_(("pending", "generating", "review_required")),
+            )
+            .limit(1)
+        ).scalar_one_or_none()
+
     def next_generation(self, copy_master_id: str) -> int:
         current = self._session.execute(
             select(func.max(VoiceMasterRow.generation)).where(

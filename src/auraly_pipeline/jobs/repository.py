@@ -65,6 +65,62 @@ class JobRepository:
                 is not None
             )
 
+    @staticmethod
+    def create_in_session(
+        session: Session,
+        request: JobSubmit,
+        now: datetime,
+        *,
+        before_commit: Callable[[Session, JobRow], None] | None = None,
+    ) -> JobRow:
+        row = JobRow(
+            id=str(uuid4()),
+            job_type=request.job_type,
+            campaign_id=request.campaign_id,
+            scene_variant_id=request.scene_variant_id,
+            status="queued",
+            priority=request.priority,
+            idempotency_key=request.idempotency_key,
+            request_fingerprint=request.request_fingerprint,
+            input_json=request.input,
+            output_json=None,
+            attempt_count=0,
+            max_attempts=request.max_attempts,
+            retry_safety=request.retry_safety.value,
+            worker_id=None,
+            lease_expires_at=None,
+            created_at=now,
+            updated_at=now,
+            queued_at=now,
+            started_at=None,
+            completed_at=None,
+            cancelled_at=None,
+            next_retry_at=None,
+            last_error_code=None,
+            last_error_message=None,
+        )
+        row.events.extend(
+            [
+                JobEventRow(
+                    id=str(uuid4()),
+                    event_type="job.created",
+                    timestamp=now,
+                    metadata_json={"jobType": request.job_type},
+                ),
+                JobEventRow(
+                    id=str(uuid4()),
+                    event_type="job.queued",
+                    timestamp=now,
+                    metadata_json={},
+                ),
+            ]
+        )
+        session.add(row)
+        if before_commit is not None:
+            before_commit(session, row)
+        session.flush()
+        return row
+
     def create(
         self,
         request: JobSubmit,
@@ -73,52 +129,13 @@ class JobRepository:
         before_commit: Callable[[Session, JobRow], None] | None = None,
     ) -> JobRow:
         with self._session_factory() as session:
-            row = JobRow(
-                id=str(uuid4()),
-                job_type=request.job_type,
-                campaign_id=request.campaign_id,
-                scene_variant_id=request.scene_variant_id,
-                status="queued",
-                priority=request.priority,
-                idempotency_key=request.idempotency_key,
-                request_fingerprint=request.request_fingerprint,
-                input_json=request.input,
-                output_json=None,
-                attempt_count=0,
-                max_attempts=request.max_attempts,
-                retry_safety=request.retry_safety.value,
-                worker_id=None,
-                lease_expires_at=None,
-                created_at=now,
-                updated_at=now,
-                queued_at=now,
-                started_at=None,
-                completed_at=None,
-                cancelled_at=None,
-                next_retry_at=None,
-                last_error_code=None,
-                last_error_message=None,
-            )
-            row.events.extend(
-                [
-                    JobEventRow(
-                        id=str(uuid4()),
-                        event_type="job.created",
-                        timestamp=now,
-                        metadata_json={"jobType": request.job_type},
-                    ),
-                    JobEventRow(
-                        id=str(uuid4()),
-                        event_type="job.queued",
-                        timestamp=now,
-                        metadata_json={},
-                    ),
-                ]
-            )
-            session.add(row)
-            if before_commit is not None:
-                before_commit(session, row)
             try:
+                row = self.create_in_session(
+                    session,
+                    request,
+                    now,
+                    before_commit=before_commit,
+                )
                 session.commit()
             except IntegrityError as exc:
                 session.rollback()

@@ -582,7 +582,7 @@ Implementado atualmente:
 - metadados de budget/config rejeitam chaves de secrets, tokens, cookies e URLs assinadas;
 - Persistent Job Orchestration: `Job`, `JobAttempt` e `JobEvent` persistidos em SQLite;
 - state machine explícita `queued/running/completed/failed/blocked/retry_scheduled/cancelled`;
-- fila local com claim atômico, leases renováveis, fencing por attempt number, recovery de lease expirado e eventos append-only;
+- fila local com claim atômico, leases renováveis, heartbeat automático durante handlers, fencing por attempt number, recovery de lease expirado e eventos append-only;
 - idempotency key global única com fingerprint do contrato e conflito para reuse incompatível;
 - retry safety persistida (`idempotent`, `manual_only`, `reconcile_before_retry`) e validada contra a capability do handler;
 - retries lineares determinísticos, max attempts, falhas retryable/terminal e cancelamento seguro;
@@ -595,6 +595,7 @@ Implementado atualmente:
 - transcript prefere alignment ElevenLabs e cai para faster-whisper small.en CPU INT8; QC compara tokens e detecta headline falada;
 - CLI JSON `voice generate/get/list/approve/reject/resolve-no-artifact`, com aprovação humana obrigatória e flag explícita para ação paga;
 - o request pago exige `budget.limitCents > 0`, `budget.currency` autoritativa em três letras maiúsculas, `--approve-paid-request`, operador explícito e `--approved-budget-cents` não superior ao limite da Campaign; o evento append-only registra operador, timestamp, teto aprovado, limite e moeda;
+- VoiceMaster aprovada bloqueia nova logical generation paga antes de VoiceMaster/Job/evento; criação do trio e decisão concorrente com approval são serializadas em uma transação SQLite, replay lógico exato permanece idempotente e replacement continua fora de escopo;
 - testes unitários/smoke;
 - faster-whisper small.en local;
 - FFmpeg/ffprobe;
@@ -617,6 +618,7 @@ funcional.
 Configuração operacional da Campaign Foundation e da Persistent Job Orchestration:
 
 - banco padrão fora do repositório: `~/.auraly/auraly.db`;
+- artefatos de Campaign usam o root canônico `<AURALY_PROJECT_ROOT>/pipeline/work`, compartilhado por Voice Master e preparação de imagem, sem mover o SQLite;
 - override por `AURALY_DATABASE_PATH` ou `--database`;
 - migrations executadas antes do acesso pela application service e serializadas por lock de arquivo entre processos;
 - banco guarda somente estado/metadados, nunca mídia BLOB, secrets, cookies, profiles ou URLs assinadas;
@@ -625,6 +627,7 @@ Configuração operacional da Campaign Foundation e da Persistent Job Orchestrat
 - jobs podem referenciar Campaign e, opcionalmente, SceneVariant, sem exigir referência para jobs globais; triggers rejeitam pares incompatíveis;
 - uma tentativa `running` pode ser finalizada uma vez e então se torna imutável; tentativas finalizadas e eventos não aceitam update, delete ou replace;
 - `worker-once` recupera leases expirados, ativa retries vencidos e executa no máximo um handler local;
+- durante o handler, heartbeat renova o lease com o mesmo worker/attempt e encerra em `finally`; perda de fencing impede completion normal;
 - cancelamento de job running é rejeitado; este Goal não simula interrupção arbitrária de operação ativa;
 - completion/renewal exigem worker, attempt number e lease ainda válido; attempt number funciona como fencing token;
 - recovery registra `job.recovered` e finaliza a tentativa interrompida antes de retry, bloqueio por safety ou falha terminal;

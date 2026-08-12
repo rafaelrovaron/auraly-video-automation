@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import subprocess
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -163,7 +164,9 @@ def test_paid_authorization_uses_campaign_currency(tmp_path: Path) -> None:
     service.close()
 
 
-def test_orphan_voice_master_without_job_is_repaired(tmp_path: Path) -> None:
+def test_voice_master_and_paid_job_creation_roll_back_atomically_on_interruption(
+    tmp_path: Path,
+) -> None:
     database = tmp_path / "auraly.db"
     campaign_id, _, _ = _campaign(database)
     service = VoiceMasterService.for_database(database, work_root=tmp_path / "work")
@@ -175,15 +178,18 @@ def test_orphan_voice_master_without_job_is_repaired(tmp_path: Path) -> None:
         paid_request_approved_by="rafael",
         approved_budget_cents=1000,
     )
-    original_submit = service._jobs.submit_job
+    original_create = service._jobs._repository.create_in_session
 
-    def fail_submission(*args: object, **kwargs: object) -> object:
-        raise RuntimeError("injected submission interruption")
+    def fail_creation(*args: object, **kwargs: object) -> object:
+        raise RuntimeError("injected transaction interruption")
 
-    service._jobs.submit_job = fail_submission  # type: ignore[assignment,method-assign]
+    service._jobs._repository.create_in_session = fail_creation  # type: ignore[assignment,method-assign]
     with pytest.raises(RuntimeError):
         service.generate(request)
-    service._jobs.submit_job = original_submit  # type: ignore[method-assign]
+    service._jobs._repository.create_in_session = original_create  # type: ignore[method-assign]
+    assert service.list(campaign_id=campaign_id) == []
+    assert service._jobs.list_jobs(campaign_id=campaign_id) == []
+
     repaired = service.generate(request)
     persisted_job = service._jobs.get_job(repaired.job.job_id)
     paid_events = [
@@ -607,6 +613,185 @@ def test_approval_rejects_tampered_transcript_or_manifest_artifact(tmp_path: Pat
             "Voice Master QC does not permit approval."
         )
         service.close()
+
+
+def test_approved_voice_blocks_new_paid_logical_generation_but_exact_replay_reuses(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "approved-guard.db"
+    campaign_id, _, spoken_text = _campaign(database)
+    provider = FakeElevenLabs(_mp3(tmp_path), spoken_text)
+    service = VoiceMasterService.for_database(
+        database, work_root=tmp_path / "work", provider=provider
+    )
+    request = VoiceGenerateRequest(
+        campaign_id=campaign_id,
+        voice_id="voice-approved",
+        model_id="eleven_multilingual_v2",
+        voice_settings={"stability": 0.4},
+        paid_request_approved=True,
+        paid_request_approved_by="rafael",
+        approved_budget_cents=1000,
+    )
+    submitted = service.generate(request)
+    service.worker_once("voice-worker")
+    approved = service.approve(submitted.voice_master.voice_master_id, approved_by="rafael")
+    assert approved.status is VoiceMasterStatus.APPROVED
+    provider_calls = len(provider.calls)
+    voice_count = len(service.list(campaign_id=campaign_id))
+    job_count = len(service._jobs.list_jobs(campaign_id=campaign_id))
+    paid_event_count = sum(
+        event.event_type == "job.paid_authorized"
+        for job in service._jobs.list_jobs(campaign_id=campaign_id)
+        for event in job.events
+    )
+
+    replayed = service.generate(request)
+    assert replayed.voice_master.voice_master_id == approved.voice_master_id
+    assert replayed.job.job_id == submitted.job.job_id
+
+    alternatives = [
+        request.model_copy(update={"voice_id": "voice-different"}),
+        request.model_copy(update={"model_id": "eleven_turbo_v2_5"}),
+        request.model_copy(update={"voice_settings": {"stability": 0.8}}),
+    ]
+    for different in alternatives:
+        with pytest.raises(VoiceMasterConflictError):
+            service.generate(different)
+    with pytest.raises(VoiceMasterConflictError):
+        service.regenerate(request)
+
+    jobs = service._jobs.list_jobs(campaign_id=campaign_id)
+    assert len(service.list(campaign_id=campaign_id)) == voice_count
+    assert len(jobs) == job_count
+    assert (
+        sum(event.event_type == "job.paid_authorized" for job in jobs for event in job.events)
+        == paid_event_count
+    )
+    assert len(provider.calls) == provider_calls
+    service.close()
+
+
+def test_approval_and_different_paid_generation_are_serialized(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "approval-generation-race.db"
+    campaign_id, _, spoken_text = _campaign(database)
+    provider = FakeElevenLabs(_mp3(tmp_path), spoken_text)
+    setup = VoiceMasterService.for_database(
+        database, work_root=tmp_path / "work", provider=provider
+    )
+    original_request = VoiceGenerateRequest(
+        campaign_id=campaign_id,
+        voice_id="voice-original",
+        model_id="eleven_multilingual_v2",
+        paid_request_approved=True,
+        paid_request_approved_by="rafael",
+        approved_budget_cents=1000,
+    )
+    original = setup.generate(original_request)
+    setup.worker_once("voice-worker")
+    provider_calls = len(provider.calls)
+    setup.close()
+    different_request = original_request.model_copy(update={"voice_id": "voice-different"})
+
+    def approve_original() -> str:
+        service = VoiceMasterService.for_database(database, work_root=tmp_path / "work")
+        try:
+            service.approve(original.voice_master.voice_master_id, approved_by="rafael")
+            return "approved"
+        except VoiceMasterConflictError:
+            return "conflict"
+        finally:
+            service.close()
+
+    def generate_different() -> str:
+        service = VoiceMasterService.for_database(database, work_root=tmp_path / "work")
+        try:
+            service.generate(different_request)
+            return "generated"
+        except VoiceMasterConflictError:
+            return "conflict"
+        finally:
+            service.close()
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        approval_future = executor.submit(approve_original)
+        generation_future = executor.submit(generate_different)
+        outcomes = {approval_future.result(), generation_future.result()}
+
+    inspected = VoiceMasterService.for_database(database, work_root=tmp_path / "work")
+    voices = inspected.list(campaign_id=campaign_id)
+    jobs = inspected._jobs.list_jobs(campaign_id=campaign_id)
+    assert outcomes in ({"approved", "conflict"}, {"generated", "conflict"})
+    assert not (
+        any(voice.status is VoiceMasterStatus.APPROVED for voice in voices)
+        and len(voices) > 1
+    )
+    assert len(jobs) == len(voices)
+    assert len(provider.calls) == provider_calls
+    inspected.close()
+
+
+def test_approval_with_multiple_other_active_voices_fails_with_stable_conflict(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "multiple-active.db"
+    campaign_id, _, spoken_text = _campaign(database)
+    provider = FakeElevenLabs(_mp3(tmp_path), spoken_text)
+    service = VoiceMasterService.for_database(
+        database, work_root=tmp_path / "work", provider=provider
+    )
+
+    def request(voice_id: str) -> VoiceGenerateRequest:
+        return VoiceGenerateRequest(
+            campaign_id=campaign_id,
+            voice_id=voice_id,
+            model_id="eleven_multilingual_v2",
+            paid_request_approved=True,
+            paid_request_approved_by="rafael",
+            approved_budget_cents=1000,
+        )
+
+    first = service.generate(request("voice-first"))
+    service.generate(request("voice-second"))
+    service.generate(request("voice-third"))
+    service.worker_once("voice-worker")
+
+    with pytest.raises(VoiceMasterConflictError) as raised:
+        service.approve(first.voice_master.voice_master_id, approved_by="rafael")
+    assert raised.value.public_message == (
+        "The Voice Master request conflicts with persisted state."
+    )
+    service.close()
+
+
+def test_failed_previous_voice_master_permits_regeneration(tmp_path: Path) -> None:
+    database = tmp_path / "failed-regeneration.db"
+    campaign_id, _, _ = _campaign(database)
+    service = VoiceMasterService.for_database(database, work_root=tmp_path / "work")
+    request = VoiceGenerateRequest(
+        campaign_id=campaign_id,
+        voice_id="voice-explicit",
+        model_id="eleven_multilingual_v2",
+        paid_request_approved=True,
+        paid_request_approved_by="rafael",
+        approved_budget_cents=1000,
+    )
+    original = service.generate(request)
+    with service._sessions() as session:
+        row = session.get(VoiceMasterRow, original.voice_master.voice_master_id)
+        assert row is not None
+        row.status = "failed"
+        row.failure_code = "provider_failed_safely"
+        row.updated_at = datetime.now(UTC)
+        session.commit()
+
+    regenerated = service.regenerate(request)
+    assert regenerated.voice_master.voice_master_id != original.voice_master.voice_master_id
+    assert regenerated.voice_master.generation == 2
+    assert len(service.list(campaign_id=campaign_id)) == 2
+    service.close()
 
 
 def test_rejection_preserves_artifacts_and_regeneration_uses_new_record(tmp_path: Path) -> None:

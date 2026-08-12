@@ -4,7 +4,7 @@ from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from threading import Event
+from threading import Event, enumerate as enumerate_threads
 
 import pytest
 from pydantic import ValidationError
@@ -46,8 +46,55 @@ class MutableClock:
     def __call__(self) -> datetime:
         return self.current
 
-    def advance(self, seconds: int) -> None:
+    def advance(self, seconds: float) -> None:
         self.current += timedelta(seconds=seconds)
+
+
+class CoordinatedLongHandler:
+    retry_safety = RetrySafety.IDEMPOTENT
+
+    def __init__(self, clock: MutableClock, renewed: Event) -> None:
+        self._clock = clock
+        self._renewed = renewed
+        self.calls = 0
+
+    def execute(self, context: JobExecutionContext) -> JobExecutionResult:
+        self.calls += 1
+        self._clock.advance(0.5)
+        assert self._renewed.wait(timeout=1)
+        self._clock.advance(0.75)
+        return JobExecutionResult(
+            outcome=JobExecutionOutcome.SUCCESS,
+            result={"attempt": context.attempt_number},
+        )
+
+
+class CoordinatedFailureHandler:
+    retry_safety = RetrySafety.IDEMPOTENT
+
+    def __init__(self, started: Event, release: Event) -> None:
+        self._started = started
+        self._release = release
+
+    def execute(self, context: JobExecutionContext) -> JobExecutionResult:
+        self._started.set()
+        assert self._release.wait(timeout=1)
+        raise RuntimeError("private handler failure")
+
+
+class WaitForHeartbeatHandler:
+    retry_safety = RetrySafety.IDEMPOTENT
+
+    def __init__(self, heartbeat_finished: Event) -> None:
+        self._heartbeat_finished = heartbeat_finished
+
+    def execute(self, context: JobExecutionContext) -> JobExecutionResult:
+        assert self._heartbeat_finished.wait(timeout=1)
+        return JobExecutionResult(outcome=JobExecutionOutcome.SUCCESS)
+
+
+def _heartbeat_threads() -> list[object]:
+    return [thread for thread in enumerate_threads() if thread.name == "auraly-job-heartbeat"]
 
 
 def _create_campaign(database_path: Path) -> tuple[str, str]:
@@ -390,6 +437,144 @@ def test_idempotent_submission_reuses_exact_job_and_rejects_conflict(tmp_path: P
     with pytest.raises(JobIdempotencyConflictError):
         service.submit_job(JobSubmit.model_validate(conflicting))
     assert len(service.list_jobs()) == 1
+    service.close()
+
+
+def test_worker_heartbeat_uses_bounded_one_third_interval() -> None:
+    assert JobService._heartbeat_interval(1) == pytest.approx(1 / 3)
+    assert JobService._heartbeat_interval(60) == 20
+    assert JobService._heartbeat_interval(3600) == 30
+
+
+def test_worker_heartbeat_renews_long_handler_without_duplicate_attempt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database_path = tmp_path / "heartbeat.db"
+    clock = MutableClock()
+    renewed = Event()
+    handler = CoordinatedLongHandler(clock, renewed)
+    service = JobService.for_database(
+        database_path,
+        clock=clock,
+        handlers={"fake.long": handler},
+    )
+    submitted = service.submit_job(_local_job("fake.long", "heartbeat-long"))
+    original_renew = service.renew_lease
+
+    def observe_renewal(
+        job_id: str,
+        worker_id: str,
+        *,
+        attempt_number: int,
+        lease_seconds: int = 60,
+    ):
+        result = original_renew(
+            job_id,
+            worker_id,
+            attempt_number=attempt_number,
+            lease_seconds=lease_seconds,
+        )
+        renewed.set()
+        return result
+
+    monkeypatch.setattr(service, "renew_lease", observe_renewal)
+    completed = service.worker_once(
+        "heartbeat-worker",
+        lease_seconds=1,
+        heartbeat_interval_seconds=0.01,
+    )
+
+    assert completed is not None
+    assert completed.job_id == submitted.job_id
+    assert completed.status == "completed"
+    assert completed.attempt_count == 1
+    assert [attempt.attempt_number for attempt in completed.attempts] == [1]
+    assert [event.event_type for event in completed.events].count("job.lease_renewed") >= 1
+    assert handler.calls == 1
+    calls_after_return = len(completed.events)
+    assert len(service.get_job(submitted.job_id).events) == calls_after_return
+    assert _heartbeat_threads() == []
+    service.close()
+
+
+def test_worker_heartbeat_stops_after_handler_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    started = Event()
+    release = Event()
+    handler = CoordinatedFailureHandler(started, release)
+    service = JobService.for_database(
+        tmp_path / "failure.db",
+        handlers={"fake.long-failure": handler},
+    )
+    submitted = service.submit_job(_local_job("fake.long-failure", "heartbeat-failure"))
+    renewed = Event()
+    original_renew = service.renew_lease
+
+    def release_after_renewal(
+        job_id: str,
+        worker_id: str,
+        *,
+        attempt_number: int,
+        lease_seconds: int = 60,
+    ):
+        result = original_renew(
+            job_id,
+            worker_id,
+            attempt_number=attempt_number,
+            lease_seconds=lease_seconds,
+        )
+        renewed.set()
+        release.set()
+        return result
+
+    monkeypatch.setattr(service, "renew_lease", release_after_renewal)
+    result = service.worker_once(
+        "heartbeat-worker",
+        lease_seconds=1,
+        heartbeat_interval_seconds=0.01,
+    )
+
+    assert started.is_set() and renewed.is_set()
+    assert result is not None and result.status == "failed"
+    event_count = len(result.events)
+    assert len(service.get_job(submitted.job_id).events) == event_count
+    assert _heartbeat_threads() == []
+    service.close()
+
+
+def test_worker_heartbeat_lost_fencing_fails_safely_without_completion(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    heartbeat_failed = Event()
+    handler = WaitForHeartbeatHandler(heartbeat_failed)
+    service = JobService.for_database(
+        tmp_path / "lost.db",
+        handlers={"fake.lost-lease": handler},
+    )
+    submitted = service.submit_job(_local_job("fake.lost-lease", "heartbeat-lost"))
+
+    def lose_lease(*args: object, **kwargs: object):
+        heartbeat_failed.set()
+        raise RuntimeError("SELECT secret_token FROM private_table")
+
+    monkeypatch.setattr(service, "renew_lease", lose_lease)
+    with pytest.raises(JobClaimError) as raised:
+        service.worker_once(
+            "heartbeat-worker",
+            lease_seconds=1,
+            heartbeat_interval_seconds=0.01,
+        )
+
+    assert raised.value.public_message == "The worker does not own the active job lease."
+    assert "SELECT" not in str(raised.value)
+    assert "secret_token" not in str(raised.value)
+    persisted = service.get_job(submitted.job_id)
+    assert persisted.status == "running"
+    assert persisted.attempt_count == 1
+    assert len(persisted.attempts) == 1
+    assert not any(event.event_type == "job.completed" for event in persisted.events)
+    assert _heartbeat_threads() == []
     service.close()
 
 
@@ -768,6 +953,7 @@ def test_crash_handler_leaves_durable_running_claim_for_lease_recovery(tmp_path:
     assert interrupted.status == "running"
     assert interrupted.worker_id == "worker-1"
     assert interrupted.attempts[0].status == "running"
+    assert _heartbeat_threads() == []
     service.close()
 
 
