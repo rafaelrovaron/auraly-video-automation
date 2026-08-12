@@ -193,7 +193,7 @@ class JobService:
                 lease_seconds,
                 before_commit=self._validate_persisted_row,
             )
-        except (ValidationError, ValueError) as exc:
+        except (IntegrityError, ValidationError, ValueError) as exc:
             raise JobPersistenceError from exc
         return None if row is None else self._to_domain(row)
 

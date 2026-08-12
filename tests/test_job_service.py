@@ -198,6 +198,36 @@ def test_claim_rejects_legacy_malformed_event_before_persisting_running(tmp_path
     service.close()
 
 
+def test_claim_wraps_attempt_storage_collision_and_rolls_back(tmp_path: Path) -> None:
+    database_path = tmp_path / "claim-collision.db"
+    service = JobService.for_database(database_path, clock=lambda: NOW)
+    submitted = service.submit_job(_local_job("fake.success", "claim-storage-collision"))
+    engine = create_sqlite_engine(database_path)
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO job_attempts "
+                "(id, job_id, attempt_number, worker_id, status, started_at, lease_expires_at, "
+                "finished_at) VALUES "
+                "('00000000-0000-4000-8000-000000000001', :job_id, 1, 'historical-worker', "
+                "'completed', :now, :now, :now)"
+            ),
+            {"job_id": submitted.job_id, "now": NOW},
+        )
+    with pytest.raises(JobPersistenceError) as raised:
+        service.claim_next_job("worker-safe-storage")
+    assert "SQL" not in str(raised.value)
+    assert "immutable" not in str(raised.value)
+    with engine.connect() as connection:
+        persisted = connection.execute(
+            text("SELECT status, attempt_count, worker_id FROM jobs WHERE id=:job_id"),
+            {"job_id": submitted.job_id},
+        ).one()
+    assert persisted == ("queued", 0, None)
+    engine.dispose()
+    service.close()
+
+
 def test_service_refuses_to_emit_unsafe_metadata_from_tampered_database(tmp_path: Path) -> None:
     database_path = tmp_path / "auraly.db"
     service = JobService.for_database(database_path, clock=lambda: NOW)
