@@ -673,8 +673,8 @@ Configuração operacional da Campaign Foundation e da Persistent Job Orchestrat
 - os Goals 0, 1, 2 e 3 têm produção/testes implementados e baseline local executado; isso não é
   evidência independente de CI nem de provider canary;
 - o canário real ElevenLabs permanece pendente como `Goal 3C -- ElevenLabs Provider Canary`;
-- próximo milestone de produto: `Goal 4A -- Image Domain & Persistence`, precedido pelo pequeno
-  trabalho de infraestrutura do Verification Harness.
+- o Verification Harness determinístico foi implementado antes de Goal 4A;
+- próximo milestone de produto: `Goal 4A -- Image Domain & Persistence`.
 
 Terminologia obrigatória de milestone:
 
@@ -841,7 +841,8 @@ O lifecycle atual de CopyMaster, que efetivamente inicia aprovado, é dívida de
 deferida. Goal 6.5 deve estabelecer `draft -> human review -> approved` antes do Goal 7, sem levar
 essa mudança para Goal 4.
 
-A direção futura do Verification Harness é `scripts/verify.py fast|full` e CI determinístico em
-`.github/workflows/verify.yml`, com job Windows desejável. Esse harness não executará ElevenLabs,
-Google Flow, HeyGen ou qualquer chamada paga. Sua implementação é uma tarefa separada e posterior
-a este alinhamento.
+O Verification Harness implementado expõe `scripts/verify.py fast|full`, detecta drift dos schemas
+gerados e alimenta CI determinístico em `.github/workflows/verify.yml` com jobs Linux full e Windows
+focused. Ele não executa ElevenLabs, Google Flow, HeyGen ou qualquer chamada paga. Uma execução
+local `full` bem-sucedida estabelece `LOCAL_VERIFIED`; somente uma execução bem-sucedida no GitHub
+estabelece evidência independente de CI. Nenhuma delas estabelece `PROVIDER_VERIFIED`.

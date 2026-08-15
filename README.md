@@ -351,11 +351,20 @@ Fluxo antes de criar um novo `edit.json`:
 ## Gates de qualidade
 
 ```bash
-uv run pytest --cov=auraly_pipeline --cov-report=term-missing
-uv run ruff check src tests
-uv run python -m mypy src
-uv run python -m auraly_pipeline.schema
+uv run python scripts/verify.py fast
+uv run python scripts/verify.py fast --pytest \
+  tests/test_job_service.py::test_submit_get_list_and_restart_persist_campaign_level_job
+uv run python scripts/verify.py full
 ```
+
+`fast` fornece feedback barato para TDD: sempre roda Ruff e mypy de source e só executa os alvos
+pytest informados após `--pytest`. `full` é o gate local de `LOCAL_VERIFIED`: executa o baseline
+determinístico completo, para na primeira falha e detecta drift dos schemas gerados sem restaurar
+arquivos automaticamente.
+
+O workflow `.github/workflows/verify.yml` usa o mesmo harness para evidência determinística
+independente em Linux e Windows. A CI ainda precisa executar com sucesso no GitHub antes de ser
+declarada verificada. Nem execução local nem CI estabelece `PROVIDER_VERIFIED`.
 
 ## Garantias atuais do manifesto
 
@@ -375,7 +384,7 @@ A sequência imediata é:
 
 ```text
 roadmap/process alignment
-→ Verification Harness
+→ Verification Harness (implemented)
 → Goal 4A design spec
 → human review
 → Goal 4A implementation plan

@@ -108,13 +108,29 @@ requires it, never as a big-bang rewrite.
 
 ## Required checks
 
-Run from the repository root:
+Use the fast harness during task-level TDD:
+
+```bash
+uv run python scripts/verify.py fast
+uv run python scripts/verify.py fast --pytest tests/test_verify_harness.py
+```
+
+Run the full deterministic gate before declaring `LOCAL_VERIFIED`:
+
+```bash
+uv run python scripts/verify.py full
+```
+
+The harness resolves the repository root from its own location, stops on the first failure, and
+checks generated schema drift without reverting user work. `full` executes this auditable baseline:
 
 ```bash
 uv sync --locked --all-groups
 uv run pytest
 uv run ruff check src tests
+uv run ruff check scripts
 uv run python -m mypy src
+MYPYPATH=src uv run python -m mypy tests
 uv run python -m auraly_pipeline.schema
 uv run python -m auraly_pipeline.cli export-image-generation-schema \
   --output schemas/image-generation.schema.json
@@ -125,14 +141,11 @@ npm audit --omit=dev --audit-level=high
 git diff --check
 ```
 
-When tests themselves are type-checked on Windows PowerShell, use:
+The displayed `MYPYPATH=src` line is POSIX notation only; the Python harness supplies the same
+environment through `subprocess` on every platform, including Windows.
 
-```powershell
-$env:MYPYPATH = "src"
-uv run python -m mypy tests
-```
-
-On POSIX shells, use `MYPYPATH=src uv run python -m mypy tests`.
+GitHub Actions invokes the same harness for independent deterministic evidence. A successful local
+or CI run does not establish `PROVIDER_VERIFIED`.
 
 When a Goal changes a HyperFrames composition, also run against that composition:
 

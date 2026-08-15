@@ -96,22 +96,21 @@ PowerShell, set `$env:MYPYPATH = "src"` and then run `uv run python -m mypy test
 External provider canaries require explicit approval and must never expose credentials or repeat
 paid actions blindly.
 
-### Verification Harness (next infrastructure task)
+### Verification Harness (implemented infrastructure)
 
-After this roadmap alignment and before Goal 4A design, add `scripts/verify.py` with approximate
-entry points:
+Before Goal 4A design, `scripts/verify.py` provides:
 
 ```bash
 uv run python scripts/verify.py fast
+uv run python scripts/verify.py fast --pytest tests/test_verify_harness.py
 uv run python scripts/verify.py full
 ```
 
-`fast` should run focused pytest, Ruff, and focused mypy. `full` should run full pytest, Ruff,
-mypy for source and tests, schema generation, dependency checks, npm ci/doctor/audit, and
-`git diff --check`, matching `AGENTS.md`. Add deterministic CI in
-`.github/workflows/verify.yml`; a Windows job is desirable because path behavior is explicitly
-cross-platform. CI must never invoke ElevenLabs, Google Flow, HeyGen, or another paid provider.
-This harness is a separate future commit, not part of the roadmap-alignment change.
+`fast` runs low-cost Ruff/mypy checks and only the pytest targets explicitly supplied. `full` runs
+the complete deterministic `AGENTS.md` baseline, including cross-platform test mypy and generated
+schema drift detection. `.github/workflows/verify.yml` provides one Linux full job and one focused
+Windows job. Local or CI evidence never implies provider verification, and the workflow invokes no
+ElevenLabs, Google Flow, HeyGen, or other paid provider.
 
 ---
 
