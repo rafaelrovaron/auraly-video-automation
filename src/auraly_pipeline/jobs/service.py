@@ -136,9 +136,14 @@ class JobService:
         session_factory = sessionmaker(engine, expire_on_commit=False, class_=Session)
         resolved_handlers = handlers
         if resolved_handlers is None:
+            from auraly_pipeline.images.handler import ImageGenerateHandler
             from auraly_pipeline.voices.handler import VoiceGenerateHandler
 
             resolved_handlers = default_fake_handlers()
+            resolved_handlers["image.generate"] = ImageGenerateHandler(
+                session_factory,
+                work_root=configured_work_root(work_root),
+            )
             resolved_handlers["voice.generate"] = VoiceGenerateHandler(
                 session_factory,
                 work_root=configured_work_root(work_root),
