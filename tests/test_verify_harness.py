@@ -185,3 +185,95 @@ def test_full_cli_selects_the_full_registry() -> None:
     assert result == 0
     assert selected[0].argv == ("uv", "sync", "--locked", "--all-groups")
     assert selected[-1].argv == ("git", "diff", "--check")
+
+
+def test_schema_drift_fails_without_reverting_generated_file(tmp_path: Path) -> None:
+    verify = load_verify_module()
+    schema = tmp_path / "schemas" / "generated.json"
+    schema.parent.mkdir()
+    schema.write_text("before\n", encoding="utf-8")
+    calls: list[list[str]] = []
+    output: list[str] = []
+
+    def changing_generator(argv: list[str], **_: Any) -> subprocess.CompletedProcess[str]:
+        calls.append(argv)
+        schema.write_text("after\n", encoding="utf-8")
+        return subprocess.CompletedProcess(argv, 0)
+
+    result = verify.run_steps(
+        (
+            verify.VerificationStep(
+                "generate schema",
+                ("uv", "run", "generator"),
+                generated_files=(Path("schemas/generated.json"),),
+            ),
+            verify.VerificationStep("must not run", ("git", "diff", "--check")),
+        ),
+        repository_root=tmp_path,
+        run_command=changing_generator,
+        output=output.append,
+    )
+
+    assert result == 1
+    assert calls == [["uv", "run", "generator"]]
+    assert schema.read_text(encoding="utf-8") == "after\n"
+    assert "generated schema drift" in "\n".join(output).lower()
+
+
+def test_unrelated_dirty_file_does_not_trigger_schema_drift(tmp_path: Path) -> None:
+    verify = load_verify_module()
+    schema = tmp_path / "schemas" / "generated.json"
+    schema.parent.mkdir()
+    schema.write_text("stable\n", encoding="utf-8")
+    (tmp_path / "unrelated.txt").write_text("pre-existing work\n", encoding="utf-8")
+
+    def stable_generator(argv: list[str], **_: Any) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(argv, 0)
+
+    result = verify.run_steps(
+        (
+            verify.VerificationStep(
+                "generate schema",
+                ("uv", "run", "generator"),
+                generated_files=(Path("schemas/generated.json"),),
+            ),
+        ),
+        repository_root=tmp_path,
+        run_command=stable_generator,
+        output=lambda _: None,
+    )
+
+    assert result == 0
+
+
+def test_full_schema_generators_declare_tracked_outputs() -> None:
+    verify = load_verify_module()
+    steps = verify.build_full_steps(os_name="posix")
+    generated = {
+        step.name: step.generated_files for step in steps if step.generated_files
+    }
+
+    assert generated == {
+        "edit schema": (Path("schemas/edit.schema.json"),),
+        "image generation schema": (Path("schemas/image-generation.schema.json"),),
+    }
+
+
+def test_environment_secret_is_never_printed(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    verify = load_verify_module()
+    secret = "do-not-print-this-api-key"
+    monkeypatch.setenv("ELEVENLABS_API_KEY", secret)
+
+    def successful_run(argv: list[str], **_: Any) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(argv, 0)
+
+    result = verify.run_steps(
+        (verify.VerificationStep("safe", ("uv", "run", "pytest")),),
+        repository_root=tmp_path,
+        run_command=successful_run,
+    )
+
+    assert result == 0
+    assert secret not in capsys.readouterr().out
