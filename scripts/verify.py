@@ -100,6 +100,10 @@ RunCommand = Callable[..., subprocess.CompletedProcess[Any]]
 Output = Callable[[str], None]
 
 
+def console_output(message: str) -> None:
+    print(message, flush=True)
+
+
 def _file_state(path: Path) -> FileState:
     if not path.exists():
         return FileState(exists=False, sha256=None)
@@ -111,7 +115,7 @@ def run_steps(
     *,
     repository_root: Path = REPOSITORY_ROOT,
     run_command: RunCommand = subprocess.run,
-    output: Output = print,
+    output: Output = console_output,
 ) -> int:
     total = len(steps)
     for index, step in enumerate(steps, start=1):
@@ -122,13 +126,18 @@ def run_steps(
         output(f"$ {shlex.join(step.argv)}")
         environment = os.environ.copy()
         environment.update(step.extra_env)
-        result = run_command(
-            list(step.argv),
-            cwd=repository_root,
-            env=environment,
-            check=False,
-            shell=False,
-        )
+        try:
+            result = run_command(
+                list(step.argv),
+                cwd=repository_root,
+                env=environment,
+                check=False,
+                shell=False,
+            )
+        except OSError as error:
+            output(f"[FAIL] {step.name} could not start ({type(error).__name__})")
+            output(f"[SUMMARY] stopped after {index}/{total} steps")
+            return 1
         if result.returncode != 0:
             output(f"[FAIL] {step.name} exited with status {result.returncode}")
             output(f"[SUMMARY] stopped after {index}/{total} steps")

@@ -67,6 +67,7 @@ def test_runner_uses_list_argv_repository_root_and_no_shell(tmp_path: Path) -> N
 def test_runner_returns_first_failure_and_stops_subsequent_steps(tmp_path: Path) -> None:
     verify = load_verify_module()
     calls: list[list[str]] = []
+    output: list[str] = []
 
     def fake_run(argv: list[str], **_: Any) -> subprocess.CompletedProcess[str]:
         calls.append(argv)
@@ -79,11 +80,39 @@ def test_runner_returns_first_failure_and_stops_subsequent_steps(tmp_path: Path)
         ),
         repository_root=tmp_path,
         run_command=fake_run,
-        output=lambda _: None,
+        output=output.append,
     )
 
     assert result == 7
     assert calls == [["uv", "run", "pytest"]]
+    assert output[-2:] == [
+        "[FAIL] first exited with status 7",
+        "[SUMMARY] stopped after 1/2 steps",
+    ]
+
+
+def test_runner_summarizes_command_start_failure_and_stops(tmp_path: Path) -> None:
+    verify = load_verify_module()
+    output: list[str] = []
+
+    def missing_command(argv: list[str], **_: Any) -> subprocess.CompletedProcess[str]:
+        raise FileNotFoundError(argv[0])
+
+    result = verify.run_steps(
+        (
+            verify.VerificationStep("missing", ("missing-tool", "check")),
+            verify.VerificationStep("must not run", ("git", "diff", "--check")),
+        ),
+        repository_root=tmp_path,
+        run_command=missing_command,
+        output=output.append,
+    )
+
+    assert result == 1
+    assert output[-2:] == [
+        "[FAIL] missing could not start (FileNotFoundError)",
+        "[SUMMARY] stopped after 1/2 steps",
+    ]
 
 
 def test_fast_without_pytest_selects_only_low_cost_checks() -> None:
@@ -100,7 +129,7 @@ def test_fast_without_pytest_selects_only_low_cost_checks() -> None:
 def test_fast_forwards_focused_pytest_targets_exactly() -> None:
     verify = load_verify_module()
     targets = (
-        "tests/test_job_service.py::test_job_submission_is_idempotent",
+        "tests/test_job_service.py::test_submit_get_list_and_restart_persist_campaign_level_job",
         "tests/test_voice_service.py",
     )
 
@@ -133,10 +162,11 @@ def test_fast_cli_selects_requested_focused_target() -> None:
 
 def test_full_contains_agents_deterministic_baseline_in_order() -> None:
     verify = load_verify_module()
-    required = [
+    expected = [
         ("uv", "sync", "--locked", "--all-groups"),
         ("uv", "run", "pytest"),
         ("uv", "run", "ruff", "check", "src", "tests"),
+        ("uv", "run", "ruff", "check", "scripts"),
         ("uv", "run", "python", "-m", "mypy", "src"),
         ("uv", "run", "python", "-m", "mypy", "tests"),
         ("uv", "run", "python", "-m", "auraly_pipeline.schema"),
@@ -159,7 +189,7 @@ def test_full_contains_agents_deterministic_baseline_in_order() -> None:
 
     actual = [step.argv for step in verify.build_full_steps(os_name="posix")]
 
-    assert [argv for argv in actual if argv in required] == required
+    assert actual == expected
 
 
 def test_full_test_mypy_uses_cross_platform_mypy_path_environment() -> None:
@@ -255,6 +285,44 @@ def test_unrelated_dirty_file_does_not_trigger_schema_drift(tmp_path: Path) -> N
     )
 
     assert result == 0
+
+
+@pytest.mark.parametrize(
+    ("before", "after"),
+    [(None, "created\n"), ("existing\n", None)],
+    ids=["created", "deleted"],
+)
+def test_schema_existence_transition_is_drift(
+    tmp_path: Path, before: str | None, after: str | None
+) -> None:
+    verify = load_verify_module()
+    schema = tmp_path / "schemas" / "generated.json"
+    schema.parent.mkdir()
+    if before is not None:
+        schema.write_text(before, encoding="utf-8")
+
+    def changing_generator(argv: list[str], **_: Any) -> subprocess.CompletedProcess[str]:
+        if after is None:
+            schema.unlink()
+        else:
+            schema.write_text(after, encoding="utf-8")
+        return subprocess.CompletedProcess(argv, 0)
+
+    result = verify.run_steps(
+        (
+            verify.VerificationStep(
+                "generate schema",
+                ("uv", "run", "generator"),
+                generated_files=(Path("schemas/generated.json"),),
+            ),
+        ),
+        repository_root=tmp_path,
+        run_command=changing_generator,
+        output=lambda _: None,
+    )
+
+    assert result == 1
+    assert schema.exists() is (after is not None)
 
 
 def test_full_schema_generators_declare_tracked_outputs() -> None:
@@ -369,6 +437,31 @@ def test_runner_prints_progress_and_final_summary(tmp_path: Path) -> None:
         "[PASS] example",
         "[SUMMARY] 1/1 steps passed",
     ]
+
+
+def test_default_progress_is_flushed_before_child_output() -> None:
+    program = """
+from scripts.verify import VerificationStep, run_steps
+import sys
+
+step = VerificationStep(
+    "child",
+    (sys.executable, "-c", "print('CHILD OUTPUT', flush=True)"),
+)
+raise SystemExit(run_steps((step,)))
+"""
+
+    result = subprocess.run(
+        [sys.executable, "-c", program],
+        cwd=REPOSITORY_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    lines = result.stdout.splitlines()
+    assert lines.index("[1/1] child") < lines.index("CHILD OUTPUT")
 
 
 def test_linux_ci_runs_full_harness_with_locked_toolchain() -> None:
