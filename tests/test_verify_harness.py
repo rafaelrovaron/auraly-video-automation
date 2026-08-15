@@ -73,3 +73,48 @@ def test_runner_returns_first_failure_and_stops_subsequent_steps(tmp_path: Path)
 
     assert result == 7
     assert calls == [["uv", "run", "pytest"]]
+
+
+def test_fast_without_pytest_selects_only_low_cost_checks() -> None:
+    verify = load_verify_module()
+
+    steps = verify.build_fast_steps(())
+
+    assert [step.argv for step in steps] == [
+        ("uv", "run", "ruff", "check", "src", "tests", "scripts"),
+        ("uv", "run", "python", "-m", "mypy", "src"),
+    ]
+
+
+def test_fast_forwards_focused_pytest_targets_exactly() -> None:
+    verify = load_verify_module()
+    targets = (
+        "tests/test_job_service.py::test_job_submission_is_idempotent",
+        "tests/test_voice_service.py",
+    )
+
+    steps = verify.build_fast_steps(targets)
+
+    assert steps[-1].argv == ("uv", "run", "pytest", *targets)
+    assert sum("pytest" in step.argv for step in steps) == 1
+
+
+def test_fast_cli_selects_requested_focused_target() -> None:
+    verify = load_verify_module()
+    selected: list[Any] = []
+
+    def fake_run_steps(steps: Any) -> int:
+        selected.extend(steps)
+        return 0
+
+    setattr(verify, "run_steps", fake_run_steps)
+
+    result = verify.main(["fast", "--pytest", "tests/test_verify_harness.py"])
+
+    assert result == 0
+    assert selected[-1].argv == (
+        "uv",
+        "run",
+        "pytest",
+        "tests/test_verify_harness.py",
+    )

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 import os
@@ -18,6 +19,27 @@ class VerificationStep:
     argv: tuple[str, ...]
     extra_env: Mapping[str, str] = field(default_factory=dict)
     generated_files: tuple[Path, ...] = ()
+
+
+def build_fast_steps(pytest_targets: Sequence[str]) -> tuple[VerificationStep, ...]:
+    steps = [
+        VerificationStep(
+            name="Ruff source, tests, and harness",
+            argv=("uv", "run", "ruff", "check", "src", "tests", "scripts"),
+        ),
+        VerificationStep(
+            name="mypy source",
+            argv=("uv", "run", "python", "-m", "mypy", "src"),
+        ),
+    ]
+    if pytest_targets:
+        steps.append(
+            VerificationStep(
+                name="focused pytest",
+                argv=("uv", "run", "pytest", *pytest_targets),
+            )
+        )
+    return tuple(steps)
 
 
 RunCommand = Callable[..., subprocess.CompletedProcess[Any]]
@@ -52,3 +74,27 @@ def run_steps(
 
     output(f"[SUMMARY] {total}/{total} steps passed")
     return 0
+
+
+def _argument_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Run deterministic Auraly verification checks.")
+    subparsers = parser.add_subparsers(dest="mode", required=True)
+    fast_parser = subparsers.add_parser("fast", help="Run low-cost task-level checks.")
+    fast_parser.add_argument(
+        "--pytest",
+        dest="pytest_targets",
+        nargs="+",
+        default=(),
+        metavar="TARGET",
+        help="Run exactly these focused pytest targets after Ruff and mypy.",
+    )
+    return parser
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    arguments = _argument_parser().parse_args(argv)
+    return run_steps(build_fast_steps(arguments.pytest_targets))
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
