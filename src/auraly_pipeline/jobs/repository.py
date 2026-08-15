@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import datetime, timedelta
+from typing import Generic, TypeVar
 from uuid import uuid4
 
 from sqlalchemy import Select, func, select, text, update
@@ -20,6 +22,16 @@ class DuplicateIdempotencyRace(RuntimeError):
 
 class JobClaimConflict(RuntimeError):
     """Signals that a worker no longer owns the active claim."""
+
+
+T = TypeVar("T")
+
+
+@dataclass(frozen=True, slots=True)
+class _LinkedJobCreateResult(Generic[T]):
+    row: JobRow
+    linked: T | None
+    reused: bool
 
 
 class JobRepository:
@@ -143,6 +155,41 @@ class JobRepository:
                     raise DuplicateIdempotencyRace from exc
                 raise
             return self._reload(session, row.id)
+
+    def create_linked(
+        self,
+        request: JobSubmit,
+        now: datetime,
+        create_linked: Callable[[Session, JobRow], T],
+        validate: Callable[[JobRow], None],
+    ) -> _LinkedJobCreateResult[T]:
+        with self._session_factory() as session:
+            try:
+                self._begin_immediate(session)
+                existing = session.scalar(
+                    select(JobRow)
+                    .where(JobRow.idempotency_key == request.idempotency_key)
+                    .options(selectinload(JobRow.attempts), selectinload(JobRow.events))
+                )
+                if existing is not None:
+                    session.commit()
+                    return _LinkedJobCreateResult(
+                        row=self._reload(session, existing.id),
+                        linked=None,
+                        reused=True,
+                    )
+                row = self.create_in_session(session, request, now)
+                linked = create_linked(session, row)
+                validate(row)
+                session.commit()
+                return _LinkedJobCreateResult(
+                    row=self._reload(session, row.id),
+                    linked=linked,
+                    reused=False,
+                )
+            except Exception:
+                session.rollback()
+                raise
 
     def apply(
         self,

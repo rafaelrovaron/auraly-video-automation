@@ -4,7 +4,14 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from threading import Barrier
+from threading import Lock
 
+from sqlalchemy import text
+from sqlalchemy.orm import Session
+
+from auraly_pipeline.campaigns.persistence import create_sqlite_engine
+from auraly_pipeline.jobs.db_models import JobRow
+from auraly_pipeline.jobs.domain import Job
 from auraly_pipeline.jobs.domain import JobSubmit
 from auraly_pipeline.jobs.service import JobService
 
@@ -34,6 +41,61 @@ def test_concurrent_duplicate_submissions_create_exactly_one_job(tmp_path: Path)
         identifiers = list(executor.map(submit, [first, second]))
 
     assert identifiers[0] == identifiers[1]
+    assert len(first.list_jobs()) == 1
+    first.close()
+    second.close()
+
+
+def test_concurrent_linked_submissions_invoke_creation_callback_once(tmp_path: Path) -> None:
+    database_path = tmp_path / "linked-race.db"
+    first = JobService.for_database(database_path, clock=lambda: NOW)
+    second = JobService.for_database(database_path, clock=lambda: NOW)
+    engine = create_sqlite_engine(database_path)
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "CREATE TABLE linked_job_test_rows ("
+                "id TEXT PRIMARY KEY, job_id TEXT NOT NULL UNIQUE, "
+                "FOREIGN KEY(job_id) REFERENCES jobs(id) ON DELETE RESTRICT)"
+            )
+        )
+    engine.dispose()
+    barrier = Barrier(2)
+    callback_lock = Lock()
+    callback_calls = 0
+
+    def create_linked(session: Session, row: JobRow) -> str:
+        nonlocal callback_calls
+        with callback_lock:
+            callback_calls += 1
+        session.execute(
+            text("INSERT INTO linked_job_test_rows (id,job_id) VALUES ('linked-1',:job_id)"),
+            {"job_id": row.id},
+        )
+        return "linked-1"
+
+    def load_existing(job: Job) -> str:
+        load_engine = create_sqlite_engine(database_path)
+        with load_engine.connect() as connection:
+            linked = connection.execute(
+                text("SELECT id FROM linked_job_test_rows WHERE job_id=:job_id"),
+                {"job_id": job.job_id},
+            ).scalar_one()
+        load_engine.dispose()
+        return str(linked)
+
+    def submit(service: JobService) -> tuple[str, str]:
+        barrier.wait()
+        submission = service.submit_linked_job(
+            _request("concurrent-linked"), create_linked, load_existing
+        )
+        return submission.job.job_id, submission.linked
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        submissions = list(executor.map(submit, [first, second]))
+
+    assert callback_calls == 1
+    assert submissions[0] == submissions[1]
     assert len(first.list_jobs()) == 1
     first.close()
     second.close()

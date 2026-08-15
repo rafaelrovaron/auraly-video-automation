@@ -16,11 +16,13 @@ from auraly_pipeline.campaigns.domain import CampaignCreate
 from auraly_pipeline.campaigns.persistence import create_sqlite_engine, sqlite_url
 from auraly_pipeline.campaigns.service import CampaignService
 from auraly_pipeline.jobs.domain import (
+    Job,
     JobExecutionOutcome,
     JobExecutionResult,
     JobSubmit,
     RetrySafety,
 )
+from auraly_pipeline.jobs.db_models import JobRow
 from auraly_pipeline.jobs.handlers import JobExecutionContext, SimulatedWorkerCrash
 from auraly_pipeline.jobs.repository import DuplicateIdempotencyRace, JobRepository
 from auraly_pipeline.jobs.service import (
@@ -158,6 +160,116 @@ def test_scene_variant_job_requires_existing_matching_campaign(tmp_path: Path) -
     missing["sceneVariantId"] = "11111111-1111-4111-8111-111111111111"
     with pytest.raises(JobReferenceError, match="SceneVariant"):
         service.submit_job(JobSubmit.model_validate(missing))
+    service.close()
+
+
+def _create_linked_test_table(database_path: Path) -> None:
+    engine = create_sqlite_engine(database_path)
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "CREATE TABLE linked_job_test_rows ("
+                "id TEXT PRIMARY KEY, job_id TEXT NOT NULL UNIQUE, "
+                "FOREIGN KEY(job_id) REFERENCES jobs(id) ON DELETE RESTRICT)"
+            )
+        )
+    engine.dispose()
+
+
+def _load_linked_test_row(database_path: Path, job: Job) -> str:
+    engine = create_sqlite_engine(database_path)
+    with engine.connect() as connection:
+        linked_id = connection.execute(
+            text("SELECT id FROM linked_job_test_rows WHERE job_id=:job_id"),
+            {"job_id": job.job_id},
+        ).scalar_one()
+    engine.dispose()
+    return str(linked_id)
+
+
+def test_submit_linked_job_commits_job_events_and_linked_row_once(tmp_path: Path) -> None:
+    database_path = tmp_path / "linked-success.db"
+    service = JobService.for_database(database_path, clock=lambda: NOW)
+    _create_linked_test_table(database_path)
+
+    def create_linked(session: Session, row: JobRow) -> str:
+        session.execute(
+            text("INSERT INTO linked_job_test_rows (id,job_id) VALUES ('linked-1',:job_id)"),
+            {"job_id": row.id},
+        )
+        return "linked-1"
+
+    submitted = service.submit_linked_job(
+        _local_job("fake.success", "linked-success"),
+        create_linked,
+        lambda job: _load_linked_test_row(database_path, job),
+    )
+
+    assert submitted.linked == "linked-1"
+    assert submitted.reused is False
+    assert submitted.job.status == "queued"
+    assert [event.event_type for event in submitted.job.events] == ["job.created", "job.queued"]
+    assert _load_linked_test_row(database_path, submitted.job) == "linked-1"
+    service.close()
+
+
+def test_submit_linked_job_rolls_back_job_events_when_callback_raises(tmp_path: Path) -> None:
+    database_path = tmp_path / "linked-rollback.db"
+    service = JobService.for_database(database_path, clock=lambda: NOW)
+    _create_linked_test_table(database_path)
+
+    def create_linked(session: Session, row: JobRow) -> str:
+        session.execute(
+            text("INSERT INTO linked_job_test_rows (id,job_id) VALUES ('linked-1',:job_id)"),
+            {"job_id": row.id},
+        )
+        raise RuntimeError("linked callback failed")
+
+    with pytest.raises(RuntimeError, match="linked callback failed"):
+        service.submit_linked_job(
+            _local_job("fake.success", "linked-rollback"),
+            create_linked,
+            lambda job: _load_linked_test_row(database_path, job),
+        )
+
+    engine = create_sqlite_engine(database_path)
+    with engine.connect() as connection:
+        assert connection.execute(text("SELECT count(*) FROM jobs")).scalar_one() == 0
+        assert connection.execute(text("SELECT count(*) FROM job_events")).scalar_one() == 0
+        assert connection.execute(text("SELECT count(*) FROM linked_job_test_rows")).scalar_one() == 0
+    engine.dispose()
+    service.close()
+
+
+def test_submit_linked_job_reuses_matching_job_without_calling_callback(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "linked-reuse.db"
+    service = JobService.for_database(database_path, clock=lambda: NOW)
+    _create_linked_test_table(database_path)
+    callback_calls = 0
+
+    def create_linked(session: Session, row: JobRow) -> str:
+        nonlocal callback_calls
+        callback_calls += 1
+        session.execute(
+            text("INSERT INTO linked_job_test_rows (id,job_id) VALUES ('linked-1',:job_id)"),
+            {"job_id": row.id},
+        )
+        return "linked-1"
+
+    request = _local_job("fake.success", "linked-reuse")
+    first = service.submit_linked_job(
+        request, create_linked, lambda job: _load_linked_test_row(database_path, job)
+    )
+    reused = service.submit_linked_job(
+        request, create_linked, lambda job: _load_linked_test_row(database_path, job)
+    )
+
+    assert callback_calls == 1
+    assert reused.reused is True
+    assert reused.job == first.job
+    assert reused.linked == first.linked == "linked-1"
     service.close()
 
 

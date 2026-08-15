@@ -4,6 +4,7 @@ from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 from threading import Event, Thread
+from typing import TypeVar, cast
 
 from pydantic import ValidationError
 from sqlalchemy.engine import Engine
@@ -12,6 +13,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from auraly_pipeline.campaigns.persistence import create_sqlite_engine, migrate_database
 from auraly_pipeline.config_paths import configured_work_root
+from auraly_pipeline.jobs import LinkedJobSubmission
 from auraly_pipeline.jobs.db_models import JobAttemptRow, JobEventRow, JobRow
 from auraly_pipeline.jobs.domain import (
     Job,
@@ -36,6 +38,9 @@ from auraly_pipeline.jobs.repository import (
 )
 from auraly_pipeline.jobs.state_machine import InvalidJobTransition, JobStatus
 from auraly_pipeline.metadata_security import validate_safe_identifier
+
+
+T = TypeVar("T")
 
 
 class JobError(RuntimeError):
@@ -184,6 +189,36 @@ class JobService:
         except IntegrityError as exc:
             raise JobPersistenceError from exc
         return self._to_domain(row)
+
+    def submit_linked_job(
+        self,
+        request: JobSubmit,
+        create_linked: Callable[[Session, JobRow], T],
+        load_existing: Callable[[Job], T],
+    ) -> LinkedJobSubmission[T]:
+        handler = self._handlers.get(request.job_type)
+        if handler is None:
+            raise JobHandlerNotFoundError
+        if getattr(handler, "retry_safety", None) != request.retry_safety:
+            raise JobRetrySafetyError
+        self._validate_references(request)
+        try:
+            result = self._repository.create_linked(
+                request,
+                self._as_utc(self._clock()),
+                create_linked,
+                self._validate_persisted_row,
+            )
+        except IntegrityError as exc:
+            raise JobPersistenceError from exc
+        if result.reused:
+            job = self._reuse_or_conflict(result.row, request)
+            return LinkedJobSubmission(job=job, linked=load_existing(job), reused=True)
+        return LinkedJobSubmission(
+            job=self._to_domain(result.row),
+            linked=cast(T, result.linked),
+            reused=False,
+        )
 
     def get_job(self, job_id: str) -> Job:
         row = self._repository.get_by_id(job_id)
