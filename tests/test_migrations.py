@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
+import pytest
 from alembic import command
 from alembic.config import Config
 from sqlalchemy import create_engine, inspect, text
@@ -78,10 +80,18 @@ def test_migrations_are_idempotent_and_application_enables_foreign_keys(tmp_path
     engine.dispose()
 
 
-def test_database_path_accepts_msys_drive_form(monkeypatch) -> None:
+@pytest.mark.skipif(os.name != "nt", reason="Windows MSYS path semantics only")
+def test_database_path_accepts_msys_drive_form(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("AURALY_DATABASE_PATH", r"\c\Users\Example\.auraly\auraly.db")
 
     assert default_database_path() == Path(r"C:\Users\Example\.auraly\auraly.db")
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX path semantics only")
+def test_database_path_accepts_native_posix_form(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AURALY_DATABASE_PATH", "/tmp/auraly/auraly.db")
+
+    assert default_database_path() == Path("/tmp/auraly/auraly.db")
 
 
 def test_direct_alembic_upgrade_creates_parent_and_enables_wal(tmp_path: Path) -> None:
