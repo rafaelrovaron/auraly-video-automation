@@ -8,10 +8,12 @@ from types import ModuleType
 from typing import Any
 
 import pytest
+import yaml  # type: ignore[import-untyped]
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 VERIFY_SCRIPT = REPOSITORY_ROOT / "scripts" / "verify.py"
+VERIFY_WORKFLOW = REPOSITORY_ROOT / ".github" / "workflows" / "verify.yml"
 
 
 def load_verify_module() -> ModuleType:
@@ -22,6 +24,13 @@ def load_verify_module() -> ModuleType:
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
+
+
+def load_verify_workflow() -> dict[Any, Any]:
+    assert VERIFY_WORKFLOW.is_file(), ".github/workflows/verify.yml must define CI verification"
+    loaded = yaml.safe_load(VERIFY_WORKFLOW.read_text(encoding="utf-8"))
+    assert isinstance(loaded, dict)
+    return loaded
 
 
 def test_verification_step_uses_explicit_argv_and_repository_root() -> None:
@@ -360,3 +369,29 @@ def test_runner_prints_progress_and_final_summary(tmp_path: Path) -> None:
         "[PASS] example",
         "[SUMMARY] 1/1 steps passed",
     ]
+
+
+def test_linux_ci_runs_full_harness_with_locked_toolchain() -> None:
+    workflow = load_verify_workflow()
+    triggers = workflow.get("on", workflow.get(True))
+    assert triggers == {"push": {"branches": ["main"]}, "pull_request": None}
+    assert workflow["permissions"] == {"contents": "read"}
+    assert workflow["concurrency"]["cancel-in-progress"] is True
+
+    job = workflow["jobs"]["linux-full"]
+    assert job["runs-on"] == "ubuntu-latest"
+    uses = {step.get("uses") for step in job["steps"]}
+    assert "actions/checkout@v6" in uses
+    assert "actions/setup-python@v6" in uses
+    assert "actions/setup-node@v6" in uses
+    assert any(str(action).startswith("astral-sh/setup-uv@") for action in uses)
+
+    python_step = next(step for step in job["steps"] if step.get("uses") == "actions/setup-python@v6")
+    node_step = next(step for step in job["steps"] if step.get("uses") == "actions/setup-node@v6")
+    assert python_step["with"]["python-version"] == "3.11"
+    assert node_step["with"]["node-version"] == "22"
+
+    commands = [step["run"] for step in job["steps"] if "run" in step]
+    assert any("install" in command and "ffmpeg" in command for command in commands)
+    assert "uv run python scripts/verify.py full" in commands
+    assert "secrets" not in str(workflow).lower()
