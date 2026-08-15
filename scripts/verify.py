@@ -42,6 +42,51 @@ def build_fast_steps(pytest_targets: Sequence[str]) -> tuple[VerificationStep, .
     return tuple(steps)
 
 
+def npm_executable(os_name: str = os.name) -> str:
+    return "npm.cmd" if os_name == "nt" else "npm"
+
+
+def build_full_steps(os_name: str = os.name) -> tuple[VerificationStep, ...]:
+    npm = npm_executable(os_name)
+    return (
+        VerificationStep("uv locked sync", ("uv", "sync", "--locked", "--all-groups")),
+        VerificationStep("full pytest", ("uv", "run", "pytest")),
+        VerificationStep("Ruff source and tests", ("uv", "run", "ruff", "check", "src", "tests")),
+        VerificationStep("Ruff harness", ("uv", "run", "ruff", "check", "scripts")),
+        VerificationStep("mypy source", ("uv", "run", "python", "-m", "mypy", "src")),
+        VerificationStep(
+            "mypy tests",
+            ("uv", "run", "python", "-m", "mypy", "tests"),
+            extra_env={"MYPYPATH": "src"},
+        ),
+        VerificationStep(
+            "edit schema",
+            ("uv", "run", "python", "-m", "auraly_pipeline.schema"),
+        ),
+        VerificationStep(
+            "image generation schema",
+            (
+                "uv",
+                "run",
+                "python",
+                "-m",
+                "auraly_pipeline.cli",
+                "export-image-generation-schema",
+                "--output",
+                "schemas/image-generation.schema.json",
+            ),
+        ),
+        VerificationStep("uv dependency check", ("uv", "pip", "check")),
+        VerificationStep("npm locked install", (npm, "ci")),
+        VerificationStep("HyperFrames doctor", (npm, "run", "hf:doctor")),
+        VerificationStep(
+            "npm production audit",
+            (npm, "audit", "--omit=dev", "--audit-level=high"),
+        ),
+        VerificationStep("Git whitespace check", ("git", "diff", "--check")),
+    )
+
+
 RunCommand = Callable[..., subprocess.CompletedProcess[Any]]
 Output = Callable[[str], None]
 
@@ -88,12 +133,15 @@ def _argument_parser() -> argparse.ArgumentParser:
         metavar="TARGET",
         help="Run exactly these focused pytest targets after Ruff and mypy.",
     )
+    subparsers.add_parser("full", help="Run the complete deterministic local gate.")
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     arguments = _argument_parser().parse_args(argv)
-    return run_steps(build_fast_steps(arguments.pytest_targets))
+    if arguments.mode == "fast":
+        return run_steps(build_fast_steps(arguments.pytest_targets))
+    return run_steps(build_full_steps())
 
 
 if __name__ == "__main__":

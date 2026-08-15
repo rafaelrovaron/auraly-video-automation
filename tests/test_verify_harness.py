@@ -118,3 +118,70 @@ def test_fast_cli_selects_requested_focused_target() -> None:
         "pytest",
         "tests/test_verify_harness.py",
     )
+
+
+def test_full_contains_agents_deterministic_baseline_in_order() -> None:
+    verify = load_verify_module()
+    required = [
+        ("uv", "sync", "--locked", "--all-groups"),
+        ("uv", "run", "pytest"),
+        ("uv", "run", "ruff", "check", "src", "tests"),
+        ("uv", "run", "python", "-m", "mypy", "src"),
+        ("uv", "run", "python", "-m", "mypy", "tests"),
+        ("uv", "run", "python", "-m", "auraly_pipeline.schema"),
+        (
+            "uv",
+            "run",
+            "python",
+            "-m",
+            "auraly_pipeline.cli",
+            "export-image-generation-schema",
+            "--output",
+            "schemas/image-generation.schema.json",
+        ),
+        ("uv", "pip", "check"),
+        ("npm", "ci"),
+        ("npm", "run", "hf:doctor"),
+        ("npm", "audit", "--omit=dev", "--audit-level=high"),
+        ("git", "diff", "--check"),
+    ]
+
+    actual = [step.argv for step in verify.build_full_steps(os_name="posix")]
+
+    assert [argv for argv in actual if argv in required] == required
+
+
+def test_full_test_mypy_uses_cross_platform_mypy_path_environment() -> None:
+    verify = load_verify_module()
+
+    steps = verify.build_full_steps(os_name="posix")
+    test_mypy = next(step for step in steps if step.argv[-1] == "tests" and "mypy" in step.argv)
+
+    assert test_mypy.extra_env == {"MYPYPATH": "src"}
+
+
+def test_full_uses_platform_appropriate_npm_executable() -> None:
+    verify = load_verify_module()
+
+    windows = verify.build_full_steps(os_name="nt")
+    posix = verify.build_full_steps(os_name="posix")
+
+    assert {step.argv[0] for step in windows if "npm" in step.argv[0]} == {"npm.cmd"}
+    assert {step.argv[0] for step in posix if "npm" in step.argv[0]} == {"npm"}
+
+
+def test_full_cli_selects_the_full_registry() -> None:
+    verify = load_verify_module()
+    selected: list[Any] = []
+
+    def fake_run_steps(steps: Any) -> int:
+        selected.extend(steps)
+        return 0
+
+    setattr(verify, "run_steps", fake_run_steps)
+
+    result = verify.main(["full"])
+
+    assert result == 0
+    assert selected[0].argv == ("uv", "sync", "--locked", "--all-groups")
+    assert selected[-1].argv == ("git", "diff", "--check")
