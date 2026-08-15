@@ -395,3 +395,34 @@ def test_linux_ci_runs_full_harness_with_locked_toolchain() -> None:
     assert any("install" in command and "ffmpeg" in command for command in commands)
     assert "uv run python scripts/verify.py full" in commands
     assert "secrets" not in str(workflow).lower()
+
+
+def test_windows_ci_runs_meaningful_cross_platform_fast_verification() -> None:
+    workflow = load_verify_workflow()
+
+    job = workflow["jobs"]["windows-focused"]
+    assert job["runs-on"] == "windows-latest"
+    uses = {step.get("uses") for step in job["steps"]}
+    assert "actions/checkout@v6" in uses
+    assert "actions/setup-python@v6" in uses
+    assert any(str(action).startswith("astral-sh/setup-uv@") for action in uses)
+
+    commands = [step["run"] for step in job["steps"] if "run" in step]
+    assert "uv sync --locked --all-groups" in commands
+    focused = next(command for command in commands if "scripts/verify.py fast" in command)
+    assert focused.split() == [
+        "uv",
+        "run",
+        "python",
+        "scripts/verify.py",
+        "fast",
+        "--pytest",
+        "tests/test_verify_harness.py",
+        "tests/test_config_paths.py",
+        "tests/test_models.py",
+        "tests/test_image_generation.py",
+        "tests/test_job_migrations.py",
+        "tests/test_migration_lock.py",
+        "tests/test_job_concurrency.py",
+    ]
+    assert "secrets" not in str(job).lower()

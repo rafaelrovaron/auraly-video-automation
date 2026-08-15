@@ -47,3 +47,35 @@ jobs:
 
       - name: Run full deterministic verification
         run: uv run python scripts/verify.py full
+
+  windows-focused:
+    name: Windows focused verification
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: true
+
+      - name: Synchronize locked dependencies
+        run: uv sync --locked --all-groups
+
+      - name: Run focused cross-platform verification
+        run: >-
+          uv run python scripts/verify.py fast --pytest
+          tests/test_verify_harness.py
+          tests/test_config_paths.py
+          tests/test_models.py
+          tests/test_image_generation.py
+          tests/test_job_migrations.py
+          tests/test_migration_lock.py
+          tests/test_job_concurrency.py
