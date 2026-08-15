@@ -10,6 +10,7 @@ from sqlalchemy import engine_from_config, pool
 from sqlalchemy.engine import make_url
 
 from auraly_pipeline.campaigns.db_models import Base
+import auraly_pipeline.images.db_models  # noqa: F401
 import auraly_pipeline.jobs.db_models  # noqa: F401
 import auraly_pipeline.voices.db_models  # noqa: F401
 from auraly_pipeline.campaigns.persistence import default_database_path, sqlite_url

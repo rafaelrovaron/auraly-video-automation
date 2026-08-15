@@ -75,7 +75,7 @@ def test_migrations_are_idempotent_and_application_enables_foreign_keys(tmp_path
         assert connection.execute(text("PRAGMA busy_timeout")).scalar_one() == 5000
         assert connection.execute(text("PRAGMA synchronous")).scalar_one() == 1
         assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == (
-            "0003_voice_master"
+            "0004_image_domain"
         )
     engine.dispose()
 
@@ -105,6 +105,6 @@ def test_direct_alembic_upgrade_creates_parent_and_enables_wal(tmp_path: Path) -
     with engine.connect() as connection:
         assert connection.execute(text("PRAGMA journal_mode")).scalar_one().casefold() == "wal"
         assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == (
-            "0003_voice_master"
+            "0004_image_domain"
         )
     engine.dispose()
