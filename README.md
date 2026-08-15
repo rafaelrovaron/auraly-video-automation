@@ -20,6 +20,8 @@ Pipeline local, determinística, retomável e auditável para produção em mass
 - orquestração local durável com `Job`, tentativas imutáveis após finalização e eventos append-only;
 - fila SQLite, idempotência, claim atômico, leases renováveis, retries e recuperação auditável;
 - CLI JSON `job submit/get/list/worker-once/cancel/resume/recover` e handlers fake determinísticos;
+- Voice Master persistente com API oficial ElevenLabs, processamento/QC local, aprovação humana,
+  budget gate, reconciliação e proteção contra geração paga duplicada;
 - contratos Google Flow v1.1 e schema de manifesto;
 - trusted project/download roots, validação canônica de contexto e paths;
 - correlação segura de downloads, partial-download handling, finalização não destrutiva,
@@ -41,6 +43,20 @@ música e render editorial também permanecem planejados; a integração oficial
 processamento de Voice Master e transcript/QC já pertencem ao Goal 3 implementado. Nenhuma
 capacidade futura deve ser inferida apenas por constar no PRD.
 
+### Estado de verificação dos milestones
+
+O projeto usa termos separados:
+
+- `IMPLEMENTED`: produção e testes requeridos existem;
+- `LOCAL_VERIFIED`: o baseline determinístico/local requerido foi executado com sucesso, sem
+  implicar provider real;
+- `PROVIDER_VERIFIED`: um canário real explicitamente aprovado foi concluído.
+
+Goals 0–3 estão `IMPLEMENTED` e `LOCAL_VERIFIED`. O provider canary de ElevenLabs não foi
+demonstrado e permanece pendente como `Goal 3C`; portanto Goal 3 não é declarado
+`PROVIDER_VERIFIED`. Nomes históricos de commit com `[verified]` não são evidência independente
+de CI ou de provider.
+
 ## Arquitetura oficial de geração de imagens
 
 O único caminho suportado é:
@@ -60,7 +76,9 @@ A IA/Hermes cria os prompts e toma decisões criativas. A aplicação executará
 forma mecânica, auditável e retomável. O browser usará perfil Chromium persistente dedicado,
 concorrência 1, seletores verificáveis por roles/labels/texto/DOM, screenshots e trace em
 falhas relevantes. Se a UI não puder ser confirmada, o worker deverá parar com segurança,
-sem cliques cegos por coordenadas. As candidatas e versões rejeitadas serão preservadas.
+sem cliques cegos por coordenadas. A grade visível terá evidência por screenshot; toda candidata
+intencionalmente baixada e toda versão baixada rejeitada serão preservadas sem overwrite. Baixar
+toda candidata visível não é requisito P0.
 
 Google Flow + Playwright é o único provider/browser workflow ativo. Não há provider alternativo
 de geração de imagens. A dependência Playwright Python está declarada, mas o browser runtime
@@ -335,7 +353,7 @@ Fluxo antes de criar um novo `edit.json`:
 ```bash
 uv run pytest --cov=auraly_pipeline --cov-report=term-missing
 uv run ruff check src tests
-uv run mypy src
+uv run python -m mypy src
 uv run python -m auraly_pipeline.schema
 ```
 
@@ -351,7 +369,24 @@ uv run python -m auraly_pipeline.schema
 - somente personagens e formatos suportados são aceitos;
 - campos desconhecidos são rejeitados.
 
-## Próximo Goal
+## Próximos passos
 
-O próximo trabalho é `Goal 4 -- Google Flow Campaign Integration`, conforme `docs/GOAL-ROADMAP.md`.
-Goal 4 não está implementado e qualquer canário real continuará exigindo aprovação explícita.
+A sequência imediata é:
+
+```text
+roadmap/process alignment
+→ Verification Harness
+→ Goal 4A design spec
+→ human review
+→ Goal 4A implementation plan
+→ small TDD/task commits
+→ full verification
+→ independent review
+→ Goal 4B design
+```
+
+Goal 4 foi decomposto em `4A Image Domain & Persistence`, `4B Google Flow Browser Runtime`,
+`4C Flow Generation, Download & Recovery` e `4D Image QC, Review & Provider Canary`. Nenhum
+desses subgoals está implementado. Specs e planos futuros vivem respectivamente em
+`docs/superpowers/specs/` e `docs/superpowers/plans/`; qualquer canário real continua exigindo
+aprovação explícita.

@@ -427,7 +427,9 @@ Cada variante contém local, horário, ação, prompt, objeto e estado independe
 - selecionar candidata configurada;
 - aprimorar/download em 2K;
 - capturar download via Playwright;
-- preservar todas as candidatas e versões rejeitadas;
+- detectar slots/estado e preservar screenshot/evidência da grade visível;
+- preservar, sem overwrite, toda candidata intencionalmente baixada e toda versão baixada
+  rejeitada; baixar todas as candidatas visíveis não é requisito P0;
 - timeout e erro estruturado.
 
 Seletores devem priorizar roles, labels, texto e atributos DOM verificáveis. Coordenadas cegas

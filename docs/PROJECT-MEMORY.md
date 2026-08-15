@@ -1,7 +1,7 @@
 # Auraly Mass Video Pipeline — Memória do Projeto
 
 **Status:** documento vivo
-**Última consolidação:** 2026-08-10
+**Última consolidação:** 2026-08-15
 **Projeto:** `<AURALY_ROOT>/pipeline`
 **Responsável de produto:** Rafael Rovaron
 **Uso:** contexto permanente para humanos, agentes de IA e futuras sessões de implementação.
@@ -228,8 +228,13 @@ AI/Hermes prompt
 A IA/Hermes escreve os prompts e toma as decisões criativas. A aplicação executa os prompts e
 as transições de estado mecanicamente, com evidências, auditoria e retomada. Roles, labels,
 texto e atributos DOM verificáveis têm preferência; mudanças inesperadas na UI exigem parada
-segura, screenshot e trace, nunca continuidade por cliques cegos em coordenadas. Candidatas e
-versões rejeitadas devem ser preservadas.
+segura, screenshot e trace, nunca continuidade por cliques cegos em coordenadas.
+
+O MVP precisa detectar slots/estado das candidatas e preservar screenshot/evidência da grade.
+Não precisa baixar todas as candidatas visíveis se isso tornar o browser frágil. Cada candidata
+intencionalmente baixada deve ser preservada sem overwrite, receber seu próprio registro e manter
+o histórico de aprovação/rejeição. Baixar todas as candidatas permanece enhancement, salvo se
+vier a ser mecanicamente necessário.
 
 ### 4.4 Entrega
 
@@ -285,10 +290,18 @@ Uma ramificação visual da campanha:
 - edit manifest;
 - renders e QC.
 
+### ImageGeneration
+
+Representa uma operação lógica de geração no Google Flow, mesmo quando nenhum arquivo foi
+persistido. Deve vincular Campaign, SceneVariant e Job e preservar generation number, snapshot/hash
+do prompt, referência/hash, provider/executor, provider state, dispatch timestamp e timestamps de
+auditoria. Esta entidade permite distinguir uma geração iniciada de uma candidata baixada e evita
+regeneração cega após falha ambígua do browser.
+
 ### ImageCandidate
 
-- arquivo original preservado;
-- prompt e índice da candidata;
+- pertence a uma `ImageGeneration` e representa um arquivo/artefato resultante;
+- arquivo original preservado e índice da candidata;
 - dimensões, hash e metadados;
 - crops/contact sheet;
 - status de revisão;
@@ -317,7 +330,25 @@ Fonte de verdade editorial renderer-neutral:
 
 ## 6. Estados
 
-Estados mínimos:
+Cada classe de estado tem um único owner:
+
+```text
+Job.status
+= estado de execução/orquestração
+
+ImageGeneration.provider_state
+= estado da operação no Google Flow
+
+ImageCandidate.review_status
+= estado do artefato/revisão
+```
+
+`SceneVariant.status` não deve duplicar detalhadamente essas fontes de verdade. Quando um estado
+global de progresso for necessário, ele deve preferencialmente ser derivado das entidades
+persistidas. A função derivadora e sua taxonomia pertencem ao design do Goal que precisar delas.
+
+Vocabulário mínimo distribuído entre os owners acima (não uma enumeração única de
+`SceneVariant.status`):
 
 ```text
 not_started
@@ -335,7 +366,8 @@ superseded
 cancelled
 ```
 
-Fluxo de variante recomendado:
+Projeção derivada recomendada de progresso da variante (não persistida como segunda state
+machine):
 
 ```text
 not_started
@@ -358,6 +390,12 @@ not_started
 → approved
 → delivered
 ```
+
+Os rótulos de execução (`queued`, `running`, `retry_scheduled`, `failed`, `blocked`) derivam de
+`Job`; os rótulos Flow/HeyGen derivam do estado persistido da operação provider; os rótulos de
+QC/review/approval derivam dos artefatos correspondentes. `SceneVariant.status`, enquanto existir,
+é no máximo metadado agregado/coarse e nunca autoritativo para esses detalhes. A taxonomia e a
+função de projeção exatas só serão introduzidas pelo Goal que delas precisar.
 
 Toda transição deve:
 
@@ -425,7 +463,8 @@ Ações pagas precisam de budget gate. Um resultado remoto ambíguo nunca autori
 
 - imagens sociais sempre 9:16;
 - downloads sempre 2K, nunca 1K;
-- preservar todas as versões;
+- preservar todas as versões intencionalmente baixadas, sem exigir download de toda candidata
+  visível;
 - registrar rejeições e desvios conhecidos.
 
 ---
@@ -631,7 +670,22 @@ Configuração operacional da Campaign Foundation e da Persistent Job Orchestrat
 - cancelamento de job running é rejeitado; este Goal não simula interrupção arbitrária de operação ativa;
 - completion/renewal exigem worker, attempt number e lease ainda válido; attempt number funciona como fencing token;
 - recovery registra `job.recovered` e finaliza a tentativa interrompida antes de retry, bloqueio por safety ou falha terminal;
-- próximo milestone: `Goal 4 -- Google Flow Campaign Integration`.
+- os Goals 0, 1, 2 e 3 têm produção/testes implementados e baseline local executado; isso não é
+  evidência independente de CI nem de provider canary;
+- o canário real ElevenLabs permanece pendente como `Goal 3C -- ElevenLabs Provider Canary`;
+- próximo milestone de produto: `Goal 4A -- Image Domain & Persistence`, precedido pelo pequeno
+  trabalho de infraestrutura do Verification Harness.
+
+Terminologia obrigatória de milestone:
+
+- `IMPLEMENTED`: produção e testes requeridos existem;
+- `LOCAL_VERIFIED`: baseline determinístico/local requerido foi executado com sucesso, sem inferir
+  execução de provider real;
+- `PROVIDER_VERIFIED`: canário real explicitamente aprovado foi concluído com sucesso.
+
+O histórico de commits com `[verified]` não prova por si só verificação independente, CI ou
+provider. Estado atual: Goals 0–3 estão `IMPLEMENTED` e `LOCAL_VERIFIED`; Goal 3 não está
+`PROVIDER_VERIFIED`; Goal 3C está `PENDING`.
 
 O README antigo descreve a pipeline principalmente como pós-produção de um MP4 do HeyGen. O novo escopo amplia a aplicação para geração em massa end-to-end. A implementação deve preservar compatibilidade com ingest/render existentes sempre que possível.
 
@@ -734,3 +788,60 @@ O piloto deve demonstrar geração Flow por Playwright, ElevenLabs por API, HeyG
 - `AGENTS.md` — regras, limites, fontes de verdade e checks para agentes;
 - `schemas/edit.schema.json` — contrato editorial existente;
 - manifests em `work/<job>/manifest/` — estado e evidência por job.
+
+---
+
+## 19. Execução incremental a partir do Goal 4
+
+Cada feature/subgoal significativo segue:
+
+```text
+design/spec
+→ revisão do usuário
+→ plano de implementação
+→ tarefas pequenas e testáveis
+→ TDD
+→ commits por entrega revisável
+→ verificação completa
+→ revisão independente
+```
+
+Specs vivem em `docs/superpowers/specs/`; planos vivem em `docs/superpowers/plans/`. A sequência
+decomposta preserva o produto e a arquitetura, mudando somente a granularidade de execução:
+
+```text
+Goal 3C  ElevenLabs Provider Canary
+Goal 4A  Image Domain & Persistence
+Goal 4B  Google Flow Browser Runtime
+Goal 4C  Flow Generation, Download & Recovery
+Goal 4D  Image QC, Review & Provider Canary
+Goal 5A  HeyGen Preflight & Asset Upload
+Goal 5B  Avatar Look & Avatar III Verification
+Goal 5C  Video Generation, Polling & Source QC
+Goal 5D  HeyGen Provider Canary
+Goal 6A  Edit Manifest & Captions
+Goal 6B  Deterministic Rendering
+Goal 6C  Final QC & Delivery
+Goal 6.5 Approval Lifecycle Hardening
+Goal 7   End-to-End Canary
+Goal 8   Local API/UI
+```
+
+O Goal 3C pode ocorrer antes do Goal 5 ou em outro checkpoint adequado, mas deve ocorrer antes de
+um pipeline end-to-end depender de Voice Master real. Todo canário de provider continua exigindo
+aprovação explícita.
+
+Goal 4 introduzirá gradualmente módulos focados em `images/` e `flow/`, reutilizando o código
+compatível de `image_generation.py` sem big-bang rewrite. Quando Goal 4A precisar persistir
+atomicamente entidade de domínio + Job + evento, deverá introduzir/reusar um contrato público de
+orquestração/transação; não deve multiplicar acesso direto a internals privados do Job como
+`self._jobs._repository`. O contrato exato pertence ao design de Goal 4A.
+
+O lifecycle atual de CopyMaster, que efetivamente inicia aprovado, é dívida deliberadamente
+deferida. Goal 6.5 deve estabelecer `draft -> human review -> approved` antes do Goal 7, sem levar
+essa mudança para Goal 4.
+
+A direção futura do Verification Harness é `scripts/verify.py fast|full` e CI determinístico em
+`.github/workflows/verify.yml`, com job Windows desejável. Esse harness não executará ElevenLabs,
+Google Flow, HeyGen ou qualquer chamada paga. Sua implementação é uma tarefa separada e posterior
+a este alinhamento.

@@ -54,6 +54,58 @@ resolve it only when it is in Goal scope, or report it as a blocker.
 - Do not commit or push until applicable checks pass and the diff has been reviewed for secrets,
   generated media, private paths, and scope creep.
 
+## Milestone verification terminology
+
+Use these terms independently; never collapse them into a generic `verified` label:
+
+- `IMPLEMENTED`: required production code and tests exist.
+- `LOCAL_VERIFIED`: the required deterministic/local verification baseline completed
+  successfully. This does not imply a real provider was exercised.
+- `PROVIDER_VERIFIED`: an explicitly approved real provider canary completed successfully.
+
+Mocked/local tests cannot establish `PROVIDER_VERIFIED`. Commit names, including names containing
+`[verified]`, are not independent CI or provider evidence.
+
+## Incremental Goal workflow
+
+From Goal 4 onward, every significant feature or subgoal follows:
+
+```text
+design/spec
+→ user review
+→ implementation plan
+→ small independently testable tasks
+→ TDD
+→ small task-level commits
+→ full verification
+→ independent review
+```
+
+Store approved designs in `docs/superpowers/specs/` and implementation plans in
+`docs/superpowers/plans/`. Do not combine independently reviewable subsystems into one Goal or
+one implementation prompt.
+
+For behavior changes, use the task-level cycle:
+
+```text
+write a failing test
+→ run the focused test and confirm the expected failure
+→ implement the minimum change
+→ run focused verification
+→ commit the independently reviewable deliverable
+```
+
+A commit need not correspond to an individual line or assertion; its boundary should be a small
+deliverable with a reasonably narrow file set. Run the full applicable baseline before declaring
+the subgoal `LOCAL_VERIFIED`.
+
+Goal 4 work must preserve module boundaries. Do not add new application-service access to private
+Job internals such as `self._jobs._repository`. If atomic domain entity + Job + audit persistence
+needs a new public orchestration/transaction contract, define it in the Goal 4A design. Add future
+image and Flow behavior through focused modules rather than placing all new code in
+`src/auraly_pipeline/image_generation.py`; refactor compatible existing code only as a subgoal
+requires it, never as a big-bang rewrite.
+
 ## Required checks
 
 Run from the repository root:
@@ -62,9 +114,10 @@ Run from the repository root:
 uv sync --locked --all-groups
 uv run pytest
 uv run ruff check src tests
-uv run mypy src
+uv run python -m mypy src
 uv run python -m auraly_pipeline.schema
-uv run auraly export-image-generation-schema --output schemas/image-generation.schema.json
+uv run python -m auraly_pipeline.cli export-image-generation-schema \
+  --output schemas/image-generation.schema.json
 uv pip check
 npm ci
 npm run hf:doctor
@@ -72,11 +125,14 @@ npm audit --omit=dev --audit-level=high
 git diff --check
 ```
 
-When tests themselves are type-checked on Windows, use:
+When tests themselves are type-checked on Windows PowerShell, use:
 
-```bash
-MYPYPATH=src uv run mypy tests
+```powershell
+$env:MYPYPATH = "src"
+uv run python -m mypy tests
 ```
+
+On POSIX shells, use `MYPYPATH=src uv run python -m mypy tests`.
 
 When a Goal changes a HyperFrames composition, also run against that composition:
 
