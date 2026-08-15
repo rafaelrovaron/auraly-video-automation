@@ -55,8 +55,7 @@ def _try_lock_file(lock_file: BinaryIO) -> bool:
     lock_file.seek(0)
     try:
         if os.name == "nt":
-            import msvcrt
-
+            msvcrt: Any = importlib.import_module("msvcrt")
             msvcrt.locking(lock_file.fileno(), msvcrt.LK_NBLCK, 1)
         else:
             fcntl: Any = importlib.import_module("fcntl")
@@ -69,8 +68,7 @@ def _try_lock_file(lock_file: BinaryIO) -> bool:
 def _unlock_file(lock_file: BinaryIO) -> None:
     lock_file.seek(0)
     if os.name == "nt":
-        import msvcrt
-
+        msvcrt: Any = importlib.import_module("msvcrt")
         msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
     else:
         fcntl: Any = importlib.import_module("fcntl")
