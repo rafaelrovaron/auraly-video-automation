@@ -208,7 +208,7 @@ def test_fake_handler_uses_generation_scoped_non_overwriting_paths(tmp_path: Pat
     jobs = JobService.for_database(database, work_root=work_root)
     failed = jobs.worker_once("image-handler")
     assert failed is not None
-    assert failed.status == "failed"
+    assert failed.status == "blocked"
     jobs.close()
     images = ImageService.for_database(database, work_root=work_root)
     assert images.list_candidates(third_id) == []

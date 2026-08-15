@@ -77,6 +77,15 @@ class ImageRepository:
         session.flush()
         return row
 
+    @staticmethod
+    def candidates_by_index_in_session(
+        session: Session, image_generation_id: str
+    ) -> dict[int, ImageCandidateRow]:
+        statement = select(ImageCandidateRow).where(
+            ImageCandidateRow.image_generation_id == image_generation_id
+        )
+        return {row.candidate_index: row for row in session.scalars(statement)}
+
     def get_generation(self, image_generation_id: str) -> ImageGenerationRow | None:
         with self._session_factory() as session:
             return session.get(ImageGenerationRow, image_generation_id)

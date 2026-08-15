@@ -12,7 +12,7 @@ from uuid import uuid4
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
-from auraly_pipeline.images.db_models import ImageGenerationRow
+from auraly_pipeline.images.db_models import ImageCandidateRow, ImageGenerationRow
 from auraly_pipeline.images.domain import ImageCandidate
 from auraly_pipeline.images.repository import ImageRepository
 from auraly_pipeline.jobs.domain import JobExecutionOutcome, JobExecutionResult, RetrySafety
@@ -34,6 +34,14 @@ class _PngFacts:
 
 
 class _ImageArtifactError(RuntimeError):
+    pass
+
+
+class _ImageArtifactMissingError(_ImageArtifactError):
+    pass
+
+
+class _ImageArtifactConflictError(_ImageArtifactError):
     pass
 
 
@@ -151,7 +159,7 @@ class ImageGenerateHandler:
                 or context.job_type != "image.generate"
                 or generation.campaign_id != context.campaign_id
                 or generation.executor != "local_fake"
-                or generation.provider_state != "queued"
+                or generation.provider_state not in {"queued", "generating"}
             ):
                 return self._terminal(
                     "image_job_integrity_failed",
@@ -161,22 +169,40 @@ class ImageGenerateHandler:
             campaign_id = generation.campaign_id
             scene_variant_id = generation.scene_variant_id
             generation_number = generation.generation_number
-            generation.provider_state = "generating"
-            generation.dispatched_at = self._clock()
+            existing_candidates = ImageRepository.candidates_by_index_in_session(
+                session, generation.id
+            )
+            if generation.provider_state == "queued":
+                generation.provider_state = "generating"
+                generation.dispatched_at = self._clock()
             generation.updated_at = self._clock()
             session.commit()
 
         try:
-            candidates = [
-                self._create_candidate(
+            candidates_to_create: list[ImageCandidate] = []
+            for index in range(2):
+                candidate = self._reconcile_candidate(
                     generation_id=generation_id,
                     campaign_id=campaign_id,
                     scene_variant_id=scene_variant_id,
                     generation_number=generation_number,
                     candidate_index=index,
+                    recorded_candidate=existing_candidates.get(index),
                 )
-                for index in range(2)
-            ]
+                if candidate is not None:
+                    candidates_to_create.append(candidate)
+        except _ImageArtifactMissingError:
+            self._mark_blocked(generation_id)
+            return self._blocked(
+                "image_artifact_missing",
+                "The persisted image artifact is missing.",
+            )
+        except _ImageArtifactConflictError:
+            self._mark_blocked(generation_id)
+            return self._blocked(
+                "image_artifact_conflict",
+                "The image artifact conflicts with persisted evidence.",
+            )
         except _ImageArtifactError:
             self._mark_failed(generation_id)
             return self._terminal(
@@ -192,7 +218,7 @@ class ImageGenerateHandler:
                     "image_generation_state_invalid",
                     "The Image Generation state is invalid.",
                 )
-            for candidate in candidates:
+            for candidate in candidates_to_create:
                 ImageRepository.create_candidate_in_session(session, candidate)
             generation.provider_state = "completed"
             generation.completed_at = timestamp
@@ -200,10 +226,10 @@ class ImageGenerateHandler:
             session.commit()
         return JobExecutionResult(
             outcome=JobExecutionOutcome.SUCCESS,
-            result={"imageGenerationId": generation_id, "candidateCount": len(candidates)},
+            result={"imageGenerationId": generation_id, "candidateCount": 2},
         )
 
-    def _create_candidate(
+    def _reconcile_candidate(
         self,
         *,
         generation_id: str,
@@ -211,7 +237,8 @@ class ImageGenerateHandler:
         scene_variant_id: str,
         generation_number: int,
         candidate_index: int,
-    ) -> ImageCandidate:
+        recorded_candidate: ImageCandidateRow | None,
+    ) -> ImageCandidate | None:
         relative_path = Path(
             "campaigns",
             campaign_id,
@@ -224,25 +251,51 @@ class ImageGenerateHandler:
         if not target.is_relative_to(self._work_root):
             raise _ImageArtifactError
         expected = deterministic_png_bytes(generation_id, candidate_index)
+        expected_facts = _png_facts(expected)
         target.parent.mkdir(parents=True, exist_ok=True)
         target = target.resolve()
         if not target.is_relative_to(self._work_root):
             raise _ImageArtifactError
-        try:
-            with target.open("xb") as artifact:
-                artifact.write(expected)
-        except FileExistsError:
+
+        if recorded_candidate is not None and not target.exists():
+            raise _ImageArtifactMissingError
+
+        if target.exists():
             try:
-                if target.read_bytes() != expected:
-                    raise _ImageArtifactError
+                actual = target.read_bytes()
             except OSError as exc:
                 raise _ImageArtifactError from exc
-        except OSError as exc:
-            raise _ImageArtifactError from exc
-        try:
-            facts = _png_facts(target.read_bytes())
-        except OSError as exc:
-            raise _ImageArtifactError from exc
+            if actual != expected:
+                raise _ImageArtifactConflictError
+            facts = _png_facts(actual)
+            if recorded_candidate is not None:
+                if not self._matches_expected_candidate(
+                    recorded_candidate,
+                    relative_path=relative_path,
+                    facts=facts,
+                ):
+                    raise _ImageArtifactConflictError
+                return None
+        else:
+            try:
+                with target.open("xb") as artifact:
+                    artifact.write(expected)
+            except FileExistsError:
+                try:
+                    actual = target.read_bytes()
+                except OSError as exc:
+                    raise _ImageArtifactError from exc
+                if actual != expected:
+                    raise _ImageArtifactConflictError
+            except OSError as exc:
+                raise _ImageArtifactError from exc
+            try:
+                facts = _png_facts(target.read_bytes())
+            except OSError as exc:
+                raise _ImageArtifactError from exc
+            if facts != expected_facts:
+                raise _ImageArtifactConflictError
+
         timestamp = self._clock()
         return ImageCandidate(
             image_candidate_id=str(uuid4()),
@@ -259,6 +312,22 @@ class ImageGenerateHandler:
             updated_at=timestamp,
         )
 
+    @staticmethod
+    def _matches_expected_candidate(
+        recorded_candidate: ImageCandidateRow,
+        *,
+        relative_path: Path,
+        facts: _PngFacts,
+    ) -> bool:
+        return (
+            recorded_candidate.source_path == relative_path.as_posix()
+            and recorded_candidate.sha256 == facts.sha256
+            and recorded_candidate.width == facts.width
+            and recorded_candidate.height == facts.height
+            and recorded_candidate.size_bytes == facts.size_bytes
+            and recorded_candidate.format == "png"
+        )
+
     def _mark_failed(self, generation_id: str) -> None:
         with self._sessions() as session:
             generation = session.get(ImageGenerationRow, generation_id)
@@ -267,10 +336,26 @@ class ImageGenerateHandler:
                 generation.updated_at = self._clock()
                 session.commit()
 
+    def _mark_blocked(self, generation_id: str) -> None:
+        with self._sessions() as session:
+            generation = session.get(ImageGenerationRow, generation_id)
+            if generation is not None:
+                generation.provider_state = "blocked"
+                generation.updated_at = self._clock()
+                session.commit()
+
     @staticmethod
     def _terminal(code: str, message: str) -> JobExecutionResult:
         return JobExecutionResult(
             outcome=JobExecutionOutcome.TERMINAL_FAILURE,
+            error_code=code,
+            error_message=message,
+        )
+
+    @staticmethod
+    def _blocked(code: str, message: str) -> JobExecutionResult:
+        return JobExecutionResult(
+            outcome=JobExecutionOutcome.BLOCKED,
             error_code=code,
             error_message=message,
         )
