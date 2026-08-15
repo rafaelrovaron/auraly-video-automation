@@ -7,6 +7,8 @@ import sys
 from types import ModuleType
 from typing import Any
 
+import pytest
+
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 VERIFY_SCRIPT = REPOSITORY_ROOT / "scripts" / "verify.py"
@@ -277,3 +279,84 @@ def test_environment_secret_is_never_printed(
 
     assert result == 0
     assert secret not in capsys.readouterr().out
+
+
+def test_runner_applies_extra_environment_without_shell_syntax(tmp_path: Path) -> None:
+    verify = load_verify_module()
+    received_environment: dict[str, str] = {}
+
+    def capture_environment(
+        argv: list[str], **kwargs: Any
+    ) -> subprocess.CompletedProcess[str]:
+        received_environment.update(kwargs["env"])
+        return subprocess.CompletedProcess(argv, 0)
+
+    result = verify.run_steps(
+        (
+            verify.VerificationStep(
+                "mypy tests",
+                ("uv", "run", "python", "-m", "mypy", "tests"),
+                extra_env={"MYPYPATH": "src"},
+            ),
+        ),
+        repository_root=tmp_path,
+        run_command=capture_environment,
+        output=lambda _: None,
+    )
+
+    assert result == 0
+    assert received_environment["MYPYPATH"] == "src"
+
+
+def test_runner_defaults_to_repository_root_cwd() -> None:
+    verify = load_verify_module()
+    received_cwd: list[Path] = []
+
+    def capture_cwd(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        received_cwd.append(kwargs["cwd"])
+        return subprocess.CompletedProcess(argv, 0)
+
+    result = verify.run_steps(
+        (verify.VerificationStep("root", ("git", "diff", "--check")),),
+        run_command=capture_cwd,
+        output=lambda _: None,
+    )
+
+    assert result == 0
+    assert received_cwd == [REPOSITORY_ROOT]
+
+
+@pytest.mark.parametrize("argv", [("invalid",), ("fast", "--pytest")])
+def test_invalid_cli_input_fails_clearly(
+    argv: tuple[str, ...], capsys: pytest.CaptureFixture[str]
+) -> None:
+    verify = load_verify_module()
+
+    with pytest.raises(SystemExit) as error:
+        verify.main(argv)
+
+    assert error.value.code == 2
+    assert "error:" in capsys.readouterr().err
+
+
+def test_runner_prints_progress_and_final_summary(tmp_path: Path) -> None:
+    verify = load_verify_module()
+    output: list[str] = []
+
+    def successful_run(argv: list[str], **_: Any) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(argv, 0)
+
+    result = verify.run_steps(
+        (verify.VerificationStep("example", ("uv", "run", "pytest")),),
+        repository_root=tmp_path,
+        run_command=successful_run,
+        output=output.append,
+    )
+
+    assert result == 0
+    assert output == [
+        "[1/1] example",
+        "$ uv run pytest",
+        "[PASS] example",
+        "[SUMMARY] 1/1 steps passed",
+    ]
