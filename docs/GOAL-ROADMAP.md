@@ -44,7 +44,7 @@ Provider verification is never inferred from mocks, local tests, or a commit nam
 | 2 — Persistent Job Orchestration | yes | yes | not applicable |
 | 3 — Voice Master | yes | yes | pending/unproven |
 | 3C — ElevenLabs Provider Canary | pending | pending | pending |
-| 4A — Image Domain & Persistence | yes | pending Task 12 local full gate | not applicable |
+| 4A — Image Domain & Persistence | yes | yes | not applicable |
 
 ## Resulting sequence
 
@@ -54,7 +54,7 @@ Goal 1   Campaign Foundation                          IMPLEMENTED / LOCAL_VERIFI
 Goal 2   Persistent Job Orchestration                 IMPLEMENTED / LOCAL_VERIFIED
 Goal 3   Voice Master                                 IMPLEMENTED / LOCAL_VERIFIED
 Goal 3C  ElevenLabs Provider Canary                   PENDING
-Goal 4A  Image Domain & Persistence                   IMPLEMENTED / LOCAL_VERIFICATION PENDING / PROVIDER N/A
+Goal 4A  Image Domain & Persistence                   IMPLEMENTED / LOCAL_VERIFIED / PROVIDER N/A
 Goal 4B  Google Flow Browser Runtime
 Goal 4C  Flow Generation, Download & Recovery
 Goal 4D  Image QC, Review & Provider Canary
@@ -344,12 +344,12 @@ Master. Run the Goal 3 baseline and real canary only after explicit operator app
 
 ### Status
 
-`IMPLEMENTED` / local verification pending Task 12 local full gate / provider verification `N/A`.
+`IMPLEMENTED` / `LOCAL_VERIFIED` / provider verification `N/A`.
 
 Goal 4A uses a deterministic local fake handler and intentionally performs no browser or provider
-operation. Task 12 must complete the full deterministic harness before `LOCAL_VERIFIED` is
-declared. Final Goal closure additionally awaits successful Linux and Windows GitHub Actions
-evidence. Neither establishes provider verification.
+operation. Task 12 completed the full deterministic harness on local code HEAD `088d556`. Linux
+and Windows GitHub Actions remain pending as separate independent CI evidence for the final HEAD.
+Neither local verification nor CI establishes provider verification.
 
 ### Objective
 

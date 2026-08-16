@@ -674,10 +674,10 @@ Configuração operacional da Campaign Foundation e da Persistent Job Orchestrat
   evidência independente de CI nem de provider canary;
 - o canário real ElevenLabs permanece pendente como `Goal 3C -- ElevenLabs Provider Canary`;
 - o Verification Harness determinístico foi implementado antes de Goal 4A;
-- Goal 4A -- Image Domain & Persistence foi implementado; a confirmação `LOCAL_VERIFIED` aguarda
-  o harness determinístico completo da Task 12. O fechamento final do Goal também aguarda a
-  evidência independente de CI Linux e Windows. O próximo subgoal de imagem é Goal 4B -- Google
-  Flow Browser Runtime.
+- Goal 4A -- Image Domain & Persistence está `IMPLEMENTED` e `LOCAL_VERIFIED`: a Task 12 concluiu
+  o harness determinístico completo no HEAD local de código `088d556`. Os jobs Linux e Windows do
+  GitHub Actions permanecem pendentes como evidência independente de CI para esse HEAD. O próximo
+  subgoal de imagem é Goal 4B -- Google Flow Browser Runtime.
 
 Terminologia obrigatória de milestone:
 
@@ -687,8 +687,9 @@ Terminologia obrigatória de milestone:
 - `PROVIDER_VERIFIED`: canário real explicitamente aprovado foi concluído com sucesso.
 
 O histórico de commits com `[verified]` não prova por si só verificação independente, CI ou
-provider. Estado atual: Goals 0–3 estão `IMPLEMENTED` e `LOCAL_VERIFIED`; Goal 3 não está
-`PROVIDER_VERIFIED`; Goal 3C está `PENDING`.
+provider. Estado atual: Goals 0–3 e Goal 4A estão `IMPLEMENTED` e `LOCAL_VERIFIED`; Goal 3 não está
+`PROVIDER_VERIFIED`; Goal 3C está `PENDING`; para Goal 4A, `PROVIDER_VERIFIED` é `N/A` e a evidência
+independente de CI Linux/Windows permanece pendente para o HEAD final.
 
 O README antigo descreve a pipeline principalmente como pós-produção de um MP4 do HeyGen. O novo escopo amplia a aplicação para geração em massa end-to-end. A implementação deve preservar compatibilidade com ingest/render existentes sempre que possível.
 
@@ -850,7 +851,7 @@ focused. Ele não executa ElevenLabs, Google Flow, HeyGen ou qualquer chamada pa
 local `full` bem-sucedida estabelece `LOCAL_VERIFIED`; somente uma execução bem-sucedida no GitHub
 estabelece evidência independente de CI. Nenhuma delas estabelece `PROVIDER_VERIFIED`.
 
-### Goal 4A — Image Domain & Persistence (implementado)
+### Goal 4A — Image Domain & Persistence (`IMPLEMENTED` / `LOCAL_VERIFIED`)
 
 - `ImageGeneration` e `ImageCandidate` são persistidos com migrations e invariantes que preservam
   a intenção da geração, a identidade do artefato e o histórico de review;
@@ -863,5 +864,7 @@ estabelece evidência independente de CI. Nenhuma delas estabelece `PROVIDER_VER
   rejeitadas e protegendo cenas distintas;
 - a CLI JSON local expõe geração, regeneração, consulta/listagem de gerações e candidatas, e as
   operações de review; erros são sanitizados;
+- a Task 12 concluiu o harness determinístico completo local; os jobs Linux e Windows do GitHub
+  Actions permanecem pendentes como evidência independente de CI para o HEAD final;
 - provider verification é `N/A` para Goal 4A: runtime Google Flow, browser, downloads reais e QC
   pertencem aos Goals 4B–4D.
