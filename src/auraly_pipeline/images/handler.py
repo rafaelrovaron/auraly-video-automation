@@ -159,7 +159,8 @@ class ImageGenerateHandler:
                 or context.job_type != "image.generate"
                 or generation.campaign_id != context.campaign_id
                 or generation.executor != "local_fake"
-                or generation.provider_state not in {"queued", "generating"}
+                or generation.provider_state
+                not in {"queued", "generating", "completed", "blocked"}
             ):
                 return self._terminal(
                     "image_job_integrity_failed",
@@ -169,14 +170,16 @@ class ImageGenerateHandler:
             campaign_id = generation.campaign_id
             scene_variant_id = generation.scene_variant_id
             generation_number = generation.generation_number
+            provider_state = generation.provider_state
             existing_candidates = ImageRepository.candidates_by_index_in_session(
                 session, generation.id
             )
             if generation.provider_state == "queued":
                 generation.provider_state = "generating"
                 generation.dispatched_at = self._clock()
-            generation.updated_at = self._clock()
-            session.commit()
+            if provider_state in {"queued", "generating"}:
+                generation.updated_at = self._clock()
+                session.commit()
 
         try:
             candidates_to_create: list[ImageCandidate] = []
@@ -208,6 +211,22 @@ class ImageGenerateHandler:
             return self._terminal(
                 "image_artifact_conflict",
                 "The image artifact conflicts with deterministic evidence.",
+            )
+
+        if provider_state == "completed":
+            if candidates_to_create or set(existing_candidates) != {0, 1}:
+                return self._terminal(
+                    "image_generation_state_invalid",
+                    "The Image Generation state is invalid.",
+                )
+            return JobExecutionResult(
+                outcome=JobExecutionOutcome.SUCCESS,
+                result={"imageGenerationId": generation_id, "candidateCount": 2},
+            )
+        if provider_state == "blocked":
+            return self._blocked(
+                "image_generation_blocked",
+                "The Image Generation remains blocked.",
             )
 
         timestamp = self._clock()

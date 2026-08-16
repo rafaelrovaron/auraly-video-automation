@@ -7,6 +7,7 @@ from pathlib import Path
 from threading import Barrier
 from uuid import uuid4
 
+import pytest
 from sqlalchemy.orm import Session, sessionmaker
 
 from auraly_pipeline.campaigns.domain import CampaignCreate
@@ -14,14 +15,27 @@ from auraly_pipeline.campaigns.persistence import create_sqlite_engine
 from auraly_pipeline.campaigns.service import CampaignService
 from auraly_pipeline.images.domain import ImageCandidate, ImageGenerateRequest
 from auraly_pipeline.images.db_models import ImageGenerationRow
-from auraly_pipeline.images.handler import deterministic_png_bytes
+from auraly_pipeline.images.handler import ImageGenerateHandler, deterministic_png_bytes
 from auraly_pipeline.images.repository import ImageRepository
 from auraly_pipeline.images.service import ImageService
+from auraly_pipeline.jobs.domain import JobExecutionResult, RetrySafety
+from auraly_pipeline.jobs.handlers import JobExecutionContext, SimulatedWorkerCrash
 from auraly_pipeline.jobs.service import JobService
 from tests.test_campaign_domain import valid_campaign_data
 
 
 RECOVERY_NOW = datetime(2026, 8, 16, 15, 0, tzinfo=UTC)
+
+
+class _CrashAfterImageDomainPersistence:
+    retry_safety = RetrySafety.IDEMPOTENT
+
+    def __init__(self, handler: ImageGenerateHandler) -> None:
+        self._handler = handler
+
+    def execute(self, context: JobExecutionContext) -> JobExecutionResult:
+        self._handler.execute(context)
+        raise SimulatedWorkerCrash
 
 
 def _campaign(database: Path) -> tuple[str, str]:
@@ -120,6 +134,25 @@ def _run_image_job(database: Path, work_root: Path):
     assert completed is not None
     jobs.close()
     return completed
+
+
+def _crash_after_image_domain_persistence(database: Path, work_root: Path) -> None:
+    engine = create_sqlite_engine(database)
+    sessions = sessionmaker(engine, expire_on_commit=False, class_=Session)
+    handler = _CrashAfterImageDomainPersistence(
+        ImageGenerateHandler(sessions, work_root=work_root, clock=lambda: RECOVERY_NOW)
+    )
+    jobs = JobService.for_database(
+        database,
+        clock=lambda: RECOVERY_NOW,
+        handlers={"image.generate": handler},
+    )
+    try:
+        with pytest.raises(SimulatedWorkerCrash):
+            jobs.worker_once("crashed-image-worker", lease_seconds=10)
+    finally:
+        jobs.close()
+        engine.dispose()
 
 
 def test_retry_reuses_valid_candidate_zero_and_creates_only_candidate_one(tmp_path: Path) -> None:
@@ -286,6 +319,117 @@ def test_unexpected_existing_file_blocks_without_overwrite(tmp_path: Path) -> No
     assert zero_path.read_bytes() == unexpected
     images = ImageService.for_database(database, work_root=work_root)
     assert images.get_generation(generation_id).provider_state == "blocked"
+    images.close()
+
+
+def test_stale_retry_finishes_completed_image_domain_outcome_without_rewriting_artifacts(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "completed-before-finish-claim.db"
+    work_root = tmp_path / "work"
+    campaign_id, scene_variant_id = _campaign(database)
+    generation_id, _generation_number = _submit_generation(
+        database,
+        work_root,
+        campaign_id=campaign_id,
+        scene_variant_id=scene_variant_id,
+        key="completed-before-finish-claim",
+    )
+
+    _crash_after_image_domain_persistence(database, work_root)
+
+    images = ImageService.for_database(database, work_root=work_root)
+    assert images.get_generation(generation_id).provider_state == "completed"
+    candidates_before = images.list_candidates(generation_id)
+    assert [candidate.candidate_index for candidate in candidates_before] == [0, 1]
+    persisted_before = [
+        (
+            candidate.image_candidate_id,
+            candidate.source_path,
+            candidate.sha256,
+            (work_root / candidate.source_path).stat().st_mtime_ns,
+        )
+        for candidate in candidates_before
+    ]
+    images.close()
+
+    expired = RECOVERY_NOW + timedelta(seconds=11)
+    restarted = JobService.for_database(database, clock=lambda: expired, work_root=work_root)
+    recovered = restarted.recover_stale_jobs()
+    assert len(recovered) == 1
+    assert recovered[0].status == "retry_scheduled"
+
+    completed = restarted.worker_once("replacement-image-worker")
+
+    assert completed is not None
+    assert completed.status == "completed"
+    assert completed.output == {"candidateCount": 2, "imageGenerationId": generation_id}
+    assert [attempt.status for attempt in completed.attempts] == ["interrupted", "completed"]
+    restarted.close()
+    images = ImageService.for_database(database, work_root=work_root)
+    candidates_after = images.list_candidates(generation_id)
+    assert [
+        (
+            candidate.image_candidate_id,
+            candidate.source_path,
+            candidate.sha256,
+            (work_root / candidate.source_path).stat().st_mtime_ns,
+        )
+        for candidate in candidates_after
+    ] == persisted_before
+    assert images.get_generation(generation_id).provider_state == "completed"
+    images.close()
+
+
+def test_stale_retry_preserves_blocked_image_domain_reason_after_pre_finish_crash(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "blocked-before-finish-claim.db"
+    work_root = tmp_path / "work"
+    campaign_id, scene_variant_id = _campaign(database)
+    generation_id, generation_number = _submit_generation(
+        database,
+        work_root,
+        campaign_id=campaign_id,
+        scene_variant_id=scene_variant_id,
+        key="blocked-before-finish-claim",
+    )
+    conflict_path = _candidate_path(
+        work_root,
+        campaign_id,
+        scene_variant_id,
+        generation_number,
+        candidate_index=0,
+    )
+    conflict_path.parent.mkdir(parents=True)
+    unexpected = b"preserve this conflicting artifact"
+    conflict_path.write_bytes(unexpected)
+
+    _crash_after_image_domain_persistence(database, work_root)
+
+    images = ImageService.for_database(database, work_root=work_root)
+    assert images.get_generation(generation_id).provider_state == "blocked"
+    assert images.list_candidates(generation_id) == []
+    images.close()
+
+    expired = RECOVERY_NOW + timedelta(seconds=11)
+    restarted = JobService.for_database(database, clock=lambda: expired, work_root=work_root)
+    recovered = restarted.recover_stale_jobs()
+    assert len(recovered) == 1
+    assert recovered[0].status == "retry_scheduled"
+
+    blocked = restarted.worker_once("replacement-image-worker")
+
+    assert blocked is not None
+    assert blocked.status == "blocked"
+    assert blocked.last_error_code == "image_artifact_conflict"
+    assert blocked.last_error_message == "The image artifact conflicts with persisted evidence."
+    assert [attempt.status for attempt in blocked.attempts] == ["interrupted", "blocked"]
+    restarted.close()
+    assert conflict_path.read_bytes() == unexpected
+    images = ImageService.for_database(database, work_root=work_root)
+    assert images.get_generation(generation_id).provider_state == "blocked"
+    assert images.list_candidates(generation_id) == []
     images.close()
 
 
