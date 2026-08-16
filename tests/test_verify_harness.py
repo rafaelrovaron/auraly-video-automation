@@ -514,8 +514,28 @@ def test_windows_ci_runs_meaningful_cross_platform_fast_verification() -> None:
         "tests/test_config_paths.py",
         "tests/test_models.py",
         "tests/test_image_generation.py",
+        "tests/test_image_domain.py",
+        "tests/test_image_migrations.py",
+        "tests/test_image_repository.py",
+        "tests/test_image_concurrency.py",
+        "tests/test_image_recovery.py",
+        "tests/test_image_cli.py",
         "tests/test_job_migrations.py",
         "tests/test_migration_lock.py",
         "tests/test_job_concurrency.py",
     ]
     assert "secrets" not in str(job).lower()
+
+
+def test_windows_ci_includes_goal_4a_cross_platform_image_targets() -> None:
+    workflow = load_verify_workflow()
+    job = workflow["jobs"]["windows-focused"]
+    commands = [step["run"] for step in job["steps"] if "run" in step]
+    focused = next(command for command in commands if "scripts/verify.py fast" in command)
+
+    for target in (
+        "tests/test_image_migrations.py",
+        "tests/test_image_concurrency.py",
+        "tests/test_image_recovery.py",
+    ):
+        assert target in focused

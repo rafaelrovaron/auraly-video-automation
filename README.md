@@ -26,12 +26,19 @@ Pipeline local, determinística, retomável e auditável para produção em mass
 - trusted project/download roots, validação canônica de contexto e paths;
 - correlação segura de downloads, partial-download handling, finalização não destrutiva,
   manifests e diagnósticos sanitizados.
+- Goal 4A: `ImageGeneration` e `ImageCandidate` persistentes, migrations, invariantes de
+  histórico/review e serviço de aplicação;
+- submissão atômica de `ImageGeneration` e `Job` vinculado, com idempotência, concorrência e
+  recuperação local;
+- handler local determinístico `image.generate`, que cria exatamente duas candidatas PNG sem
+  browser ou provider;
+- CLI JSON `image generate/regenerate/generation/candidate`, incluindo approve, reject e replace.
 
 ### Parcialmente implementado
 
-Os comandos `image-*` preparam e finalizam mecanicamente jobs de imagem. O runtime Playwright
-que abre o Flow, verifica a UI, gera/preserva candidatas, seleciona o download 2K e captura trace
-ainda não foi implementado nem validado. Os contratos registram explicitamente
+Os helpers legados `image-*` preparam e finalizam mecanicamente artefatos de imagem. O runtime
+Playwright que abre o Flow, verifica a UI, gera/preserva candidatas, seleciona o download 2K e
+captura trace ainda não foi implementado nem validado. Os contratos registram explicitamente
 `browserRuntimeStatus=not_implemented` e `imageQcStatus=not_implemented`; eles não afirmam que
 uma imagem foi gerada automaticamente ou que o QC 2K foi concluído.
 
@@ -56,6 +63,11 @@ Goals 0–3 estão `IMPLEMENTED` e `LOCAL_VERIFIED`. O provider canary de Eleven
 demonstrado e permanece pendente como `Goal 3C`; portanto Goal 3 não é declarado
 `PROVIDER_VERIFIED`. Nomes históricos de commit com `[verified]` não são evidência independente
 de CI ou de provider.
+
+Goal 4A — Image Domain & Persistence está `IMPLEMENTED`; a confirmação `LOCAL_VERIFIED` permanece
+na Task 12, após o harness determinístico completo. O fechamento final do Goal também aguarda os
+jobs Linux e Windows de CI. Sua verificação de provider é `N/A`: a implementação usa somente o
+handler local determinístico e não executa browser, Google Flow ou qualquer chamada de provider.
 
 ## Arquitetura oficial de geração de imagens
 
@@ -385,17 +397,13 @@ A sequência imediata é:
 ```text
 roadmap/process alignment
 → Verification Harness (implemented)
-→ Goal 4A design spec
-→ human review
-→ Goal 4A implementation plan
-→ small TDD/task commits
-→ full verification
-→ independent review
 → Goal 4B design
 ```
 
 Goal 4 foi decomposto em `4A Image Domain & Persistence`, `4B Google Flow Browser Runtime`,
-`4C Flow Generation, Download & Recovery` e `4D Image QC, Review & Provider Canary`. Nenhum
-desses subgoals está implementado. Specs e planos futuros vivem respectivamente em
+`4C Flow Generation, Download & Recovery` e `4D Image QC, Review & Provider Canary`. Goal 4A
+está implementado, com o fechamento de `LOCAL_VERIFIED` reservado à Task 12; 4B, 4C e 4D
+permanecem planejados. Specs e planos
+futuros vivem respectivamente em
 `docs/superpowers/specs/` e `docs/superpowers/plans/`; qualquer canário real continua exigindo
 aprovação explícita.

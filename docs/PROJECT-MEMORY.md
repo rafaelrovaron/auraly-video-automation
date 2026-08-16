@@ -674,7 +674,10 @@ Configuração operacional da Campaign Foundation e da Persistent Job Orchestrat
   evidência independente de CI nem de provider canary;
 - o canário real ElevenLabs permanece pendente como `Goal 3C -- ElevenLabs Provider Canary`;
 - o Verification Harness determinístico foi implementado antes de Goal 4A;
-- próximo milestone de produto: `Goal 4A -- Image Domain & Persistence`.
+- Goal 4A -- Image Domain & Persistence foi implementado; a confirmação `LOCAL_VERIFIED` aguarda
+  o harness determinístico completo da Task 12. O fechamento final do Goal também aguarda a
+  evidência independente de CI Linux e Windows. O próximo subgoal de imagem é Goal 4B -- Google
+  Flow Browser Runtime.
 
 Terminologia obrigatória de milestone:
 
@@ -831,11 +834,11 @@ O Goal 3C pode ocorrer antes do Goal 5 ou em outro checkpoint adequado, mas deve
 um pipeline end-to-end depender de Voice Master real. Todo canário de provider continua exigindo
 aprovação explícita.
 
-Goal 4 introduzirá gradualmente módulos focados em `images/` e `flow/`, reutilizando o código
-compatível de `image_generation.py` sem big-bang rewrite. Quando Goal 4A precisar persistir
-atomicamente entidade de domínio + Job + evento, deverá introduzir/reusar um contrato público de
-orquestração/transação; não deve multiplicar acesso direto a internals privados do Job como
-`self._jobs._repository`. O contrato exato pertence ao design de Goal 4A.
+Goal 4A introduziu módulos focados em `images/`, reutilizando o código compatível de
+`image_generation.py` sem big-bang rewrite. A persistência atômica de entidade de domínio + Job +
+evento usa um contrato público de orquestração/transação; `ImageService` não acessa internals
+privados do Job como `self._jobs._repository`. Goals posteriores poderão estender essa estrutura
+somente no respectivo design aprovado.
 
 O lifecycle atual de CopyMaster, que efetivamente inicia aprovado, é dívida deliberadamente
 deferida. Goal 6.5 deve estabelecer `draft -> human review -> approved` antes do Goal 7, sem levar
@@ -846,3 +849,19 @@ gerados e alimenta CI determinístico em `.github/workflows/verify.yml` com jobs
 focused. Ele não executa ElevenLabs, Google Flow, HeyGen ou qualquer chamada paga. Uma execução
 local `full` bem-sucedida estabelece `LOCAL_VERIFIED`; somente uma execução bem-sucedida no GitHub
 estabelece evidência independente de CI. Nenhuma delas estabelece `PROVIDER_VERIFIED`.
+
+### Goal 4A — Image Domain & Persistence (implementado)
+
+- `ImageGeneration` e `ImageCandidate` são persistidos com migrations e invariantes que preservam
+  a intenção da geração, a identidade do artefato e o histórico de review;
+- a criação de geração, `Job` vinculado e evento de auditoria usa uma seam pública de orquestração
+  atômica, sem acesso de `ImageService` ao repositório privado de Jobs;
+- o handler local `image.generate` é determinístico, produz exatamente duas candidatas PNG e não
+  chama browser ou provider; idempotência, fencing, retry e recuperação preservam uma única
+  geração/Job e evidências conflitantes ou ausentes;
+- o lifecycle local de review suporta approve, reject e replace explícito, preservando candidatas
+  rejeitadas e protegendo cenas distintas;
+- a CLI JSON local expõe geração, regeneração, consulta/listagem de gerações e candidatas, e as
+  operações de review; erros são sanitizados;
+- provider verification é `N/A` para Goal 4A: runtime Google Flow, browser, downloads reais e QC
+  pertencem aos Goals 4B–4D.

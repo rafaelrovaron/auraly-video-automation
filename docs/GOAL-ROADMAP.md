@@ -44,6 +44,7 @@ Provider verification is never inferred from mocks, local tests, or a commit nam
 | 2 — Persistent Job Orchestration | yes | yes | not applicable |
 | 3 — Voice Master | yes | yes | pending/unproven |
 | 3C — ElevenLabs Provider Canary | pending | pending | pending |
+| 4A — Image Domain & Persistence | yes | pending Task 12 local full gate | not applicable |
 
 ## Resulting sequence
 
@@ -53,7 +54,7 @@ Goal 1   Campaign Foundation                          IMPLEMENTED / LOCAL_VERIFI
 Goal 2   Persistent Job Orchestration                 IMPLEMENTED / LOCAL_VERIFIED
 Goal 3   Voice Master                                 IMPLEMENTED / LOCAL_VERIFIED
 Goal 3C  ElevenLabs Provider Canary                   PENDING
-Goal 4A  Image Domain & Persistence
+Goal 4A  Image Domain & Persistence                   IMPLEMENTED / LOCAL_VERIFICATION PENDING / PROVIDER N/A
 Goal 4B  Google Flow Browser Runtime
 Goal 4C  Flow Generation, Download & Recovery
 Goal 4D  Image QC, Review & Provider Canary
@@ -341,6 +342,15 @@ Master. Run the Goal 3 baseline and real canary only after explicit operator app
 
 ## Goal 4A — Image Domain & Persistence
 
+### Status
+
+`IMPLEMENTED` / local verification pending Task 12 local full gate / provider verification `N/A`.
+
+Goal 4A uses a deterministic local fake handler and intentionally performs no browser or provider
+operation. Task 12 must complete the full deterministic harness before `LOCAL_VERIFIED` is
+declared. Final Goal closure additionally awaits successful Linux and Windows GitHub Actions
+evidence. Neither establishes provider verification.
+
 ### Objective
 
 Create durable campaign image-generation state and candidate history without browser execution.
@@ -396,21 +406,6 @@ Goals 0–2 and approved Goal 4A design/plan. Goal 3C is not a dependency.
 - persistence constraints prevent ambiguous duplicate generation/candidate history;
 - fake/local job integration preserves idempotency, fencing, and audit invariants;
 - no new application-service dependency on private Job repository internals is added.
-
-### Suggested task sequence
-
-```text
-Task 1 — Image domain
-Task 2 — DB models / migration
-Task 3 — persistence invariants
-Task 4 — application service
-Task 5 — job integration
-Task 6 — CLI
-Task 7 — restart/security regression
-Task 8 — full verification
-```
-
-Each task uses the TDD cycle and a small independently reviewable commit.
 
 ---
 
