@@ -1,10 +1,16 @@
 from __future__ import annotations
 
-from sqlalchemy import Select, func, select
+from collections.abc import Callable
+from typing import TypeVar
+
+from sqlalchemy import Select, func, select, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from auraly_pipeline.images.db_models import ImageCandidateRow, ImageGenerationRow
 from auraly_pipeline.images.domain import ImageCandidate, ImageGeneration
+
+
+Result = TypeVar("Result")
 
 
 class ImageRepository:
@@ -85,6 +91,48 @@ class ImageRepository:
             ImageCandidateRow.image_generation_id == image_generation_id
         )
         return {row.candidate_index: row for row in session.scalars(statement)}
+
+    def immediate_transaction(self, operation: Callable[[Session], Result]) -> Result:
+        with self._session_factory() as session:
+            try:
+                session.execute(text("BEGIN IMMEDIATE"))
+                result = operation(session)
+                session.commit()
+                return result
+            except BaseException:
+                session.rollback()
+                raise
+
+    @staticmethod
+    def candidate_with_generation_in_session(
+        session: Session, image_candidate_id: str
+    ) -> tuple[ImageCandidateRow, ImageGenerationRow] | None:
+        statement = (
+            select(ImageCandidateRow, ImageGenerationRow)
+            .join(
+                ImageGenerationRow,
+                ImageCandidateRow.image_generation_id == ImageGenerationRow.id,
+            )
+            .where(ImageCandidateRow.id == image_candidate_id)
+        )
+        return session.execute(statement).tuples().one_or_none()
+
+    @staticmethod
+    def approved_candidate_for_scene_in_session(
+        session: Session, scene_variant_id: str
+    ) -> tuple[ImageCandidateRow, ImageGenerationRow] | None:
+        statement = (
+            select(ImageCandidateRow, ImageGenerationRow)
+            .join(
+                ImageGenerationRow,
+                ImageCandidateRow.image_generation_id == ImageGenerationRow.id,
+            )
+            .where(
+                ImageGenerationRow.scene_variant_id == scene_variant_id,
+                ImageCandidateRow.review_status == "approved",
+            )
+        )
+        return session.execute(statement).tuples().one_or_none()
 
     def get_generation(self, image_generation_id: str) -> ImageGenerationRow | None:
         with self._session_factory() as session:

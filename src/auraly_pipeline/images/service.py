@@ -7,6 +7,7 @@ from typing import cast
 from uuid import uuid4
 
 from sqlalchemy import Engine, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 from auraly_pipeline.campaigns.persistence import create_sqlite_engine, migrate_database
@@ -27,6 +28,10 @@ from auraly_pipeline.jobs.db_models import JobRow
 from auraly_pipeline.jobs.domain import Job, JobSubmit, RetrySafety
 from auraly_pipeline.jobs.handlers import JobHandler
 from auraly_pipeline.jobs.service import JobIdempotencyConflictError, JobService
+from auraly_pipeline.metadata_security import (
+    validate_safe_error_message,
+    validate_safe_identifier,
+)
 
 
 class ImageError(RuntimeError):
@@ -201,6 +206,111 @@ class ImageService:
             self._candidate_to_domain(row)
             for row in self._repository.list_candidates(image_generation_id)
         ]
+
+    def approve_candidate(self, candidate_id: str, approved_by: str) -> ImageCandidate:
+        validate_safe_identifier(approved_by, "approved_by", max_length=120)
+        now = self._utc(self._clock())
+
+        def approve(session: Session) -> ImageCandidate:
+            ownership = self._repository.candidate_with_generation_in_session(
+                session, candidate_id
+            )
+            if ownership is None:
+                raise ImageCandidateNotFoundError
+            candidate, generation = ownership
+            if candidate.review_status != "pending_review":
+                raise ImageTransitionError
+            if (
+                self._repository.approved_candidate_for_scene_in_session(
+                    session, generation.scene_variant_id
+                )
+                is not None
+            ):
+                raise ImageApprovedCandidateExistsError
+            candidate.review_status = "approved"
+            candidate.approved_at = now
+            candidate.approved_by = approved_by
+            candidate.updated_at = now
+            session.flush()
+            return self._candidate_to_domain(candidate)
+
+        return self._review_transaction(approve)
+
+    def reject_candidate(
+        self, candidate_id: str, rejected_by: str, rejection_reason: str
+    ) -> ImageCandidate:
+        validate_safe_identifier(rejected_by, "rejected_by", max_length=120)
+        if not rejection_reason or not rejection_reason.strip():
+            raise ValueError("rejection_reason must not be empty")
+        validate_safe_error_message(rejection_reason, "rejection_reason")
+        now = self._utc(self._clock())
+
+        def reject(session: Session) -> ImageCandidate:
+            ownership = self._repository.candidate_with_generation_in_session(
+                session, candidate_id
+            )
+            if ownership is None:
+                raise ImageCandidateNotFoundError
+            candidate, _generation = ownership
+            if candidate.review_status != "pending_review":
+                raise ImageTransitionError
+            candidate.review_status = "rejected"
+            candidate.rejected_at = now
+            candidate.rejected_by = rejected_by
+            candidate.rejection_reason = rejection_reason
+            candidate.updated_at = now
+            session.flush()
+            return self._candidate_to_domain(candidate)
+
+        return self._review_transaction(reject)
+
+    def replace_approved_candidate(
+        self, scene_variant_id: str, new_candidate_id: str, approved_by: str
+    ) -> ImageCandidate:
+        validate_safe_identifier(approved_by, "approved_by", max_length=120)
+        now = self._utc(self._clock())
+
+        def replace(session: Session) -> ImageCandidate:
+            ownership = self._repository.candidate_with_generation_in_session(
+                session, new_candidate_id
+            )
+            if ownership is None:
+                raise ImageCandidateNotFoundError
+            new_candidate, new_generation = ownership
+            if new_generation.scene_variant_id != scene_variant_id:
+                raise ImageCandidateSceneMismatchError
+            if new_candidate.review_status not in {"pending_review", "rejected"}:
+                raise ImageTransitionError
+            approved = self._repository.approved_candidate_for_scene_in_session(
+                session, scene_variant_id
+            )
+            if approved is None:
+                raise ImageTransitionError
+            old_candidate, _old_generation = approved
+            old_candidate.review_status = "superseded"
+            old_candidate.superseded_at = now
+            old_candidate.superseded_by_candidate_id = new_candidate.id
+            old_candidate.updated_at = now
+            session.flush()
+            new_candidate.review_status = "approved"
+            new_candidate.approved_at = now
+            new_candidate.approved_by = approved_by
+            new_candidate.updated_at = now
+            session.flush()
+            self._candidate_to_domain(old_candidate)
+            return self._candidate_to_domain(new_candidate)
+
+        return self._review_transaction(replace)
+
+    def _review_transaction(
+        self, operation: Callable[[Session], ImageCandidate]
+    ) -> ImageCandidate:
+        try:
+            return self._repository.immediate_transaction(operation)
+        except IntegrityError as exc:
+            if "approved candidate already exists" in str(exc.orig):
+                raise ImageApprovedCandidateExistsError from None
+            raise ImageTransitionError from None
 
     def _generation_by_job_id(self, job_id: str) -> ImageGenerationRow | None:
         with self._sessions() as session:
