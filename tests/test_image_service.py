@@ -10,6 +10,7 @@ from auraly_pipeline.campaigns.domain import CampaignCreate
 from auraly_pipeline.campaigns.persistence import create_sqlite_engine
 from auraly_pipeline.campaigns.service import CampaignService
 from auraly_pipeline.images.domain import ImageCandidate, ImageGenerateRequest
+from auraly_pipeline.images.db_models import ImageGenerationRow
 from auraly_pipeline.images.repository import ImageRepository
 from auraly_pipeline.images.service import (
     ImageCandidateNotFoundError,
@@ -186,3 +187,29 @@ def test_get_and_list_candidate_contracts_and_not_found_errors(tmp_path: Path) -
     assert generation_error.value.code == "image_generation_not_found"
     assert candidate_error.value.code == "image_candidate_not_found"
     service.close()
+
+
+def test_service_restart_preserves_completed_generation_reads(tmp_path: Path) -> None:
+    database = tmp_path / "restart-completed.db"
+    campaign_id, scene_variant_id = _campaign(database)
+    service = _service(database)
+    submitted = service.generate(_request(campaign_id, scene_variant_id, key="restart-completed"))
+    generation_id = submitted.generation.image_generation_id
+    service.close()
+
+    engine = create_sqlite_engine(database)
+    sessions = sessionmaker(engine, expire_on_commit=False, class_=Session)
+    with sessions() as session:
+        generation = session.get(ImageGenerationRow, generation_id)
+        assert generation is not None
+        generation.provider_state = "completed"
+        generation.completed_at = NOW
+        session.commit()
+    engine.dispose()
+
+    restarted = _service(database)
+    restored = restarted.get_generation(generation_id)
+
+    assert restored.provider_state == "completed"
+    assert restored.completed_at == NOW
+    restarted.close()

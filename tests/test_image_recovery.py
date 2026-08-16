@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import hashlib
-from datetime import UTC, datetime
+from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from threading import Barrier
 from uuid import uuid4
 
 from sqlalchemy.orm import Session, sessionmaker
@@ -17,6 +19,9 @@ from auraly_pipeline.images.repository import ImageRepository
 from auraly_pipeline.images.service import ImageService
 from auraly_pipeline.jobs.service import JobService
 from tests.test_campaign_domain import valid_campaign_data
+
+
+RECOVERY_NOW = datetime(2026, 8, 16, 15, 0, tzinfo=UTC)
 
 
 def _campaign(database: Path) -> tuple[str, str]:
@@ -248,6 +253,13 @@ def test_candidate_row_without_file_blocks_job_and_generation(tmp_path: Path) ->
     )
     images.close()
 
+    restarted = ImageService.for_database(database, work_root=work_root)
+    assert restarted.get_generation(generation_id).provider_state == "blocked"
+    restarted_candidate = restarted.get_candidate(candidate_before.image_candidate_id)
+    assert restarted_candidate.source_path == candidate_before.source_path
+    assert restarted_candidate.sha256 == candidate_before.sha256
+    restarted.close()
+
 
 def test_unexpected_existing_file_blocks_without_overwrite(tmp_path: Path) -> None:
     database = tmp_path / "conflict.db"
@@ -275,3 +287,67 @@ def test_unexpected_existing_file_blocks_without_overwrite(tmp_path: Path) -> No
     images = ImageService.for_database(database, work_root=work_root)
     assert images.get_generation(generation_id).provider_state == "blocked"
     images.close()
+
+
+def test_stale_image_job_recovery_race_preserves_one_generation_and_job(tmp_path: Path) -> None:
+    database = tmp_path / "stale-image-recovery.db"
+    work_root = tmp_path / "work"
+    campaign_id, scene_variant_id = _campaign(database)
+    initial = ImageService.for_database(
+        database, clock=lambda: RECOVERY_NOW, work_root=work_root
+    )
+    submission = initial.generate(
+        ImageGenerateRequest(
+            campaign_id=campaign_id,
+            scene_variant_id=scene_variant_id,
+            idempotency_key="stale-image-recovery",
+            prompt_snapshot="A moonlit studio",
+        )
+    )
+    claimer = JobService.for_database(database, clock=lambda: RECOVERY_NOW, work_root=work_root)
+    claimed = claimer.claim_next_job("crashed-image-worker", lease_seconds=10)
+    assert claimed is not None
+    assert claimed.job_id == submission.job.job_id
+    claimer.close()
+    initial.close()
+
+    expired = RECOVERY_NOW + timedelta(seconds=11)
+    first_images = ImageService.for_database(database, clock=lambda: expired, work_root=work_root)
+    second_images = ImageService.for_database(database, clock=lambda: expired, work_root=work_root)
+    first = JobService.for_database(database, clock=lambda: expired, work_root=work_root)
+    second = JobService.for_database(database, clock=lambda: expired, work_root=work_root)
+    barrier = Barrier(2)
+
+    def recover(jobs: JobService):
+        barrier.wait()
+        return jobs.recover_stale_jobs()
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        recovered = list(executor.map(recover, [first, second]))
+
+    assert sorted(len(items) for items in recovered) == [0, 1]
+    assert first.recover_stale_jobs() == []
+    persisted_jobs = first.list_jobs()
+    assert [job.job_id for job in persisted_jobs] == [submission.job.job_id]
+    generation = first_images.get_generation(submission.generation.image_generation_id)
+    assert generation.job_id == submission.job.job_id
+    assert second_images.list_generations(scene_variant_id) == [generation]
+    assert [event.event_type for event in persisted_jobs[0].events].count("job.recovered") == 1
+    assert first_images.list_candidates(generation.image_generation_id) == []
+
+    resumed = JobService.for_database(database, clock=lambda: expired, work_root=work_root)
+    completed = resumed.worker_once("resumed-image-worker")
+    assert completed is not None
+    assert completed.status == "completed"
+    assert resumed.worker_once("resumed-image-worker") is None
+    resumed.close()
+    restarted = ImageService.for_database(database, clock=lambda: expired, work_root=work_root)
+    assert [candidate.candidate_index for candidate in restarted.list_candidates(generation.image_generation_id)] == [
+        0,
+        1,
+    ]
+    restarted.close()
+    first.close()
+    second.close()
+    first_images.close()
+    second_images.close()

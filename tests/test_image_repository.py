@@ -65,7 +65,13 @@ def _sessions(engine: Engine) -> sessionmaker[Session]:
     return sessionmaker(engine, expire_on_commit=False, class_=Session)
 
 
-def _generation(*, number: int, job_id: str) -> ImageGeneration:
+def _generation(
+    *,
+    number: int,
+    job_id: str,
+    provider_state: str = "queued",
+    completed_at: datetime | None = None,
+) -> ImageGeneration:
     return ImageGeneration(
         image_generation_id=str(uuid4()),
         campaign_id="campaign-1",
@@ -78,13 +84,20 @@ def _generation(*, number: int, job_id: str) -> ImageGeneration:
         prompt_sha256="cf07194ee232eb531e15f690000d19846dea69cf05504782658afcfacb9228a2",
         provider="google_flow",
         executor="local_fake",
-        provider_state="queued",
+        provider_state=provider_state,
         created_at=NOW,
         updated_at=NOW,
+        completed_at=completed_at,
     )
 
 
-def _candidate(*, generation_id: str, index: int) -> ImageCandidate:
+def _candidate(
+    *,
+    generation_id: str,
+    index: int,
+    review_status: str = "pending_review",
+    superseded_by_candidate_id: str | None = None,
+) -> ImageCandidate:
     return ImageCandidate(
         image_candidate_id=str(uuid4()),
         image_generation_id=generation_id,
@@ -95,7 +108,12 @@ def _candidate(*, generation_id: str, index: int) -> ImageCandidate:
         height=16,
         size_bytes=128 + index,
         format="png",
-        review_status="pending_review",
+        review_status=review_status,
+        rejected_at=NOW if review_status == "rejected" else None,
+        rejected_by="reviewer-1" if review_status == "rejected" else None,
+        rejection_reason="Framing is too tight" if review_status == "rejected" else None,
+        superseded_at=NOW if review_status == "superseded" else None,
+        superseded_by_candidate_id=superseded_by_candidate_id,
         created_at=NOW,
         updated_at=NOW,
     )
@@ -163,17 +181,30 @@ def test_two_immediate_transactions_allocate_distinct_generation_numbers(
 def test_repository_preserves_zero_candidate_generation_and_history_after_restart(
     tmp_path: Path,
 ) -> None:
-    jobs = [str(uuid4()), str(uuid4())]
+    jobs = [str(uuid4()), str(uuid4()), str(uuid4())]
     database, engine = _database(tmp_path, job_ids=jobs)
     sessions = _sessions(engine)
     repository = ImageRepository(sessions)
-    historical = _generation(number=1, job_id=jobs[0])
-    zero_candidate = _generation(number=2, job_id=jobs[1])
-    historical_candidate = _candidate(generation_id=historical.image_generation_id, index=0)
+    completed = _generation(
+        number=1, job_id=jobs[0], provider_state="completed", completed_at=NOW
+    )
+    rejected = _generation(number=2, job_id=jobs[1], provider_state="completed")
+    superseded = _generation(number=3, job_id=jobs[2], provider_state="completed")
+    rejected_candidate = _candidate(
+        generation_id=rejected.image_generation_id, index=0, review_status="rejected"
+    )
+    superseded_candidate = _candidate(
+        generation_id=superseded.image_generation_id,
+        index=0,
+        review_status="superseded",
+        superseded_by_candidate_id=rejected_candidate.image_candidate_id,
+    )
     with sessions() as session:
-        repository.create_generation_in_session(session, historical)
-        repository.create_candidate_in_session(session, historical_candidate)
-        repository.create_generation_in_session(session, zero_candidate)
+        repository.create_generation_in_session(session, completed)
+        repository.create_generation_in_session(session, rejected)
+        repository.create_generation_in_session(session, superseded)
+        repository.create_candidate_in_session(session, rejected_candidate)
+        repository.create_candidate_in_session(session, superseded_candidate)
         session.commit()
     engine.dispose()
 
@@ -181,11 +212,21 @@ def test_repository_preserves_zero_candidate_generation_and_history_after_restar
     restarted = ImageRepository(_sessions(restarted_engine))
 
     assert [item.id for item in restarted.list_generations(SCENE_ID)] == [
-        historical.image_generation_id,
-        zero_candidate.image_generation_id,
+        completed.image_generation_id,
+        rejected.image_generation_id,
+        superseded.image_generation_id,
     ]
-    assert restarted.list_candidates(zero_candidate.image_generation_id) == []
-    assert [item.id for item in restarted.list_candidates(historical.image_generation_id)] == [
-        historical_candidate.image_candidate_id
+    assert restarted.list_candidates(completed.image_generation_id) == []
+    restarted_completed = restarted.get_generation(completed.image_generation_id)
+    assert restarted_completed is not None
+    assert restarted_completed.completed_at == NOW.replace(tzinfo=None)
+    restarted_rejected = restarted.list_candidates(rejected.image_generation_id)
+    restarted_superseded = restarted.list_candidates(superseded.image_generation_id)
+    assert [(item.id, item.review_status, item.rejected_by) for item in restarted_rejected] == [
+        (rejected_candidate.image_candidate_id, "rejected", "reviewer-1")
     ]
+    assert [
+        (item.id, item.review_status, item.superseded_by_candidate_id)
+        for item in restarted_superseded
+    ] == [(superseded_candidate.image_candidate_id, "superseded", rejected_candidate.image_candidate_id)]
     restarted_engine.dispose()
