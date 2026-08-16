@@ -227,7 +227,7 @@ def test_image_artifact_path_rejects_symlink_escape(tmp_path: Path) -> None:
     try:
         escaped_generation_root.symlink_to(outside_root, target_is_directory=True)
     except OSError as exc:
-        if os.name == "nt" and exc.winerror == 1314:
+        if os.name == "nt" and getattr(exc, "winerror", None) == 1314:
             pytest.skip("Windows test account lacks the symlink creation privilege")
         raise
 

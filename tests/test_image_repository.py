@@ -11,7 +11,12 @@ from auraly_pipeline.campaigns.persistence import (
     create_sqlite_engine,
     migrate_database,
 )
-from auraly_pipeline.images.domain import ImageCandidate, ImageGeneration
+from auraly_pipeline.images.domain import (
+    ImageCandidate,
+    ImageCandidateReviewStatus,
+    ImageGeneration,
+    ImageGenerationState,
+)
 from auraly_pipeline.images.repository import ImageRepository
 
 
@@ -69,7 +74,7 @@ def _generation(
     *,
     number: int,
     job_id: str,
-    provider_state: str = "queued",
+    provider_state: ImageGenerationState = "queued",
     completed_at: datetime | None = None,
 ) -> ImageGeneration:
     return ImageGeneration(
@@ -95,7 +100,7 @@ def _candidate(
     *,
     generation_id: str,
     index: int,
-    review_status: str = "pending_review",
+    review_status: ImageCandidateReviewStatus = "pending_review",
     superseded_by_candidate_id: str | None = None,
 ) -> ImageCandidate:
     return ImageCandidate(
