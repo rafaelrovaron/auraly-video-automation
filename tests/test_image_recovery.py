@@ -408,7 +408,9 @@ def test_stale_retry_preserves_blocked_image_domain_reason_after_pre_finish_cras
     _crash_after_image_domain_persistence(database, work_root)
 
     images = ImageService.for_database(database, work_root=work_root)
-    assert images.get_generation(generation_id).provider_state == "blocked"
+    blocked_generation = images.get_generation(generation_id)
+    assert blocked_generation.provider_state == "blocked"
+    blocked_updated_at = blocked_generation.updated_at
     assert images.list_candidates(generation_id) == []
     images.close()
 
@@ -428,7 +430,116 @@ def test_stale_retry_preserves_blocked_image_domain_reason_after_pre_finish_cras
     restarted.close()
     assert conflict_path.read_bytes() == unexpected
     images = ImageService.for_database(database, work_root=work_root)
-    assert images.get_generation(generation_id).provider_state == "blocked"
+    persisted_generation = images.get_generation(generation_id)
+    assert persisted_generation.provider_state == "blocked"
+    assert persisted_generation.updated_at == blocked_updated_at
+    assert images.list_candidates(generation_id) == []
+    images.close()
+
+
+@pytest.mark.parametrize(
+    ("provider_state", "expected_job_status", "expected_error_code"),
+    [
+        ("completed", "failed", "image_generation_state_invalid"),
+        ("blocked", "blocked", "image_generation_blocked"),
+    ],
+)
+def test_stale_terminal_image_retry_with_absent_evidence_is_inspection_only(
+    tmp_path: Path,
+    provider_state: str,
+    expected_job_status: str,
+    expected_error_code: str,
+) -> None:
+    database = tmp_path / f"{provider_state}-absent-evidence.db"
+    work_root = tmp_path / "work"
+    campaign_id, scene_variant_id = _campaign(database)
+    generation_id, _generation_number = _submit_generation(
+        database,
+        work_root,
+        campaign_id=campaign_id,
+        scene_variant_id=scene_variant_id,
+        key=f"{provider_state}-absent-evidence",
+    )
+    claimer = JobService.for_database(database, clock=lambda: RECOVERY_NOW, work_root=work_root)
+    claimed = claimer.claim_next_job("crashed-image-worker", lease_seconds=10)
+    assert claimed is not None
+    claimer.close()
+    _set_generation_state(database, generation_id, provider_state)
+    images = ImageService.for_database(database, work_root=work_root)
+    generation_before = images.get_generation(generation_id)
+    assert generation_before.provider_state == provider_state
+    assert images.list_candidates(generation_id) == []
+    images.close()
+    assert not work_root.exists()
+
+    expired = RECOVERY_NOW + timedelta(seconds=11)
+    restarted = JobService.for_database(database, clock=lambda: expired, work_root=work_root)
+    recovered = restarted.recover_stale_jobs()
+    assert len(recovered) == 1
+    assert recovered[0].status == "retry_scheduled"
+
+    inspected = restarted.worker_once("replacement-image-worker")
+
+    assert inspected is not None
+    assert inspected.status == expected_job_status
+    assert inspected.last_error_code == expected_error_code
+    restarted.close()
+    assert not work_root.exists()
+    images = ImageService.for_database(database, work_root=work_root)
+    generation_after = images.get_generation(generation_id)
+    assert generation_after.provider_state == provider_state
+    assert generation_after.updated_at == generation_before.updated_at
+    assert generation_after.dispatched_at == generation_before.dispatched_at
+    assert generation_after.completed_at == generation_before.completed_at
+    assert images.list_candidates(generation_id) == []
+    images.close()
+
+
+def test_stale_blocked_retry_with_unreadable_evidence_remains_generically_blocked(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "blocked-unreadable-evidence.db"
+    work_root = tmp_path / "work"
+    campaign_id, scene_variant_id = _campaign(database)
+    generation_id, generation_number = _submit_generation(
+        database,
+        work_root,
+        campaign_id=campaign_id,
+        scene_variant_id=scene_variant_id,
+        key="blocked-unreadable-evidence",
+    )
+    claimer = JobService.for_database(database, clock=lambda: RECOVERY_NOW, work_root=work_root)
+    claimed = claimer.claim_next_job("crashed-image-worker", lease_seconds=10)
+    assert claimed is not None
+    claimer.close()
+    _set_generation_state(database, generation_id, "blocked")
+    unreadable_path = _candidate_path(
+        work_root,
+        campaign_id,
+        scene_variant_id,
+        generation_number,
+        candidate_index=0,
+    )
+    unreadable_path.mkdir(parents=True)
+    images = ImageService.for_database(database, work_root=work_root)
+    generation_before = images.get_generation(generation_id)
+    images.close()
+
+    expired = RECOVERY_NOW + timedelta(seconds=11)
+    restarted = JobService.for_database(database, clock=lambda: expired, work_root=work_root)
+    assert restarted.recover_stale_jobs()[0].status == "retry_scheduled"
+
+    inspected = restarted.worker_once("replacement-image-worker")
+
+    assert inspected is not None
+    assert inspected.status == "blocked"
+    assert inspected.last_error_code == "image_generation_blocked"
+    restarted.close()
+    assert unreadable_path.is_dir()
+    images = ImageService.for_database(database, work_root=work_root)
+    generation_after = images.get_generation(generation_id)
+    assert generation_after.provider_state == "blocked"
+    assert generation_after.updated_at == generation_before.updated_at
     assert images.list_candidates(generation_id) == []
     images.close()
 

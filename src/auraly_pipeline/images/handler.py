@@ -183,42 +183,61 @@ class ImageGenerateHandler:
 
         try:
             candidates_to_create: list[ImageCandidate] = []
-            for index in range(2):
-                candidate = self._reconcile_candidate(
-                    generation_id=generation_id,
-                    campaign_id=campaign_id,
-                    scene_variant_id=scene_variant_id,
-                    generation_number=generation_number,
-                    candidate_index=index,
-                    recorded_candidate=existing_candidates.get(index),
-                )
-                if candidate is not None:
-                    candidates_to_create.append(candidate)
+            if provider_state in {"completed", "blocked"}:
+                if provider_state == "completed" and set(existing_candidates) != {0, 1}:
+                    return self._terminal(
+                        "image_generation_state_invalid",
+                        "The Image Generation state is invalid.",
+                    )
+                for index in range(2):
+                    self._inspect_candidate(
+                        generation_id=generation_id,
+                        campaign_id=campaign_id,
+                        scene_variant_id=scene_variant_id,
+                        generation_number=generation_number,
+                        candidate_index=index,
+                        recorded_candidate=existing_candidates.get(index),
+                    )
+            else:
+                for index in range(2):
+                    candidate = self._reconcile_candidate(
+                        generation_id=generation_id,
+                        campaign_id=campaign_id,
+                        scene_variant_id=scene_variant_id,
+                        generation_number=generation_number,
+                        candidate_index=index,
+                        recorded_candidate=existing_candidates.get(index),
+                    )
+                    if candidate is not None:
+                        candidates_to_create.append(candidate)
         except _ImageArtifactMissingError:
-            self._mark_blocked(generation_id)
+            if provider_state not in {"completed", "blocked"}:
+                self._mark_blocked(generation_id)
             return self._blocked(
                 "image_artifact_missing",
                 "The persisted image artifact is missing.",
             )
         except _ImageArtifactConflictError:
-            self._mark_blocked(generation_id)
+            if provider_state not in {"completed", "blocked"}:
+                self._mark_blocked(generation_id)
             return self._blocked(
                 "image_artifact_conflict",
                 "The image artifact conflicts with persisted evidence.",
             )
         except _ImageArtifactError:
-            self._mark_failed(generation_id)
+            if provider_state == "blocked":
+                return self._blocked(
+                    "image_generation_blocked",
+                    "The Image Generation remains blocked.",
+                )
+            if provider_state != "completed":
+                self._mark_failed(generation_id)
             return self._terminal(
                 "image_artifact_conflict",
                 "The image artifact conflicts with deterministic evidence.",
             )
 
         if provider_state == "completed":
-            if candidates_to_create or set(existing_candidates) != {0, 1}:
-                return self._terminal(
-                    "image_generation_state_invalid",
-                    "The Image Generation state is invalid.",
-                )
             return JobExecutionResult(
                 outcome=JobExecutionOutcome.SUCCESS,
                 result={"imageGenerationId": generation_id, "candidateCount": 2},
@@ -248,6 +267,40 @@ class ImageGenerateHandler:
             result={"imageGenerationId": generation_id, "candidateCount": 2},
         )
 
+    def _inspect_candidate(
+        self,
+        *,
+        generation_id: str,
+        campaign_id: str,
+        scene_variant_id: str,
+        generation_number: int,
+        candidate_index: int,
+        recorded_candidate: ImageCandidateRow | None,
+    ) -> None:
+        relative_path, target = self._candidate_paths(
+            campaign_id=campaign_id,
+            scene_variant_id=scene_variant_id,
+            generation_number=generation_number,
+            candidate_index=candidate_index,
+        )
+        if not target.exists():
+            if recorded_candidate is not None:
+                raise _ImageArtifactMissingError
+            return
+        try:
+            actual = target.read_bytes()
+        except OSError as exc:
+            raise _ImageArtifactError from exc
+        if actual != deterministic_png_bytes(generation_id, candidate_index):
+            raise _ImageArtifactConflictError
+        facts = _png_facts(actual)
+        if recorded_candidate is not None and not self._matches_expected_candidate(
+            recorded_candidate,
+            relative_path=relative_path,
+            facts=facts,
+        ):
+            raise _ImageArtifactConflictError
+
     def _reconcile_candidate(
         self,
         *,
@@ -258,17 +311,12 @@ class ImageGenerateHandler:
         candidate_index: int,
         recorded_candidate: ImageCandidateRow | None,
     ) -> ImageCandidate | None:
-        relative_path = Path(
-            "campaigns",
-            campaign_id,
-            "images",
-            scene_variant_id,
-            f"generation-{generation_number:04d}",
-            f"candidate-{candidate_index:04d}.png",
+        relative_path, target = self._candidate_paths(
+            campaign_id=campaign_id,
+            scene_variant_id=scene_variant_id,
+            generation_number=generation_number,
+            candidate_index=candidate_index,
         )
-        target = (self._work_root / relative_path).resolve()
-        if not target.is_relative_to(self._work_root):
-            raise _ImageArtifactError
         expected = deterministic_png_bytes(generation_id, candidate_index)
         expected_facts = _png_facts(expected)
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -330,6 +378,27 @@ class ImageGenerateHandler:
             created_at=timestamp,
             updated_at=timestamp,
         )
+
+    def _candidate_paths(
+        self,
+        *,
+        campaign_id: str,
+        scene_variant_id: str,
+        generation_number: int,
+        candidate_index: int,
+    ) -> tuple[Path, Path]:
+        relative_path = Path(
+            "campaigns",
+            campaign_id,
+            "images",
+            scene_variant_id,
+            f"generation-{generation_number:04d}",
+            f"candidate-{candidate_index:04d}.png",
+        )
+        target = (self._work_root / relative_path).resolve()
+        if not target.is_relative_to(self._work_root):
+            raise _ImageArtifactError
+        return relative_path, target
 
     @staticmethod
     def _matches_expected_candidate(
