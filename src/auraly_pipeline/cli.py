@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import sys
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Literal
@@ -26,6 +27,8 @@ from auraly_pipeline.image_generation import (
     write_failure_result,
 )
 from auraly_pipeline.ingest import IngestError, ingest_reel
+from auraly_pipeline.images.domain import ImageGenerateRequest, ImageGenerationSubmission
+from auraly_pipeline.images.service import ImageError, ImageService
 from auraly_pipeline.jobs.domain import Job, JobSubmit
 from auraly_pipeline.jobs.service import (
     JobError,
@@ -65,6 +68,14 @@ voice_app = typer.Typer(
     help="Generate, inspect, and review campaign Voice Masters.", no_args_is_help=True
 )
 app.add_typer(voice_app, name="voice")
+image_app = typer.Typer(
+    help="Persist and review deterministic local image generations.", no_args_is_help=True
+)
+app.add_typer(image_app, name="image")
+image_generation_app = typer.Typer(help="Inspect image generations.", no_args_is_help=True)
+image_app.add_typer(image_generation_app, name="generation")
+image_candidate_app = typer.Typer(help="Inspect and review image candidates.", no_args_is_help=True)
+image_app.add_typer(image_candidate_app, name="candidate")
 
 
 @app.command("ingest")
@@ -287,6 +298,271 @@ def _voice_failure(code: str, message: str) -> None:
 
 def _voice_service(database: Path) -> VoiceMasterService:
     return VoiceMasterService.for_database(database)
+
+
+def _image_failure(code: str, message: str) -> None:
+    _json_echo({"success": False, "error": {"code": code, "message": message}})
+    raise typer.Exit(code=1)
+
+
+def _image_service(database: Path, work_root: Path) -> ImageService:
+    return ImageService.for_database(database, work_root=work_root)
+
+
+def _close_image_service(service: ImageService | None) -> None:
+    if service is None:
+        return
+    handling_error = sys.exc_info()[0] is not None
+    try:
+        service.close()
+    except Exception:
+        if handling_error:
+            return
+        _image_failure("image_operation_failed", "The image operation failed safely.")
+
+
+def _image_submission_payload(submission: ImageGenerationSubmission) -> dict[str, object]:
+    generation = submission.generation.model_dump(by_alias=True, mode="json")
+    job = submission.job.model_dump(by_alias=True, mode="json")
+    return {
+        "success": True,
+        "generation": generation,
+        "job": job,
+        "reused": submission.reused,
+    }
+
+
+def _image_generate(
+    *,
+    campaign_id: str,
+    scene_variant_id: str,
+    idempotency_key: str,
+    prompt_snapshot: str,
+    reference_image_path: str | None,
+    reference_image_sha256: str | None,
+    database: Path,
+    work_root: Path,
+    regenerate: bool,
+) -> None:
+    service: ImageService | None = None
+    try:
+        request = ImageGenerateRequest(
+            campaign_id=campaign_id,
+            scene_variant_id=scene_variant_id,
+            idempotency_key=idempotency_key,
+            prompt_snapshot=prompt_snapshot,
+            reference_image_path=reference_image_path,
+            reference_image_sha256=reference_image_sha256,
+        )
+        service = _image_service(database, work_root)
+        submission = service.regenerate(request) if regenerate else service.generate(request)
+    except (ValueError, ValidationError):
+        _image_failure("image_invalid", "Image input is invalid.")
+    except ImageError as exc:
+        _image_failure(exc.code, exc.public_message)
+    except Exception:
+        _image_failure("image_operation_failed", "The image operation failed safely.")
+    finally:
+        _close_image_service(service)
+    _json_echo(_image_submission_payload(submission))
+
+
+@image_app.command("generate")
+def image_generate_command(
+    campaign_id: Annotated[str, typer.Argument(help="Campaign ID")],
+    scene_variant_id: Annotated[str, typer.Option("--scene-variant-id")],
+    idempotency_key: Annotated[str, typer.Option("--idempotency-key")],
+    prompt_snapshot: Annotated[str, typer.Option("--prompt-snapshot")],
+    reference_image_path: Annotated[str | None, typer.Option("--reference-image-path")] = None,
+    reference_image_sha256: Annotated[
+        str | None, typer.Option("--reference-image-sha256")
+    ] = None,
+    database: Annotated[Path, typer.Option("--database")] = default_database_path(),
+    work_root: Annotated[Path, typer.Option("--work-root")] = Path("work"),
+) -> None:
+    """Queue one deterministic local-fake image generation without executing it."""
+    _image_generate(
+        campaign_id=campaign_id,
+        scene_variant_id=scene_variant_id,
+        idempotency_key=idempotency_key,
+        prompt_snapshot=prompt_snapshot,
+        reference_image_path=reference_image_path,
+        reference_image_sha256=reference_image_sha256,
+        database=database,
+        work_root=work_root,
+        regenerate=False,
+    )
+
+
+@image_app.command("regenerate")
+def image_regenerate_command(
+    campaign_id: Annotated[str, typer.Argument(help="Campaign ID")],
+    scene_variant_id: Annotated[str, typer.Option("--scene-variant-id")],
+    idempotency_key: Annotated[str, typer.Option("--idempotency-key")],
+    prompt_snapshot: Annotated[str, typer.Option("--prompt-snapshot")],
+    reference_image_path: Annotated[str | None, typer.Option("--reference-image-path")] = None,
+    reference_image_sha256: Annotated[
+        str | None, typer.Option("--reference-image-sha256")
+    ] = None,
+    database: Annotated[Path, typer.Option("--database")] = default_database_path(),
+    work_root: Annotated[Path, typer.Option("--work-root")] = Path("work"),
+) -> None:
+    """Queue a new image generation; an existing idempotency key is rejected."""
+    _image_generate(
+        campaign_id=campaign_id,
+        scene_variant_id=scene_variant_id,
+        idempotency_key=idempotency_key,
+        prompt_snapshot=prompt_snapshot,
+        reference_image_path=reference_image_path,
+        reference_image_sha256=reference_image_sha256,
+        database=database,
+        work_root=work_root,
+        regenerate=True,
+    )
+
+
+@image_generation_app.command("get")
+def image_generation_get_command(
+    image_generation_id: Annotated[str, typer.Argument()],
+    database: Annotated[Path, typer.Option("--database")] = default_database_path(),
+    work_root: Annotated[Path, typer.Option("--work-root")] = Path("work"),
+) -> None:
+    service: ImageService | None = None
+    try:
+        service = _image_service(database, work_root)
+        generation = service.get_generation(image_generation_id)
+    except ImageError as exc:
+        _image_failure(exc.code, exc.public_message)
+    except Exception:
+        _image_failure("image_operation_failed", "The image operation failed safely.")
+    finally:
+        _close_image_service(service)
+    _json_echo({"success": True, "generation": generation.model_dump(by_alias=True, mode="json")})
+
+
+@image_generation_app.command("list")
+def image_generation_list_command(
+    scene_variant_id: Annotated[str, typer.Argument()],
+    database: Annotated[Path, typer.Option("--database")] = default_database_path(),
+    work_root: Annotated[Path, typer.Option("--work-root")] = Path("work"),
+) -> None:
+    service: ImageService | None = None
+    try:
+        service = _image_service(database, work_root)
+        generations = service.list_generations(scene_variant_id)
+    except Exception:
+        _image_failure("image_operation_failed", "The image operation failed safely.")
+    finally:
+        _close_image_service(service)
+    serialized = [generation.model_dump(by_alias=True, mode="json") for generation in generations]
+    _json_echo({"success": True, "count": len(serialized), "generations": serialized})
+
+
+@image_candidate_app.command("get")
+def image_candidate_get_command(
+    image_candidate_id: Annotated[str, typer.Argument()],
+    database: Annotated[Path, typer.Option("--database")] = default_database_path(),
+    work_root: Annotated[Path, typer.Option("--work-root")] = Path("work"),
+) -> None:
+    service: ImageService | None = None
+    try:
+        service = _image_service(database, work_root)
+        candidate = service.get_candidate(image_candidate_id)
+    except ImageError as exc:
+        _image_failure(exc.code, exc.public_message)
+    except Exception:
+        _image_failure("image_operation_failed", "The image operation failed safely.")
+    finally:
+        _close_image_service(service)
+    _json_echo({"success": True, "candidate": candidate.model_dump(by_alias=True, mode="json")})
+
+
+@image_candidate_app.command("list")
+def image_candidate_list_command(
+    image_generation_id: Annotated[str, typer.Argument()],
+    database: Annotated[Path, typer.Option("--database")] = default_database_path(),
+    work_root: Annotated[Path, typer.Option("--work-root")] = Path("work"),
+) -> None:
+    service: ImageService | None = None
+    try:
+        service = _image_service(database, work_root)
+        candidates = service.list_candidates(image_generation_id)
+    except Exception:
+        _image_failure("image_operation_failed", "The image operation failed safely.")
+    finally:
+        _close_image_service(service)
+    serialized = [candidate.model_dump(by_alias=True, mode="json") for candidate in candidates]
+    _json_echo({"success": True, "count": len(serialized), "candidates": serialized})
+
+
+@image_candidate_app.command("approve")
+def image_candidate_approve_command(
+    image_candidate_id: Annotated[str, typer.Argument()],
+    approved_by: Annotated[str, typer.Option("--approved-by")],
+    database: Annotated[Path, typer.Option("--database")] = default_database_path(),
+    work_root: Annotated[Path, typer.Option("--work-root")] = Path("work"),
+) -> None:
+    service: ImageService | None = None
+    try:
+        service = _image_service(database, work_root)
+        candidate = service.approve_candidate(image_candidate_id, approved_by)
+    except (ValueError, ValidationError):
+        _image_failure("image_invalid", "Image input is invalid.")
+    except ImageError as exc:
+        _image_failure(exc.code, exc.public_message)
+    except Exception:
+        _image_failure("image_operation_failed", "The image operation failed safely.")
+    finally:
+        _close_image_service(service)
+    _json_echo({"success": True, "candidate": candidate.model_dump(by_alias=True, mode="json")})
+
+
+@image_candidate_app.command("reject")
+def image_candidate_reject_command(
+    image_candidate_id: Annotated[str, typer.Argument()],
+    rejected_by: Annotated[str, typer.Option("--rejected-by")],
+    reason: Annotated[str, typer.Option("--reason")],
+    database: Annotated[Path, typer.Option("--database")] = default_database_path(),
+    work_root: Annotated[Path, typer.Option("--work-root")] = Path("work"),
+) -> None:
+    service: ImageService | None = None
+    try:
+        service = _image_service(database, work_root)
+        candidate = service.reject_candidate(image_candidate_id, rejected_by, reason)
+    except (ValueError, ValidationError):
+        _image_failure("image_invalid", "Image input is invalid.")
+    except ImageError as exc:
+        _image_failure(exc.code, exc.public_message)
+    except Exception:
+        _image_failure("image_operation_failed", "The image operation failed safely.")
+    finally:
+        _close_image_service(service)
+    _json_echo({"success": True, "candidate": candidate.model_dump(by_alias=True, mode="json")})
+
+
+@image_candidate_app.command("replace-approved")
+def image_candidate_replace_approved_command(
+    scene_variant_id: Annotated[str, typer.Argument()],
+    new_candidate_id: Annotated[str, typer.Argument()],
+    approved_by: Annotated[str, typer.Option("--approved-by")],
+    database: Annotated[Path, typer.Option("--database")] = default_database_path(),
+    work_root: Annotated[Path, typer.Option("--work-root")] = Path("work"),
+) -> None:
+    service: ImageService | None = None
+    try:
+        service = _image_service(database, work_root)
+        candidate = service.replace_approved_candidate(
+            scene_variant_id, new_candidate_id, approved_by
+        )
+    except (ValueError, ValidationError):
+        _image_failure("image_invalid", "Image input is invalid.")
+    except ImageError as exc:
+        _image_failure(exc.code, exc.public_message)
+    except Exception:
+        _image_failure("image_operation_failed", "The image operation failed safely.")
+    finally:
+        _close_image_service(service)
+    _json_echo({"success": True, "candidate": candidate.model_dump(by_alias=True, mode="json")})
 
 
 @voice_app.command("generate")
