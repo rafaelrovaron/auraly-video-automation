@@ -675,9 +675,9 @@ Configuração operacional da Campaign Foundation e da Persistent Job Orchestrat
 - o canário real ElevenLabs permanece pendente como `Goal 3C -- ElevenLabs Provider Canary`;
 - o Verification Harness determinístico foi implementado antes de Goal 4A;
 - Goal 4A -- Image Domain & Persistence está `IMPLEMENTED` e `LOCAL_VERIFIED`: a Task 12 concluiu
-  o harness determinístico completo no HEAD local de código `088d556`. Os jobs Linux e Windows do
-  GitHub Actions permanecem pendentes como evidência independente de CI para esse HEAD. O próximo
-  subgoal de imagem é Goal 4B -- Google Flow Browser Runtime.
+  o harness determinístico completo no HEAD local de código `088d556`; os jobs Linux full e Windows
+  focused do GitHub Actions foram aprovados no commit final `1a96525`, estabelecendo evidência
+  independente de CI. O próximo subgoal de imagem é Goal 4B -- Google Flow Browser Runtime.
 
 Terminologia obrigatória de milestone:
 
@@ -688,8 +688,8 @@ Terminologia obrigatória de milestone:
 
 O histórico de commits com `[verified]` não prova por si só verificação independente, CI ou
 provider. Estado atual: Goals 0–3 e Goal 4A estão `IMPLEMENTED` e `LOCAL_VERIFIED`; Goal 3 não está
-`PROVIDER_VERIFIED`; Goal 3C está `PENDING`; para Goal 4A, `PROVIDER_VERIFIED` é `N/A` e a evidência
-independente de CI Linux/Windows permanece pendente para o HEAD final.
+`PROVIDER_VERIFIED`; Goal 3C está `PENDING`; para Goal 4A, `PROVIDER_VERIFIED` é `N/A` e os jobs
+independentes de CI Linux full e Windows focused foram aprovados no commit `1a96525`.
 
 O README antigo descreve a pipeline principalmente como pós-produção de um MP4 do HeyGen. O novo escopo amplia a aplicação para geração em massa end-to-end. A implementação deve preservar compatibilidade com ingest/render existentes sempre que possível.
 
@@ -864,7 +864,7 @@ estabelece evidência independente de CI. Nenhuma delas estabelece `PROVIDER_VER
   rejeitadas e protegendo cenas distintas;
 - a CLI JSON local expõe geração, regeneração, consulta/listagem de gerações e candidatas, e as
   operações de review; erros são sanitizados;
-- a Task 12 concluiu o harness determinístico completo local; os jobs Linux e Windows do GitHub
-  Actions permanecem pendentes como evidência independente de CI para o HEAD final;
+- a Task 12 concluiu o harness determinístico completo local; os jobs Linux full e Windows focused
+  do GitHub Actions foram aprovados no commit `1a96525` como evidência independente de CI;
 - provider verification é `N/A` para Goal 4A: runtime Google Flow, browser, downloads reais e QC
   pertencem aos Goals 4B–4D.

@@ -65,10 +65,11 @@ demonstrado e permanece pendente como `Goal 3C`; portanto Goal 3 não é declara
 de CI ou de provider.
 
 Goal 4A — Image Domain & Persistence está `IMPLEMENTED` e `LOCAL_VERIFIED`: a Task 12 concluiu o
-harness determinístico completo no HEAD local de código `088d556`. Os jobs Linux e Windows do
-GitHub Actions são evidência independente de CI, separada da verificação local, e permanecem
-pendentes para o HEAD final. Sua verificação de provider é `N/A`: a implementação usa somente o
-handler local determinístico e não executa browser, Google Flow ou qualquer chamada de provider.
+harness determinístico completo no HEAD local de código `088d556`. Os jobs Linux full e Windows
+focused do GitHub Actions executaram com sucesso para o commit final `1a96525`, fornecendo
+evidência independente de CI para o fechamento. Sua verificação de provider é `N/A`: a
+implementação usa somente o handler local determinístico e não executa browser, Google Flow ou
+qualquer chamada de provider.
 
 ## Arquitetura oficial de geração de imagens
 
@@ -376,8 +377,8 @@ determinístico completo, para na primeira falha e detecta drift dos schemas ger
 arquivos automaticamente.
 
 O workflow `.github/workflows/verify.yml` usa o mesmo harness para evidência determinística
-independente em Linux e Windows. Para Goal 4A, essa evidência de CI permanece pendente para o HEAD
-final. Nem execução local nem CI estabelece `PROVIDER_VERIFIED`.
+independente em Linux e Windows. Para Goal 4A, os jobs Linux full e Windows focused foram aprovados
+no commit `1a96525`. Nem execução local nem CI estabelece `PROVIDER_VERIFIED`.
 
 ## Garantias atuais do manifesto
 
@@ -403,8 +404,8 @@ roadmap/process alignment
 
 Goal 4 foi decomposto em `4A Image Domain & Persistence`, `4B Google Flow Browser Runtime`,
 `4C Flow Generation, Download & Recovery` e `4D Image QC, Review & Provider Canary`. Goal 4A
-está `IMPLEMENTED` e `LOCAL_VERIFIED`; a evidência independente de CI Linux/Windows permanece
-pendente para o HEAD final. Goals 4B, 4C e 4D permanecem planejados. Specs e planos
+está `IMPLEMENTED` e `LOCAL_VERIFIED`, com evidência independente de CI Linux full e Windows
+focused aprovada no commit `1a96525`. Goals 4B, 4C e 4D permanecem planejados. Specs e planos
 futuros vivem respectivamente em
 `docs/superpowers/specs/` e `docs/superpowers/plans/`; qualquer canário real continua exigindo
 aprovação explícita.

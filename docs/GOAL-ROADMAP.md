@@ -348,8 +348,9 @@ Master. Run the Goal 3 baseline and real canary only after explicit operator app
 
 Goal 4A uses a deterministic local fake handler and intentionally performs no browser or provider
 operation. Task 12 completed the full deterministic harness on local code HEAD `088d556`. Linux
-and Windows GitHub Actions remain pending as separate independent CI evidence for the final HEAD.
-Neither local verification nor CI establishes provider verification.
+full and Windows focused GitHub Actions both succeeded for final commit `1a96525`, establishing
+separate independent CI evidence for Goal 4A closure. Neither local verification nor CI establishes
+provider verification.
 
 ### Objective
 
