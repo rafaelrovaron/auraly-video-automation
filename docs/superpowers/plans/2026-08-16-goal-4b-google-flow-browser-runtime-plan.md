@@ -28,6 +28,7 @@
 - Diagnostics and stdout/stderr never contain cookies, auth headers, storage state, browser-profile files, email/account identity, credentials, prompt/reference content, HTML/DOM snapshots, source, bodies, query strings/fragments, tokens, arbitrary exceptions, or absolute private paths.
 - Deterministic tests use local HTML through a private runtime-only injection seam. The production CLI/service cannot supply a URL or target override, and CI never opens live Google Flow.
 - Use TDD for every behavior task: run the focused test red, implement the minimum, rerun green, run the fast harness with that exact test file, review the diff, then commit only that task.
+- Goal closure requires a fresh, read-only independent reviewer through `superpowers:requesting-code-review` after full deterministic verification. Implementer self-review is preparatory evidence only; unresolved Critical or High review findings block closure.
 - Do not mark `PROVIDER_VERIFIED`. Optional live success may later be recorded only as supplemental `BROWSER_PREFLIGHT_VERIFIED` evidence.
 
 ## Repository Map
@@ -704,6 +705,42 @@ git commit -m "feat: add headed Flow browser runtime"
 - Consumes: config resolver, native lock, runtime, diagnostic writer, and all typed errors.
 - Produces: `FlowPreflightService.preflight() -> FlowPreflightResult` as the only public application entry point.
 
+Define the injectable types in `flow/service.py` exactly as follows. `ConfigResolver` is a keyword
+Protocol because the public config resolver has keyword-only options; the three factories are exact
+constructor callables from Tasks 3, 5, and 6.
+
+```python
+from collections.abc import Callable
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Protocol, TypeAlias
+
+
+class ConfigResolver(Protocol):
+    def __call__(
+        self,
+        *,
+        profile_dir: Path | None = None,
+        diagnostics_dir: Path | None = None,
+        login_timeout_seconds: int | None = None,
+        navigation_timeout_seconds: int | None = None,
+    ) -> FlowRuntimeConfig: ...
+
+
+LockFactory: TypeAlias = Callable[[Path], BrowserRuntimeLock]
+RuntimeFactory: TypeAlias = Callable[[FlowRuntimeConfig], GoogleFlowRuntime]
+DiagnosticWriterFactory: TypeAlias = Callable[[Path, Path], FlowDiagnosticWriter]
+
+
+def utc_now() -> datetime:
+    return datetime.now(UTC)
+```
+
+`FlowPreflightService.preflight()` calls `_config_resolver` with the four named keyword arguments
+above, constructs `_lock_factory(config.lock_path)`, `_runtime_factory(config)`, and
+`_diagnostic_writer_factory(config.diagnostics_dir, config.staging_root)`. Test fakes must implement
+the same signatures rather than relying on untyped `lambda *args, **kwargs` behavior.
+
 - [ ] **Step 1: Write failing orchestration tests with injected fakes**
 
 ```python
@@ -1049,13 +1086,13 @@ git add .github/workflows/verify.yml tests/test_verify_harness.py
 git commit -m "ci: verify headed Flow browser runtime"
 ```
 
-### Task 11: Goal 4B closure, documentation, and final evidence
+### Task 11: Goal 4B closure, independent review, documentation, and final evidence
 
 **Files:**
 - Modify: `README.md`
 - Modify: `docs/GOAL-ROADMAP.md`
 - Modify: `docs/PROJECT-MEMORY.md`
-- Modify only files required by independently reviewed regression fixes.
+- Modify only files required by accepted reviewer findings and their regression tests.
 
 **Interfaces:**
 - Consumes: Tasks 1–10, the common deterministic harness, and both GitHub Actions jobs.
@@ -1073,7 +1110,7 @@ git diff --check
 On Linux, run the full harness as `xvfb-run -a uv run python scripts/verify.py full`. Expected: all
 harness steps pass, all Flow tests use local pages, and no live provider request occurs.
 
-- [ ] **Step 2: Perform an independent scope and security review**
+- [ ] **Step 2: Perform the local pre-review; it is not the independent review**
 
 ```bash
 git status --short
@@ -1086,13 +1123,88 @@ Review every match in context. Accept only negative assertions, status text, or 
 `headless=False` launch. Confirm no prompt, upload, download, candidate, QC, Job/DB integration,
 personal profile, arbitrary URL, raw trace, secret, or private path entered production output.
 
-- [ ] **Step 3: Fix any accepted review finding with a red-green commit**
+This is an implementer self-check only. It must never be reported as, substituted for, or used to
+waive the independent review required in Step 3.
 
-For each real finding, add one focused failing regression test, prove the failure, make the minimum
-Goal 4B fix, rerun its focused file and fast harness, and commit it separately with a message naming
-the corrected invariant. After the last fix, repeat Steps 1–2. Do not bundle review fixes into docs.
+- [ ] **Step 3: Request a fresh independent reviewer with `superpowers:requesting-code-review`**
 
-- [ ] **Step 4: Update truthful closure documentation**
+After Step 1 passes, obtain the implementation range:
+
+```bash
+git rev-parse 35aebb09628b1363990bb2fe51b05e0598c085d6
+git rev-parse HEAD
+git diff --stat 35aebb09628b1363990bb2fe51b05e0598c085d6..HEAD
+git diff 35aebb09628b1363990bb2fe51b05e0598c085d6..HEAD
+```
+
+Invoke `superpowers:requesting-code-review` to dispatch a fresh reviewer/subagent who did not
+implement Goal 4B and is read-only on the checkout. Supply this complete reviewer brief, replacing
+`<IMPLEMENTATION_HEAD>` with the SHA returned by `git rev-parse HEAD`:
+
+```text
+Review Goal 4B — Google Flow Browser Runtime independently and read-only.
+
+Approved design spec:
+docs/superpowers/specs/2026-08-16-goal-4b-google-flow-browser-runtime-design.md
+
+Approved implementation plan:
+docs/superpowers/plans/2026-08-16-goal-4b-google-flow-browser-runtime-plan.md
+
+Baseline commit:
+35aebb09628b1363990bb2fe51b05e0598c085d6
+
+Implementation HEAD:
+<IMPLEMENTATION_HEAD>
+
+Inspect:
+git diff --stat 35aebb09628b1363990bb2fe51b05e0598c085d6..<IMPLEMENTATION_HEAD>
+git diff 35aebb09628b1363990bb2fe51b05e0598c085d6..<IMPLEMENTATION_HEAD>
+
+Verify all of the following:
+- compliance with the approved design spec and this plan;
+- scope creep or accidental Goal 4C/4D behavior;
+- browser safety, headed-only Playwright-managed Chromium, and no unsafe interaction;
+- secret/private-data leakage through results, logs, screenshots, traces, paths, or profiles;
+- browser/context cleanup and closure on every path;
+- native lock correctness and concurrency-one behavior;
+- manual authentication boundary and timeout handling;
+- semantic locator uniqueness and fail-closed behavior;
+- status-specific diagnostics sanitization and append-only publication; and
+- test coverage gaps, especially real local-browser, OS-lock, CLI, and CI coverage.
+
+Classify findings exactly as Critical, High, or Minor. Give every finding a file:line reference,
+impact, and specific remediation. Critical and High findings block Goal 4B closure. State whether
+the reviewed implementation is ready for closure only after considering the exact range above.
+```
+
+The reviewer returns strengths, findings, and an explicit assessment. The implementer/coordinator
+may clarify a finding with evidence, but cannot self-approve closure or downgrade a valid Critical
+or High finding without a documented technical reason and a new reviewer response.
+
+- [ ] **Step 4: Fix accepted Critical or High findings with red-green commits**
+
+Critical and High findings block closure. For each accepted finding—every Critical/High item and any
+Minor item the user explicitly elects to fix—first add one focused regression test that fails on the
+reviewed implementation, prove the red result, make the minimum Goal 4B fix, rerun the focused test
+and the relevant fast harness, then commit the regression and fix separately from closure
+documentation. Preserve unaccepted Minor findings in the review report. Do not bundle reviewer
+fixes into docs.
+
+- [ ] **Step 5: Re-run focused and full verification after reviewer fixes**
+
+```bash
+uv run pytest tests/test_flow_domain.py tests/test_flow_config.py tests/test_flow_lock.py tests/test_flow_locators.py tests/test_flow_diagnostics.py tests/test_flow_runtime.py tests/test_flow_service.py tests/test_flow_cli.py tests/test_flow_security.py -q
+uv run python scripts/verify.py fast --pytest tests/test_flow_domain.py tests/test_flow_config.py tests/test_flow_lock.py tests/test_flow_locators.py tests/test_flow_diagnostics.py tests/test_flow_runtime.py tests/test_flow_service.py tests/test_flow_cli.py tests/test_flow_security.py
+uv run playwright install --dry-run chromium
+uv run python scripts/verify.py full
+git diff --check
+```
+
+On Linux, use `xvfb-run -a` for browser-bearing pytest/full commands. If no Critical or High
+findings were accepted, run the full command and whitespace check anyway. Do not proceed to closure
+documentation until this post-review full verification passes.
+
+- [ ] **Step 6: Update truthful closure documentation**
 
 Record only proven durable behavior:
 
@@ -1105,12 +1217,12 @@ BROWSER_PREFLIGHT_VERIFIED not run unless separately approved and evidenced
 ```
 
 README summarizes the independent preflight and exact non-generation boundary. Roadmap marks Goal
-4B implemented/local only after Step 1 passes. PROJECT-MEMORY records the persistent external
+4B implemented/local only after Steps 1–5 pass. PROJECT-MEMORY records the persistent external
 profile, manual headed authentication, semantic fail-closed locator contract, OS lock, sanitized
 append-only diagnostics, closure behavior, and that Goals 4C/4D remain deferred. Do not claim a
 live Flow run or provider verification.
 
-- [ ] **Step 5: Re-run the closure gate after documentation and commit**
+- [ ] **Step 7: Re-run the closure gate after documentation and commit**
 
 ```bash
 uv run python scripts/verify.py full
@@ -1122,7 +1234,7 @@ git commit -m "docs: close Goal 4B implementation"
 On Linux, use the Xvfb wrapper for the full harness. Expected: full deterministic gate passes on
 the exact documentation commit; commit contains only closure docs.
 
-- [ ] **Step 6: Require final remote CI evidence**
+- [ ] **Step 8: Require final remote CI evidence**
 
 Push the final branch/commit through the user's selected Git workflow and require both:
 
@@ -1131,9 +1243,10 @@ Linux full verification       SUCCESS
 Windows focused verification  SUCCESS
 ```
 
-If CI finds a real issue, add a focused failing regression test, fix only that issue, rerun local
-full verification, commit separately, push, and require both jobs on the new final SHA. Do not mark
-`LOCAL_VERIFIED` on a SHA whose required CI is failing or pending.
+If CI finds a real issue, add a focused failing regression test, fix only that issue, rerun focused
+and local full verification, commit separately, push, and require both jobs on the new final SHA.
+Do not mark `LOCAL_VERIFIED` on a SHA whose required CI is failing or pending. Closure is prohibited
+when the Step 3 reviewer left any Critical or High finding unresolved.
 
 ## Optional operator-approved live preflight
 
@@ -1170,6 +1283,7 @@ preflight into `PROVIDER_VERIFIED`; real generation/download verification remain
 | Trace/screenshot/result sanitization | 5, 6, 7, 9 |
 | Deterministic local headed browser tests | 4, 6, 9, 10 |
 | Windows-focused and Linux/Xvfb CI | 3, 10, 11 |
+| Fresh independent review; Critical/High regression-fix gate | 11 Steps 3–5 |
 | Optional manual live preflight, not provider verification | 11 and optional section |
 | No Generate/upload/download/candidates/QC | Global Constraints, 6, 9, 11 |
 
