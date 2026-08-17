@@ -93,6 +93,20 @@ def test_non_ready_result_rejects_success_true_and_private_artifact_paths() -> N
             screenshot=r"C:\Users\private\screenshot.png",
             timestamp=datetime.now(UTC),
         )
+
+
+def test_failure_factory_is_the_only_non_ready_public_constructor() -> None:
+    result = FlowPreflightResult.failure(
+        status="runtime_busy",
+        authenticated=False,
+        ui_ready=False,
+        failed_step="acquire_runtime_lock",
+        timestamp=datetime(2026, 8, 16, tzinfo=UTC),
+    )
+    assert result.success is False
+    assert result.status == "runtime_busy"
+    assert result.screenshot is None
+    assert result.trace is None
 ```
 
 Also parameterize all six statuses and all eight failed steps; reject unknown values and enforce
@@ -110,6 +124,13 @@ FLOW_URL = "https://labs.google/fx/tools/flow"
 
 FlowPreflightStatus = Literal[
     "ready",
+    "authentication_required",
+    "human_intervention_required",
+    "runtime_busy",
+    "browser_launch_failed",
+    "ui_contract_failed",
+]
+NonReadyFlowPreflightStatus = Literal[
     "authentication_required",
     "human_intervention_required",
     "runtime_busy",
@@ -143,10 +164,64 @@ class FlowPreflightResult(ContractModel):
     screenshot: Literal["screenshot.png"] | None = None
     trace: Literal["trace.zip"] | None = None
     timestamp: datetime
+
+    @classmethod
+    def ready(
+        cls,
+        *,
+        timestamp: datetime,
+    ) -> Self:
+        return cls(
+            success=True,
+            status="ready",
+            flow_url=FLOW_URL,
+            authenticated=True,
+            ui_ready=True,
+            failed_step=None,
+            failed_locator=None,
+            diagnostic_run_id=None,
+            screenshot=None,
+            trace=None,
+            timestamp=timestamp,
+        )
+
+    @classmethod
+    def failure(
+        cls,
+        *,
+        status: NonReadyFlowPreflightStatus,
+        authenticated: bool,
+        ui_ready: bool,
+        failed_step: FlowFailedStep,
+        timestamp: datetime,
+        failed_locator: FlowLocatorName | None = None,
+        diagnostic_run_id: str | None = None,
+        screenshot: Literal["screenshot.png"] | None = None,
+        trace: Literal["trace.zip"] | None = None,
+    ) -> Self:
+        return cls(
+            success=False,
+            status=status,
+            flow_url=FLOW_URL,
+            authenticated=authenticated,
+            ui_ready=ui_ready,
+            failed_step=failed_step,
+            failed_locator=failed_locator,
+            diagnostic_run_id=diagnostic_run_id,
+            screenshot=screenshot,
+            trace=trace,
+            timestamp=timestamp,
+        )
 ```
 
-Add a model validator for the ready/non-ready invariants, UTC timestamps, safe run IDs, and
-artifact/run linkage. Define immutable internal dataclasses `FlowRuntimeObservation` and
+Import `Self` from `typing`. `ready()` is the only success factory and `failure()` is the only
+public non-ready factory used by the service. `ready()` always sets `authenticated=True`,
+`ui_ready=True`, and every failure/artifact field to `None`. `failure()` preserves all existing
+non-ready validator invariants. The validator must reject `success=True` with a non-ready status and
+`success=False` with `ready`; optional fields remain JSON `null` through
+`model_dump(by_alias=True, mode="json", exclude_none=False)` when inapplicable. Define a model
+validator for these ready/non-ready invariants, UTC timestamps, safe run IDs, and artifact/run
+linkage. Define immutable internal dataclasses `FlowRuntimeObservation` and
 `FlowFailureEvidence`; the latter holds only transient `screenshot_png`, `raw_trace_path`, and
 test-supplied `deny_values`. Define `FlowRuntimeError` with sanitized scalar fields and subclasses
 `FlowRuntimeBusyError`, `FlowBrowserLaunchError`, `FlowAuthenticationTimeoutError`,
@@ -347,10 +422,29 @@ def test_process_exit_releases_kernel_lock_even_when_file_remains(tmp_path: Path
     holder.wait(timeout=5)
     with BrowserRuntimeLock(lock_path):
         assert lock_path.is_file()
+
+
+def test_normal_release_allows_reacquisition_and_keeps_lock_file(tmp_path: Path) -> None:
+    lock_path = tmp_path / "flow.lock"
+    first = BrowserRuntimeLock(lock_path)
+    first.acquire()
+    first.release()
+    assert lock_path.is_file()
+    with BrowserRuntimeLock(lock_path):
+        assert lock_path.is_file()
+
+
+def test_release_is_idempotent_after_finally_style_cleanup(tmp_path: Path) -> None:
+    lock = BrowserRuntimeLock(tmp_path / "flow.lock")
+    lock.acquire()
+    lock.release()
+    lock.release()
 ```
 
 The helper acquires the real lock, prints `locked`, waits for stdin/termination, and never deletes
-the file. Add same-process release/idempotent-finally tests.
+the file. The tests above cover real cross-process contention, normal release, kernel release after
+process crash/exit, reacquisition after release, and the lock file remaining physically present after
+unlock, as well as idempotent finally-style cleanup.
 
 - [ ] **Step 2: Run the red tests**
 
@@ -379,9 +473,22 @@ class BrowserRuntimeLock:
         self.release()
 ```
 
-Open the fixed file in binary append/update mode, ensure at least one byte exists, and use
-`msvcrt.locking(handle.fileno(), LK_NBLCK, 1)` on Windows or
-`fcntl.flock(handle.fileno(), LOCK_EX | LOCK_NB)` on POSIX.
+Open the fixed file in binary append/update mode and ensure at least one byte exists. On Windows,
+byte offset `0` is always the locked byte. Lock and unlock must seek to offset `0` first and must
+not depend on the file object's current position:
+
+```python
+# Windows acquisition
+handle.seek(0)
+msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+
+# Windows release, before closing handle
+handle.seek(0)
+msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+```
+
+Preserve the POSIX behavior with `fcntl.flock(handle.fileno(), LOCK_EX | LOCK_NB)` on acquisition
+and `fcntl.flock(handle.fileno(), LOCK_UN)` on release.
 Translate only contention to `FlowRuntimeBusyError`; close the handle on every failed acquisition.
 Unlock and close in `release()` without deleting the file.
 
@@ -813,7 +920,10 @@ class FlowPreflightService:
 ```
 
 Resolve config, acquire the lock without waiting, run the browser, verify closure is complete, then
-release the lock in `finally`. Build public results only through allowlisted constructors. For every
+release the lock in `finally`. Map a ready observation only through
+`FlowPreflightResult.ready(timestamp=self._now())`; map every typed error and other approved
+non-ready service outcome only through `FlowPreflightResult.failure(...)`. Never instantiate
+`FlowPreflightResult` ad hoc in this service. For every
 failure with a validated diagnostics root, call the writer; if writer sanitization fails, discard
 unsafe evidence and write a fresh result-only `human_intervention_required` result with
 `sanitize_diagnostics`. Do not expose the private runtime target or accept a URL.
@@ -905,7 +1015,9 @@ def flow_preflight_command(
 
 Catch only unexpected CLI-boundary failures, converting them to the fixed
 `browser_launch_failed`/`validate_config` JSON without exception text. Do not add logging that can
-interleave with stdout.
+interleave with stdout. The CLI only serializes the `FlowPreflightResult` it receives; it must not
+reconstruct a result or payload, and it preserves optional fields as JSON `null` with aliases and
+`exclude_none=False`.
 
 - [ ] **Step 4: Run focused verification**
 
@@ -1293,9 +1405,10 @@ Type consistency check:
 FlowRuntimeConfig
   → BrowserRuntimeLock(config.lock_path)
   → GoogleFlowRuntime(config).run() returns FlowRuntimeObservation or raises FlowRuntimeError
-  → FlowPreflightService.preflight() maps to FlowPreflightResult
+  → FlowPreflightService.preflight()
+      → FlowPreflightResult.ready(timestamp=...) OR FlowPreflightResult.failure(...)
   → FlowDiagnosticWriter.write_failure(result, evidence) returns updated FlowPreflightResult
-  → CLI serializes FlowPreflightResult with aliases and exclude_none=False
+  → CLI serializes the received result with aliases and exclude_none=False
 ```
 
 Every referenced production module is created before a later task consumes it. Every browser test
