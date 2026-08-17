@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import FrozenInstanceError
 from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 from pydantic import ValidationError
@@ -150,7 +151,7 @@ def test_public_result_rejects_values_outside_the_allowlists(field: str, value: 
     payload[field] = value
 
     with pytest.raises(ValidationError):
-        FlowPreflightResult(**payload)
+        FlowPreflightResult(**cast(Any, payload))
 
 
 def test_non_ready_result_rejects_success_true_and_private_artifact_paths() -> None:
@@ -161,7 +162,7 @@ def test_non_ready_result_rejects_success_true_and_private_artifact_paths() -> N
             flow_url=FLOW_URL,
             authenticated=True,
             ui_ready=False,
-            screenshot=r"C:\Users\private\screenshot.png",
+            screenshot=r"C:\Users\private\screenshot.png",  # type: ignore[arg-type]
             timestamp=TIMESTAMP,
         )
 
@@ -201,21 +202,28 @@ def test_artifacts_are_safe_fixed_names_and_require_a_diagnostic_run(
         "timestamp": TIMESTAMP,
     }
     with pytest.raises(ValidationError):
-        FlowPreflightResult.failure(**(base | {artifact_field: "unexpected.png"}))  # type: ignore[arg-type]
+        FlowPreflightResult.failure(**cast(Any, base | {artifact_field: "unexpected.png"}))
     with pytest.raises(ValidationError):
         FlowPreflightResult.failure(
-            **(base | {artifact_field: "screenshot.png" if artifact_field == "screenshot" else "trace.zip"})
-        )  # type: ignore[arg-type]
+            **cast(
+                Any,
+                base
+                | {
+                    artifact_field: "screenshot.png" if artifact_field == "screenshot" else "trace.zip"
+                },
+            )
+        )
 
     result = FlowPreflightResult.failure(
-        **(
+        **cast(
+            Any,
             base
             | {
                 "diagnostic_run_id": "20260816T000000Z-a1b2c3d4",
                 artifact_field: "screenshot.png" if artifact_field == "screenshot" else "trace.zip",
             }
         )
-    )  # type: ignore[arg-type]
+    )
     assert getattr(result, artifact_field) in {"screenshot.png", "trace.zip"}
 
 
@@ -267,7 +275,7 @@ def test_runtime_observation_and_evidence_are_frozen_internal_values() -> None:
     assert observation.ui_ready is True
     assert evidence.raw_trace_path == Path("transient.zip")
     with pytest.raises(FrozenInstanceError):
-        observation.ui_ready = False  # type: ignore[misc]
+        observation.ui_ready = False  # type: ignore[assignment,misc]
     with pytest.raises(FrozenInstanceError):
         evidence.raw_trace_path = Path("other.zip")  # type: ignore[misc]
 
