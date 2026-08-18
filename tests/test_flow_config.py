@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import FrozenInstanceError
 import os
 from pathlib import Path
+import stat
 from typing import Any, cast
 
 import pytest
@@ -66,6 +67,22 @@ def test_config_uses_environment_then_local_state_defaults(tmp_path: Path) -> No
     assert config.staging_root == (state / "staging" / "google-flow").resolve()
     assert config.login_timeout_seconds == 120
     assert config.navigation_timeout_seconds == 15
+
+
+def test_config_uses_exact_production_defaults_from_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    home = tmp_path / "controlled-home"
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+
+    config = resolve_flow_runtime_config(environment={}, repository_root=REPOSITORY_ROOT)
+
+    state = (home / ".auraly").resolve()
+    assert config.profile_dir == state / "browser-profiles" / "google-flow"
+    assert config.diagnostics_dir == state / "diagnostics" / "google-flow"
+    assert config.lock_path == state / "locks" / "google-flow-browser.lock"
+    assert config.staging_root == state / "staging" / "google-flow"
+    assert config.login_timeout_seconds == 300
+    assert config.navigation_timeout_seconds == 30
+    assert config.flow_url == FLOW_URL
 
 
 @pytest.mark.parametrize(
@@ -239,3 +256,29 @@ def test_config_validates_all_directory_ancestors_before_creating_any_runtime_di
     assert not profile_dir.exists()
     assert not diagnostics_dir.exists()
     assert not (state / "staging").exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX permission modes are not honored on Windows")
+def test_config_creates_each_new_runtime_component_with_private_mode(tmp_path: Path) -> None:
+    state = tmp_path / "state"
+    prior_umask = os.umask(0o022)
+    try:
+        resolve_flow_runtime_config(
+            profile_dir=tmp_path / "profile",
+            diagnostics_dir=tmp_path / "diagnostics",
+            repository_root=REPOSITORY_ROOT,
+            _local_state_root=state,
+            environment={},
+        )
+    finally:
+        os.umask(prior_umask)
+
+    for directory in (
+        tmp_path / "profile",
+        tmp_path / "diagnostics",
+        state,
+        state / "locks",
+        state / "staging",
+        state / "staging" / "google-flow",
+    ):
+        assert stat.S_IMODE(directory.stat().st_mode) == 0o700

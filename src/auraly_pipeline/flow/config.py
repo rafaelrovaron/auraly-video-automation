@@ -169,10 +169,20 @@ def _create_runtime_directories(
         raise ValueError("runtime lock path is unusable")
 
     for directory in directories:
-        directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+        _create_private_directory_tree(directory)
 
 
 def _validate_directory_ancestors(directory: Path) -> None:
     for candidate in (directory, *directory.parents):
         if candidate.exists() and not candidate.is_dir():
             raise ValueError("runtime directory is unusable")
+
+
+def _create_private_directory_tree(directory: Path) -> None:
+    missing_directories: list[Path] = []
+    candidate = directory
+    while not candidate.exists():
+        missing_directories.append(candidate)
+        candidate = candidate.parent
+    for missing_directory in reversed(missing_directories):
+        missing_directory.mkdir(mode=0o700, exist_ok=True)
