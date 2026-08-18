@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import FrozenInstanceError
+import os
 from pathlib import Path
 from typing import Any, cast
 
@@ -129,7 +130,9 @@ def test_config_rejects_profile_and_diagnostics_overlap(
     )
 
 
-@pytest.mark.parametrize("runtime_dir", ("locks", "staging", "staging/google-flow"))
+@pytest.mark.parametrize(
+    "runtime_dir", ("locks", "locks/profile", "staging", "staging/google-flow")
+)
 def test_config_rejects_profile_or_diagnostics_overlap_with_runtime_state(
     runtime_dir: str, tmp_path: Path
 ) -> None:
@@ -154,8 +157,10 @@ def test_config_rejects_canonical_symlink_escape_into_repository(tmp_path: Path)
     link = tmp_path / "linked-repository"
     try:
         link.symlink_to(REPOSITORY_ROOT, target_is_directory=True)
-    except OSError:
-        pytest.skip("symlink creation is unavailable for this test account")
+    except OSError as error:
+        if os.name == "nt" and error.winerror == 1314:
+            pytest.skip("Windows account lacks the directory symlink privilege")
+        raise
 
     _assert_config_error(
         profile_dir=link / "profile",
@@ -198,3 +203,39 @@ def test_config_is_immutable(tmp_path: Path) -> None:
     assert isinstance(config, FlowRuntimeConfig)
     with pytest.raises(FrozenInstanceError):
         config.login_timeout_seconds = 1  # type: ignore[misc]
+
+
+def test_config_constructor_cannot_override_fixed_flow_destination(tmp_path: Path) -> None:
+    with pytest.raises(TypeError):
+        FlowRuntimeConfig(
+            profile_dir=tmp_path / "profile",
+            diagnostics_dir=tmp_path / "diagnostics",
+            lock_path=tmp_path / "lock",
+            staging_root=tmp_path / "staging",
+            login_timeout_seconds=1,
+            navigation_timeout_seconds=1,
+            flow_url="https://attacker.invalid/flow",  # type: ignore[call-arg]
+        )
+
+
+def test_config_validates_all_directory_ancestors_before_creating_any_runtime_directory(
+    tmp_path: Path,
+) -> None:
+    state = tmp_path / "state"
+    lock_ancestor = state / "locks"
+    lock_ancestor.parent.mkdir()
+    lock_ancestor.write_text("not a directory", encoding="utf-8")
+    profile_dir = tmp_path / "profile"
+    diagnostics_dir = tmp_path / "diagnostics"
+
+    _assert_config_error(
+        profile_dir=profile_dir,
+        diagnostics_dir=diagnostics_dir,
+        repository_root=REPOSITORY_ROOT,
+        _local_state_root=state,
+        environment={},
+    )
+
+    assert not profile_dir.exists()
+    assert not diagnostics_dir.exists()
+    assert not (state / "staging").exists()

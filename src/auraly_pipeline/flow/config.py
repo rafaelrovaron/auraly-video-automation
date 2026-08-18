@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import os
 from pathlib import Path
 from typing import Literal, Mapping
@@ -24,7 +24,7 @@ class FlowRuntimeConfig:
     staging_root: Path
     login_timeout_seconds: int
     navigation_timeout_seconds: int
-    flow_url: Literal["https://labs.google/fx/tools/flow"] = FLOW_URL
+    flow_url: Literal["https://labs.google/fx/tools/flow"] = field(default=FLOW_URL, init=False)
 
 
 def resolve_flow_runtime_config(
@@ -80,7 +80,7 @@ def resolve_flow_runtime_config(
         runtime_paths = (
             resolved_profile_dir,
             resolved_diagnostics_dir,
-            lock_path,
+            lock_path.parent,
             staging_root,
         )
         _validate_runtime_paths(runtime_paths, canonical_repository_root)
@@ -162,11 +162,17 @@ def _create_runtime_directories(
     lock_path: Path,
     staging_root: Path,
 ) -> None:
-    for directory in (profile_dir, diagnostics_dir, staging_root):
-        if directory.exists() and not directory.is_dir():
-            raise ValueError("runtime directory is unusable")
+    directories = (profile_dir, diagnostics_dir, lock_path.parent, staging_root)
+    for directory in directories:
+        _validate_directory_ancestors(directory)
     if lock_path.exists() and lock_path.is_dir():
         raise ValueError("runtime lock path is unusable")
 
-    for directory in (profile_dir, diagnostics_dir, lock_path.parent, staging_root):
+    for directory in directories:
         directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+
+
+def _validate_directory_ancestors(directory: Path) -> None:
+    for candidate in (directory, *directory.parents):
+        if candidate.exists() and not candidate.is_dir():
+            raise ValueError("runtime directory is unusable")
