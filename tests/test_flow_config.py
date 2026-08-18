@@ -258,6 +258,41 @@ def test_config_validates_all_directory_ancestors_before_creating_any_runtime_di
     assert not (state / "staging").exists()
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows roots are required for this regression")
+def test_config_rejects_unavailable_windows_anchor_without_creating_directories(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    unavailable_root = Path("Z:/").resolve(strict=False)
+    original_exists = Path.exists
+    anchor_checks = 0
+
+    class AnchorLoopDetected(BaseException):
+        pass
+
+    def missing_anchor_exists(path: Path) -> bool:
+        nonlocal anchor_checks
+        if path == unavailable_root:
+            anchor_checks += 1
+            if anchor_checks > 2:
+                raise AnchorLoopDetected
+            return False
+        return original_exists(path)
+
+    monkeypatch.setattr(Path, "exists", missing_anchor_exists)
+    diagnostics_dir = tmp_path / "diagnostics"
+
+    _assert_config_error(
+        profile_dir=unavailable_root,
+        diagnostics_dir=diagnostics_dir,
+        repository_root=REPOSITORY_ROOT,
+        _local_state_root=tmp_path / "state",
+        environment={},
+    )
+
+    assert not diagnostics_dir.exists()
+    assert not (tmp_path / "state").exists()
+
+
 @pytest.mark.skipif(os.name == "nt", reason="POSIX permission modes are not honored on Windows")
 def test_config_creates_each_new_runtime_component_with_private_mode(tmp_path: Path) -> None:
     state = tmp_path / "state"

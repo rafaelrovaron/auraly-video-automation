@@ -183,6 +183,9 @@ def _create_private_directory_tree(directory: Path) -> None:
     candidate = directory
     while not candidate.exists():
         missing_directories.append(candidate)
-        candidate = candidate.parent
+        parent = candidate.parent
+        if parent == candidate:
+            raise ValueError("runtime directory anchor is unavailable")
+        candidate = parent
     for missing_directory in reversed(missing_directories):
         missing_directory.mkdir(mode=0o700, exist_ok=True)
