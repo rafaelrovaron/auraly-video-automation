@@ -174,8 +174,11 @@ def _create_runtime_directories(
 
 def _validate_directory_ancestors(directory: Path) -> None:
     for candidate in (directory, *directory.parents):
-        if candidate.exists() and not candidate.is_dir():
-            raise ValueError("runtime directory is unusable")
+        if candidate.exists():
+            if not candidate.is_dir():
+                raise ValueError("runtime directory is unusable")
+        elif candidate.parent == candidate:
+            raise ValueError("runtime directory anchor is unavailable")
 
 
 def _create_private_directory_tree(directory: Path) -> None:

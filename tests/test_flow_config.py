@@ -293,6 +293,39 @@ def test_config_rejects_unavailable_windows_anchor_without_creating_directories(
     assert not (tmp_path / "state").exists()
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows roots are required for this regression")
+@pytest.mark.parametrize("unavailable_option", ("diagnostics", "local_state"))
+def test_config_rejects_later_unavailable_windows_anchor_before_any_creation(
+    unavailable_option: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    unavailable_root = Path("Z:/").resolve(strict=False)
+    original_exists = Path.exists
+    monkeypatch.setattr(
+        Path,
+        "exists",
+        lambda path: False if path == unavailable_root else original_exists(path),
+    )
+    profile_dir = tmp_path / "profile"
+    diagnostics_dir = (
+        unavailable_root if unavailable_option == "diagnostics" else tmp_path / "diagnostics"
+    )
+    local_state_root = unavailable_root if unavailable_option == "local_state" else tmp_path / "state"
+
+    _assert_config_error(
+        profile_dir=profile_dir,
+        diagnostics_dir=diagnostics_dir,
+        repository_root=REPOSITORY_ROOT,
+        _local_state_root=local_state_root,
+        environment={},
+    )
+
+    assert not profile_dir.exists()
+    if diagnostics_dir != unavailable_root:
+        assert not diagnostics_dir.exists()
+    if local_state_root != unavailable_root:
+        assert not local_state_root.exists()
+
+
 @pytest.mark.skipif(os.name == "nt", reason="POSIX permission modes are not honored on Windows")
 def test_config_creates_each_new_runtime_component_with_private_mode(tmp_path: Path) -> None:
     state = tmp_path / "state"
