@@ -1,6 +1,7 @@
 """Google Flow preflight contracts and runtime components."""
 
 from .config import FlowRuntimeConfig, resolve_flow_runtime_config
+from .lock import BrowserRuntimeLock
 from .domain import (
     FLOW_URL,
     FlowAuthenticationTimeoutError,
@@ -20,6 +21,7 @@ from .domain import (
 
 __all__ = [
     "FLOW_URL",
+    "BrowserRuntimeLock",
     "FlowRuntimeConfig",
     "FlowAuthenticationTimeoutError",
     "FlowBrowserLaunchError",
