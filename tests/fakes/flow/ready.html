@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Flow ready</title>
+  </head>
+  <body>
+    <header>
+      <button type="button" aria-label="Google Account">Primary account</button>
+      <button type="button" aria-label="Google Account">Secondary account</button>
+      <button type="button" aria-label="Google Account" hidden>Hidden account</button>
+    </header>
+    <main aria-label="Flow workspace">
+      <button type="button">Create</button>
+      <label id="prompt-label" for="prompt">Prompt</label>
+      <textarea id="prompt" placeholder="Describe your image"></textarea>
+      <label>
+        Prompt
+        <textarea placeholder="Describe your image" disabled></textarea>
+      </label>
+      <label hidden>
+        Prompt
+        <textarea placeholder="Describe your image"></textarea>
+      </label>
+    </main>
+  </body>
+</html>

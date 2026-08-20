@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Flow blocking modal</title>
+  </head>
+  <body>
+    <button type="button" aria-label="Google Account">Google Account</button>
+    <main aria-label="Flow workspace">
+      <button type="button">Create</button>
+      <label for="prompt">Prompt</label>
+      <textarea id="prompt" placeholder="Describe your image"></textarea>
+    </main>
+    <section role="dialog" aria-label="Blocking dialog">
+      <p>Confirm this unexpected state before continuing.</p>
+    </section>
+    <section role="alertdialog" aria-label="Blocking alert" hidden>
+      <p>An unexpected blocking alert requires attention.</p>
+    </section>
+  </body>
+</html>

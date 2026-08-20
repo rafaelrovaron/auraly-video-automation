@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Flow login completing</title>
+  </head>
+  <body>
+    <main aria-label="Google sign in">
+      <h1>Completing sign in</h1>
+      <button type="button" aria-label="Google Account">Google Account</button>
+    </main>
+    <script>
+      window.setTimeout(() => {
+        window.location.replace(new URL("ready.html", window.location.href));
+      }, 100);
+    </script>
+  </body>
+</html>
