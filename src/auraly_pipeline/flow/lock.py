@@ -66,8 +66,8 @@ def _ensure_lock_byte(handle: BinaryIO) -> None:
 
 def _acquire_handle_lock(handle: BinaryIO) -> None:
     if os.name == "nt":
-        handle.seek(0)
         msvcrt: Any = importlib.import_module("msvcrt")
+        handle.seek(0)
         msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
     else:
         fcntl: Any = importlib.import_module("fcntl")
@@ -76,8 +76,8 @@ def _acquire_handle_lock(handle: BinaryIO) -> None:
 
 def _release_handle_lock(handle: BinaryIO) -> None:
     if os.name == "nt":
-        handle.seek(0)
         msvcrt: Any = importlib.import_module("msvcrt")
+        handle.seek(0)
         msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
     else:
         fcntl: Any = importlib.import_module("fcntl")

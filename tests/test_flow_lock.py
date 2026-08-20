@@ -4,6 +4,7 @@ import errno
 from pathlib import Path
 import subprocess
 import sys
+from typing import BinaryIO, cast
 
 import pytest
 
@@ -67,6 +68,74 @@ def test_release_is_idempotent_after_finally_style_cleanup(tmp_path: Path) -> No
     lock.acquire()
     lock.release()
     lock.release()
+
+
+def test_retained_lock_releases_after_with_body_error_and_can_be_reacquired(tmp_path: Path) -> None:
+    lock = BrowserRuntimeLock(tmp_path / "flow.lock")
+
+    with pytest.raises(ValueError, match="body failed"):
+        with lock:
+            raise ValueError("body failed")
+
+    with lock:
+        assert (tmp_path / "flow.lock").is_file()
+
+
+def test_failed_native_acquire_leaves_no_owned_handle_before_reacquisition(tmp_path: Path) -> None:
+    lock_path = tmp_path / "flow.lock"
+    holder = start_lock_holder(lock_path)
+    attempted = BrowserRuntimeLock(lock_path)
+    try:
+        with pytest.raises(FlowRuntimeBusyError):
+            attempted.acquire()
+        assert attempted._handle is None
+
+        assert holder.stdin is not None
+        holder.stdin.write("release\n")
+        holder.stdin.flush()
+        assert holder.wait(timeout=5) == 0
+
+        with attempted:
+            assert attempted._handle is not None
+    finally:
+        if holder.poll() is None:
+            holder.kill()
+            holder.wait(timeout=5)
+
+
+def test_windows_native_lock_calls_resolve_module_before_seeking_lock_byte(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[str] = []
+
+    class FakeHandle:
+        def seek(self, _: int) -> None:
+            events.append("seek")
+
+        def fileno(self) -> int:
+            return 1
+
+    class FakeMsvcrt:
+        LK_NBLCK = 1
+        LK_UNLCK = 2
+
+        def locking(self, _: int, mode: int, __: int) -> None:
+            events.append(f"locking:{mode}")
+
+    def import_msvcrt(name: str, package: str | None = None) -> FakeMsvcrt:
+        assert name == "msvcrt"
+        assert package is None
+        events.append("import")
+        return FakeMsvcrt()
+
+    monkeypatch.setattr(lock_module.os, "name", "nt")
+    monkeypatch.setattr(lock_module.importlib, "import_module", import_msvcrt)
+    handle = cast(BinaryIO, FakeHandle())
+
+    lock_module._acquire_handle_lock(handle)
+    lock_module._release_handle_lock(handle)
+
+    assert events == ["import", "seek", "locking:1", "import", "seek", "locking:2"]
 
 
 def test_unexpected_lock_setup_error_propagates(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
