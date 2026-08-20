@@ -175,7 +175,7 @@ def test_config_rejects_canonical_symlink_escape_into_repository(tmp_path: Path)
     try:
         link.symlink_to(REPOSITORY_ROOT, target_is_directory=True)
     except OSError as error:
-        if os.name == "nt" and error.winerror == 1314:
+        if os.name == "nt" and getattr(error, "winerror", None) == 1314:
             pytest.skip("Windows account lacks the directory symlink privilege")
         raise
 
