@@ -486,7 +486,9 @@ def test_linux_ci_runs_full_harness_with_locked_toolchain() -> None:
 
     commands = [step["run"] for step in job["steps"] if "run" in step]
     assert any("install" in command and "ffmpeg" in command for command in commands)
-    assert "uv run python scripts/verify.py full" in commands
+    assert any("install" in command and "xvfb" in command for command in commands)
+    assert "uv run playwright install --with-deps chromium" in commands
+    assert "xvfb-run -a uv run python scripts/verify.py full" in commands
     assert "secrets" not in str(workflow).lower()
 
 
