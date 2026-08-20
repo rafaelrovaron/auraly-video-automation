@@ -87,4 +87,4 @@ def _release_handle_lock(handle: BinaryIO) -> None:
 def _is_lock_contention(error: OSError) -> bool:
     if error.errno in {errno.EACCES, errno.EAGAIN}:
         return True
-    return os.name == "nt" and error.winerror in {32, 33}
+    return os.name == "nt" and getattr(error, "winerror", None) in {32, 33}

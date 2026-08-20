@@ -138,6 +138,20 @@ def test_windows_native_lock_calls_resolve_module_before_seeking_lock_byte(
     assert events == ["import", "seek", "locking:1", "import", "seek", "locking:2"]
 
 
+def test_windows_lock_contention_tolerates_oserror_without_winerror(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class OSErrorWithoutWinerror(OSError):
+        def __getattribute__(self, name: str) -> object:
+            if name == "winerror":
+                raise AttributeError(name)
+            return super().__getattribute__(name)
+
+    monkeypatch.setattr(lock_module.os, "name", "nt")
+
+    assert lock_module._is_lock_contention(OSErrorWithoutWinerror(errno.EIO, "unexpected")) is False
+
+
 def test_unexpected_lock_setup_error_propagates(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     def deny_lock_setup(_: object) -> None:
         raise PermissionError(errno.EACCES, "denied")
