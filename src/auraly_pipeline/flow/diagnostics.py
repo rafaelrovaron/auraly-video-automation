@@ -253,7 +253,8 @@ class FlowDiagnosticWriter:
         """Sanitize in staging, publish one exclusive run, and return artifact references."""
         published: FlowPreflightResult | None = None
         cleanup_failed = False
-        operation_error: Exception | None = None
+        operation_error: BaseException | None = None
+        cleanup_error: FlowDiagnosticSanitizationError | None = None
         try:
             if result.success or result.status == "ready" or result.failed_step is None:
                 raise FlowDiagnosticSanitizationError(evidence=evidence)
@@ -265,18 +266,27 @@ class FlowDiagnosticWriter:
             operation_error = exc
         except OSError:
             operation_error = FlowDiagnosticSanitizationError(evidence=evidence)
-        except Exception as exc:
+        except BaseException as exc:
             operation_error = exc
         try:
             _cleanup_raw_trace(evidence.raw_trace_path, self._staging_root)
-        except (FlowDiagnosticSanitizationError, OSError):
+        except FlowDiagnosticSanitizationError as exc:
             cleanup_failed = True
+            cleanup_error = exc
+        except OSError:
+            cleanup_failed = True
+            cleanup_error = FlowDiagnosticSanitizationError(evidence=evidence)
         if cleanup_failed and published is not None and published.diagnostic_run_id is not None:
-            _remove_incomplete_final_run(self._diagnostics_dir / published.diagnostic_run_id)
+            try:
+                _remove_incomplete_final_run(self._diagnostics_dir / published.diagnostic_run_id)
+            except FlowDiagnosticSanitizationError as exc:
+                cleanup_error = exc
         if operation_error is not None:
+            if cleanup_error is not None and isinstance(operation_error, Exception):
+                raise cleanup_error
             raise operation_error
-        if cleanup_failed:
-            raise FlowDiagnosticSanitizationError(evidence=evidence)
+        if cleanup_error is not None:
+            raise cleanup_error
         if published is None:
             raise FlowDiagnosticSanitizationError(evidence=evidence)
         return published
@@ -372,10 +382,19 @@ class FlowDiagnosticWriter:
                 _remove_incomplete_final_run(final_dir)
             _remove_tree_for_failure(staging_dir)
             raise FlowDiagnosticSanitizationError(evidence=evidence) from None
-        except Exception:
+        except BaseException as original:
+            cleanup_error: FlowDiagnosticSanitizationError | None = None
             if final_created:
-                _remove_incomplete_final_run(final_dir)
-            _remove_tree_for_failure(staging_dir)
+                try:
+                    _remove_incomplete_final_run(final_dir)
+                except FlowDiagnosticSanitizationError as exc:
+                    cleanup_error = exc
+            try:
+                _remove_tree_for_failure(staging_dir)
+            except FlowDiagnosticSanitizationError as exc:
+                cleanup_error = exc
+            if cleanup_error is not None and isinstance(original, Exception):
+                raise cleanup_error
             raise
 
     def _publish_file_exclusive(self, source: Path, destination: Path) -> None:

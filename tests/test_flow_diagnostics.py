@@ -1346,6 +1346,36 @@ def test_writer_cleans_raw_staging_and_final_run_after_unexpected_publication_er
     assert not any(path.name == "result.json" for path in diagnostics_dir.rglob("*"))
 
 
+def test_writer_cleans_raw_staging_and_marker_after_interrupting_post_marker_publication(
+    tmp_path: Path,
+) -> None:
+    class InterruptingWriter(FlowDiagnosticWriter):
+        def _publish_result_json_exclusive(self, source: Path, destination: Path) -> None:
+            super()._publish_result_json_exclusive(source, destination)
+            assert destination.is_file()
+            raise KeyboardInterrupt()
+
+    diagnostics_dir = tmp_path / "diagnostics"
+    staging_root = tmp_path / "staging"
+    diagnostics_dir.mkdir()
+    staging_root.mkdir()
+    writer = InterruptingWriter(diagnostics_dir, staging_root)
+    result = _failure_result(
+        "ui_contract_failed",
+        authenticated=True,
+        failed_step="verify_flow_ui",
+    )
+    evidence = _trusted_evidence(staging_root)
+
+    with pytest.raises(KeyboardInterrupt):
+        writer.write_failure(result, evidence=evidence)
+
+    assert evidence.raw_trace_path is not None
+    assert not evidence.raw_trace_path.exists()
+    assert not list(staging_root.rglob("*"))
+    assert not any(path.name == "result.json" for path in diagnostics_dir.rglob("*"))
+
+
 def test_writer_surfaces_staging_cleanup_failure_and_removes_completion_marker(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
