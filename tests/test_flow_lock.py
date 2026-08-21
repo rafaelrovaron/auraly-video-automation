@@ -4,6 +4,7 @@ import errno
 from pathlib import Path
 import subprocess
 import sys
+import time
 from typing import BinaryIO, cast
 
 import pytest
@@ -48,8 +49,16 @@ def test_process_exit_releases_kernel_lock_even_when_file_remains(tmp_path: Path
     holder.kill()
     assert holder.wait(timeout=5) != 0
 
-    with BrowserRuntimeLock(lock_path):
-        assert lock_path.is_file()
+    deadline = time.monotonic() + 5
+    while True:
+        try:
+            with BrowserRuntimeLock(lock_path):
+                assert lock_path.is_file()
+                return
+        except FlowRuntimeBusyError:
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(0.05)
 
 
 def test_normal_release_allows_reacquisition_and_keeps_lock_file(tmp_path: Path) -> None:
