@@ -8,7 +8,7 @@ from typing import Literal, Protocol, Self, TypeVar
 from .domain import FlowLocatorName, FlowUiContractError
 
 
-LocatorStrategyKind = Literal["role", "label", "placeholder"]
+LocatorStrategyKind = Literal["role", "label", "placeholder", "text", "attribute"]
 SemanticRole = Literal["main", "button", "dialog", "alertdialog"]
 
 
@@ -53,12 +53,40 @@ class PageProtocol(Protocol[_LocatorT_co]):
         exact: bool | None = None,
     ) -> _LocatorT_co: ...
 
+    def get_by_text(
+        self,
+        text: str,
+        *,
+        exact: bool | None = None,
+    ) -> _LocatorT_co: ...
+
+    def get_by_attribute(
+        self,
+        name: str,
+        value: str,
+        *,
+        exact: bool | None = None,
+    ) -> _LocatorT_co: ...
+
 
 @dataclass(frozen=True)
 class LocatorStrategy:
     kind: LocatorStrategyKind
     value: str
     role: SemanticRole | None = None
+    attribute_name: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.kind == "role":
+            if self.role is None or self.attribute_name is not None:
+                raise ValueError("role locators require only a semantic role")
+            return
+        if self.kind == "attribute":
+            if self.attribute_name is None or self.role is not None:
+                raise ValueError("attribute locators require only a stable attribute name")
+            return
+        if self.role is not None or self.attribute_name is not None:
+            raise ValueError("non-role locators cannot declare role or attribute metadata")
 
 
 @dataclass(frozen=True)
@@ -136,4 +164,8 @@ def _resolve_strategy(
         return page.get_by_label(strategy.value, exact=True)
     if strategy.kind == "placeholder":
         return page.get_by_placeholder(strategy.value, exact=True)
+    if strategy.kind == "text":
+        return page.get_by_text(strategy.value, exact=True)
+    if strategy.kind == "attribute" and strategy.attribute_name is not None:
+        return page.get_by_attribute(strategy.attribute_name, strategy.value, exact=True)
     raise FlowUiContractError()
