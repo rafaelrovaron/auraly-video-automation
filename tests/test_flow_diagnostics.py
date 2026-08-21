@@ -194,6 +194,10 @@ def _png_with_idat(
     return b"\x89PNG\r\n\x1a\n" + ihdr + idat + iend
 
 
+def _png_with_rows(rows: bytes, *, width: int = 1, height: int = 1) -> bytes:
+    return _png_with_idat(width=width, height=height, idat_payload=zlib.compress(rows))
+
+
 def _run_dir(tmp_path: Path, result: FlowPreflightResult) -> Path:
     assert result.diagnostic_run_id is not None
     return tmp_path / "diagnostics" / result.diagnostic_run_id
@@ -416,6 +420,90 @@ def test_trace_sanitizer_accepts_representative_playwright_context_options_recor
     assert b"SECRET" not in expanded
 
 
+def test_trace_sanitizer_accepts_representative_playwright_1_62_records(
+    tmp_path: Path,
+) -> None:
+    raw = _write_trace_archive(
+        tmp_path / "raw.zip",
+        [
+            {
+                "type": "context-options",
+                "version": 8,
+                "origin": "library",
+                "browserName": "chromium",
+                "playwrightVersion": "1.62.0",
+                "platform": "win32",
+                "wallTime": 1_777_777_777_000,
+                "monotonicTime": 123.4,
+                "sdkLanguage": "python",
+                "channel": "chromium",
+                "title": "Flow preflight",
+                "options": {
+                    "baseURL": "https://person:SECRET@example.test/root?token=SECRET",
+                    "extraHTTPHeaders": {"authorization": "Bearer SECRET"},
+                    "storageState": {"cookies": [{"value": "SECRET"}]},
+                },
+            },
+            {
+                "type": "before",
+                "callId": "call@1",
+                "startTime": 10.0,
+                "class": "Frame",
+                "method": "goto",
+                "title": "Navigate to Flow",
+                "stepId": "pw:api@1",
+                "parentId": "pw:api@0",
+                "params": {
+                    "url": "HTTPS://person:SECRET@labs.google/fx/tools/flow?token=SECRET#frag"
+                },
+                "error": {"message": "PRIVATE_PROMPT"},
+            },
+            {
+                "type": "after",
+                "callId": "call@1",
+                "endTime": 11.0,
+                "title": "Navigate to Flow",
+                "stepId": "pw:api@1",
+                "parentId": "pw:api@0",
+                "error": {"message": "PRIVATE_PROMPT"},
+                "result": {"value": "PRIVATE_PROMPT"},
+            },
+        ],
+    )
+    safe = tmp_path / "safe.zip"
+
+    sanitize_trace_archive(raw, safe, deny_values=("SECRET", "PRIVATE_PROMPT", "person:SECRET"))
+
+    expanded = _expanded_zip_bytes(safe)
+    assert b'"origin":"library"' in expanded
+    assert b'"playwrightVersion":"1.62.0"' in expanded
+    assert b'"channel":"chromium"' in expanded
+    assert b'"title":"Navigate to Flow"' in expanded
+    assert b'"stepId":"pw:api@1"' in expanded
+    assert b'"parentId":"pw:api@0"' in expanded
+    assert b"https://labs.google/fx/tools/flow" in expanded
+    for forbidden in (
+        b'"options"',
+        b'"error"',
+        b'"result"',
+        b"PRIVATE_PROMPT",
+        b"person:SECRET",
+        b"?token=",
+        b"#frag",
+    ):
+        assert forbidden not in expanded
+
+
+def test_trace_sanitizer_rejects_sensitive_type_value(tmp_path: Path) -> None:
+    raw = _write_trace_archive(tmp_path / "raw.zip", [{"type": "PRIVATE_PROMPT"}])
+    safe = tmp_path / "safe.zip"
+
+    with pytest.raises(FlowDiagnosticSanitizationError):
+        sanitize_trace_archive(raw, safe)
+
+    assert not safe.exists()
+
+
 def test_trace_sanitizer_rejects_unknown_playwright_event_shape(
     tmp_path: Path,
 ) -> None:
@@ -618,6 +706,28 @@ def test_trace_sanitizer_maps_zlib_errors_to_typed_sanitization_error(
         sanitize_trace_archive(raw, safe)
 
     assert not safe.exists()
+
+
+def test_trace_sanitizer_normalizes_output_cleanup_unlink_failures(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    raw = _write_trace_archive(tmp_path / "raw.zip", [{"type": "event", "url": FLOW_URL}])
+    safe = tmp_path / "safe.zip"
+
+    def fail_archive_validation(_path: Path, _deny_values: tuple[str, ...]) -> None:
+        raise FlowDiagnosticSanitizationError()
+
+    def fail_output_unlink(path: Path, *args: Any, **kwargs: Any) -> None:
+        if path == safe:
+            raise OSError("unlink failed")
+        real_unlink(path, *args, **kwargs)
+
+    real_unlink = Path.unlink
+    monkeypatch.setattr(diagnostics_module, "_validate_sanitized_archive", fail_archive_validation)
+    monkeypatch.setattr(Path, "unlink", fail_output_unlink)
+
+    with pytest.raises(FlowDiagnosticSanitizationError):
+        sanitize_trace_archive(raw, safe)
 
 
 def test_trace_sanitizer_rejects_serialized_windows_drive_and_unc_private_paths(
@@ -918,6 +1028,70 @@ def test_writer_rejects_malformed_deflate_and_huge_png_dimensions(
     assert not list((tmp_path / "diagnostics").rglob("*"))
 
 
+@pytest.mark.parametrize(
+    "screenshot_png",
+    (
+        _png_with_idat(idat_payload=zlib.compress(b"\x00\x00\x00\x00\xff")[:-1]),
+        _png_with_rows(b"\x05\x00\x00\x00\xff"),
+    ),
+)
+def test_writer_rejects_truncated_png_zlib_and_invalid_filter_bytes(
+    tmp_path: Path, screenshot_png: bytes
+) -> None:
+    writer = _writer(tmp_path)
+    raw_trace = _write_trace_archive(
+        tmp_path / "staging" / "raw" / "trace.zip",
+        [{"type": "event", "url": FLOW_URL}],
+    )
+    result = _failure_result(
+        "ui_contract_failed",
+        authenticated=True,
+        failed_step="verify_flow_ui",
+    )
+
+    with pytest.raises(FlowDiagnosticSanitizationError):
+        writer.write_failure(
+            result,
+            evidence=FlowFailureEvidence(
+                screenshot_png=screenshot_png,
+                raw_trace_path=raw_trace,
+                trusted_page=True,
+            ),
+        )
+
+    assert not raw_trace.exists()
+    assert not list((tmp_path / "diagnostics").rglob("*"))
+
+
+def test_writer_maps_png_decompression_limit_failure_to_typed_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    writer = _writer(tmp_path)
+    raw_trace = _write_trace_archive(
+        tmp_path / "staging" / "raw" / "trace.zip",
+        [{"type": "event", "url": FLOW_URL}],
+    )
+    result = _failure_result(
+        "ui_contract_failed",
+        authenticated=True,
+        failed_step="verify_flow_ui",
+    )
+    monkeypatch.setattr(diagnostics_module, "_MAX_PNG_INFLATED_BYTES", 4)
+
+    with pytest.raises(FlowDiagnosticSanitizationError):
+        writer.write_failure(
+            result,
+            evidence=FlowFailureEvidence(
+                screenshot_png=PNG_BYTES,
+                raw_trace_path=raw_trace,
+                trusted_page=True,
+            ),
+        )
+
+    assert not raw_trace.exists()
+    assert not list((tmp_path / "diagnostics").rglob("*"))
+
+
 def test_writer_rejects_ready_result_without_creating_a_run(tmp_path: Path) -> None:
     writer = _writer(tmp_path)
 
@@ -1015,6 +1189,29 @@ def test_writer_does_not_make_result_json_visible_until_payload_copy_completes(
     writer.write_failure(_failure_result("runtime_busy"), evidence=FlowFailureEvidence())
 
     assert observed_visible_marker_during_copy is False
+
+
+def test_writer_result_json_publish_preserves_file_created_during_race(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    writer = FlowDiagnosticWriter(tmp_path / "diagnostics", tmp_path / "staging")
+    source = tmp_path / "source-result.json"
+    destination = tmp_path / "final" / "result.json"
+    destination.parent.mkdir(parents=True)
+    source.write_text('{"status":"runtime_busy"}', encoding="utf-8")
+    real_link = diagnostics_module.os.link
+
+    def create_destination_before_link(src: str | bytes, dst: str | bytes) -> None:
+        destination.write_text("existing marker", encoding="utf-8")
+        real_link(src, dst)
+
+    monkeypatch.setattr(diagnostics_module.os, "link", create_destination_before_link)
+
+    with pytest.raises(FileExistsError):
+        writer._publish_result_json_exclusive(source, destination)
+
+    assert destination.read_text("utf-8") == "existing marker"
+    assert not list(destination.parent.glob(".result.json.*.tmp"))
 
 
 def test_writer_cleans_staging_raw_and_incomplete_runs_on_sanitization_failure(

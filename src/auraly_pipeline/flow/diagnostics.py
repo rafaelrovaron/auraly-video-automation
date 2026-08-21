@@ -34,6 +34,7 @@ _SAFE_RUN_ID = re.compile(r"^[0-9]{8}T[0-9]{6}Z-[0-9a-f]{8}$")
 _HTTP_URL = re.compile(r"https?://[^\s\"'<>}\\]+", re.IGNORECASE)
 _SAFE_TRACE_TEXT = re.compile(r"^[A-Za-z0-9_.:-]{1,256}$")
 _SAFE_TRACE_IDENTIFIER = re.compile(r"^[A-Za-z0-9_.:@/-]{1,256}$")
+_SAFE_TRACE_TITLE = re.compile(r"^[A-Za-z0-9_.:@/ -]{1,256}$")
 _MAX_ZIP_MEMBERS = 20
 _MAX_RAW_TRACE_ARCHIVE_BYTES = 512 * 1024
 _MAX_ZIP_MEMBER_COMPRESSED_BYTES = 128 * 1024
@@ -74,6 +75,7 @@ _SAFE_TRACE_SCALAR_KEYS = frozenset(
         "browserName",
         "callId",
         "class",
+        "channel",
         "column",
         "contextId",
         "duration",
@@ -84,13 +86,17 @@ _SAFE_TRACE_SCALAR_KEYS = frozenset(
         "line",
         "method",
         "monotonicTime",
+        "origin",
         "pageId",
         "parentId",
+        "playwrightVersion",
         "platform",
         "sdkLanguage",
         "startTime",
+        "stepId",
         "testIdAttributeName",
         "timestamp",
+        "title",
         "type",
         "url",
         "version",
@@ -102,11 +108,15 @@ _TRACE_EVENT_PROJECTIONS: dict[str, frozenset[str]] = {
     "context-options": frozenset(
         {
             "browserName",
+            "channel",
             "contextId",
             "monotonicTime",
+            "origin",
+            "playwrightVersion",
             "platform",
             "sdkLanguage",
             "testIdAttributeName",
+            "title",
             "type",
             "version",
             "wallTime",
@@ -121,7 +131,10 @@ _TRACE_EVENT_PROJECTIONS: dict[str, frozenset[str]] = {
             "guid",
             "method",
             "pageId",
+            "parentId",
             "startTime",
+            "stepId",
+            "title",
             "type",
             "url",
             "wallTime",
@@ -132,6 +145,9 @@ _TRACE_EVENT_PROJECTIONS: dict[str, frozenset[str]] = {
             "callId",
             "duration",
             "endTime",
+            "parentId",
+            "stepId",
+            "title",
             "type",
             "wallTime",
         }
@@ -373,9 +389,8 @@ class FlowDiagnosticWriter:
                     shutil.copyfileobj(source_file, result_file)
                 result_file.flush()
                 os.fsync(result_file.fileno())
-            if destination.exists():
-                raise FileExistsError(destination)
-            temp_destination.replace(destination)
+            os.link(temp_destination, destination)
+            _unlink_if_present(temp_destination)
         except OSError:
             _unlink_if_present(temp_destination)
             raise
@@ -517,6 +532,8 @@ def _project_trace_event(value: dict[str, Any]) -> dict[str, Any]:
             continue
         if event_type == "before" and key == "params":
             continue
+        if event_type in {"before", "after"} and key in {"error", "result"}:
+            continue
         if _is_sensitive_key(key):
             continue
         raise FlowDiagnosticSanitizationError()
@@ -589,8 +606,12 @@ def _sanitize_trace_string(key: str, value: str) -> str:
     normalized = re.sub(r"[^a-z0-9]", "", sanitized.lower())
     if any(part in normalized for part in _SENSITIVE_VALUE_PARTS):
         raise FlowDiagnosticSanitizationError()
-    if key in {"callId", "contextId", "frameId", "guid", "pageId", "parentId"}:
+    if key in {"callId", "contextId", "frameId", "guid", "pageId", "parentId", "stepId"}:
         if not _SAFE_TRACE_IDENTIFIER.fullmatch(sanitized):
+            raise FlowDiagnosticSanitizationError()
+        return sanitized
+    if key == "title":
+        if not _SAFE_TRACE_TITLE.fullmatch(sanitized):
             raise FlowDiagnosticSanitizationError()
         return sanitized
     if not _SAFE_TRACE_TEXT.fullmatch(sanitized):
@@ -719,12 +740,17 @@ def _validate_png_idat_stream(data: bytes, *, width: int, height: int, color_typ
     try:
         inflated = decompressor.decompress(data, _MAX_PNG_INFLATED_BYTES + 1)
         inflated += decompressor.flush(_MAX_PNG_INFLATED_BYTES + 1 - len(inflated))
-    except zlib.error:
+    except (ValueError, zlib.error):
         raise FlowDiagnosticSanitizationError() from None
-    if decompressor.unused_data or decompressor.unconsumed_tail:
+    if not decompressor.eof or decompressor.unused_data or decompressor.unconsumed_tail:
         raise FlowDiagnosticSanitizationError()
     if len(inflated) > _MAX_PNG_INFLATED_BYTES or len(inflated) != expected_scanline_bytes:
         raise FlowDiagnosticSanitizationError()
+    row_length = 1 + width * channels
+    for offset in range(0, len(inflated), row_length):
+        filter_type = inflated[offset]
+        if filter_type > 4:
+            raise FlowDiagnosticSanitizationError()
 
 
 def _requires_rich_evidence(
@@ -801,7 +827,10 @@ def _new_run_id() -> str:
 
 
 def _unlink_if_present(path: Path) -> None:
-    path.unlink(missing_ok=True)
+    try:
+        path.unlink(missing_ok=True)
+    except OSError:
+        raise FlowDiagnosticSanitizationError() from None
 
 
 def _remove_tree_if_present(path: Path) -> None:
