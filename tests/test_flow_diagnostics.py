@@ -9,6 +9,7 @@ import zlib
 from zipfile import ZIP_DEFLATED, ZIP_STORED, ZipFile
 
 import pytest
+from playwright.sync_api import sync_playwright
 
 from auraly_pipeline.flow import diagnostics as diagnostics_module
 from auraly_pipeline.flow.diagnostics import FlowDiagnosticWriter, sanitize_trace_archive
@@ -490,6 +491,53 @@ def test_trace_sanitizer_accepts_representative_playwright_1_62_records(
         b"person:SECRET",
         b"?token=",
         b"#frag",
+    ):
+        assert forbidden not in expanded
+
+
+def test_trace_sanitizer_accepts_actual_local_playwright_trace_without_log_or_stack_content(
+    tmp_path: Path,
+) -> None:
+    page_path = tmp_path / "PRIVATE_LOCATOR_SECRET_page.html"
+    page_path.write_text(
+        "<html><body><main><button>PRIVATE_LOCATOR_SECRET</button></main></body></html>",
+        encoding="utf-8",
+    )
+    raw = tmp_path / "raw-playwright-trace.zip"
+    safe = tmp_path / "safe.zip"
+
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(headless=True)
+        try:
+            context = browser.new_context()
+            context.tracing.start(screenshots=False, snapshots=False, sources=False)
+            page = context.new_page()
+            page.goto(page_path.resolve(strict=True).as_uri())
+            page.get_by_text("PRIVATE_LOCATOR_SECRET").count()
+            context.tracing.stop(path=raw)
+        finally:
+            browser.close()
+
+    assert "trace.stacks" in _zip_members(raw)
+
+    sanitize_trace_archive(
+        raw,
+        safe,
+        deny_values=("PRIVATE_LOCATOR_SECRET", str(page_path), page_path.as_uri()),
+    )
+
+    expanded = _expanded_zip_bytes(safe)
+    assert _zip_members(safe) == {"trace.trace"}
+    for forbidden in (
+        b"trace.stacks",
+        b'"type":"log"',
+        b'"message"',
+        b'"params"',
+        b'"result"',
+        b"locator",
+        b"PRIVATE_LOCATOR_SECRET",
+        str(page_path).encode("utf-8"),
+        page_path.as_uri().encode("utf-8"),
     ):
         assert forbidden not in expanded
 
@@ -1268,6 +1316,34 @@ def test_writer_removes_incomplete_final_run_if_result_json_write_fails(
     assert not evidence.raw_trace_path.exists()
     assert not list(staging_root.rglob("*"))
     assert not list(diagnostics_dir.rglob("*"))
+
+
+def test_writer_cleans_raw_staging_and_final_run_after_unexpected_publication_error(
+    tmp_path: Path,
+) -> None:
+    class UnexpectedFailureWriter(FlowDiagnosticWriter):
+        def _publish_result_json_exclusive(self, source: Path, destination: Path) -> None:
+            raise RuntimeError("unexpected publication failure")
+
+    diagnostics_dir = tmp_path / "diagnostics"
+    staging_root = tmp_path / "staging"
+    diagnostics_dir.mkdir()
+    staging_root.mkdir()
+    writer = UnexpectedFailureWriter(diagnostics_dir, staging_root)
+    result = _failure_result(
+        "ui_contract_failed",
+        authenticated=True,
+        failed_step="verify_flow_ui",
+    )
+    evidence = _trusted_evidence(staging_root)
+
+    with pytest.raises(RuntimeError, match="unexpected publication failure"):
+        writer.write_failure(result, evidence=evidence)
+
+    assert evidence.raw_trace_path is not None
+    assert not evidence.raw_trace_path.exists()
+    assert not list(staging_root.rglob("*"))
+    assert not any(path.name == "result.json" for path in diagnostics_dir.rglob("*"))
 
 
 def test_writer_surfaces_staging_cleanup_failure_and_removes_completion_marker(

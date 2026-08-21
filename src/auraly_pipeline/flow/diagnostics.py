@@ -97,6 +97,7 @@ _SAFE_TRACE_SCALAR_KEYS = frozenset(
         "testIdAttributeName",
         "timestamp",
         "title",
+        "time",
         "type",
         "url",
         "version",
@@ -162,6 +163,7 @@ _TRACE_EVENT_PROJECTIONS: dict[str, frozenset[str]] = {
             "method",
             "pageId",
             "timestamp",
+            "time",
             "type",
             "url",
             "wallTime",
@@ -251,7 +253,7 @@ class FlowDiagnosticWriter:
         """Sanitize in staging, publish one exclusive run, and return artifact references."""
         published: FlowPreflightResult | None = None
         cleanup_failed = False
-        operation_error: FlowDiagnosticSanitizationError | None = None
+        operation_error: Exception | None = None
         try:
             if result.success or result.status == "ready" or result.failed_step is None:
                 raise FlowDiagnosticSanitizationError(evidence=evidence)
@@ -263,6 +265,8 @@ class FlowDiagnosticWriter:
             operation_error = exc
         except OSError:
             operation_error = FlowDiagnosticSanitizationError(evidence=evidence)
+        except Exception as exc:
+            operation_error = exc
         try:
             _cleanup_raw_trace(evidence.raw_trace_path, self._staging_root)
         except (FlowDiagnosticSanitizationError, OSError):
@@ -368,6 +372,11 @@ class FlowDiagnosticWriter:
                 _remove_incomplete_final_run(final_dir)
             _remove_tree_for_failure(staging_dir)
             raise FlowDiagnosticSanitizationError(evidence=evidence) from None
+        except Exception:
+            if final_created:
+                _remove_incomplete_final_run(final_dir)
+            _remove_tree_for_failure(staging_dir)
+            raise
 
     def _publish_file_exclusive(self, source: Path, destination: Path) -> None:
         with source.open("rb") as source_file:
@@ -439,8 +448,8 @@ def _sanitize_trace_member(raw_path: Path) -> bytes:
         if not isinstance(value, dict):
             raise FlowDiagnosticSanitizationError()
         sanitized = _project_trace_event(value)
-        if not isinstance(sanitized, dict):
-            raise FlowDiagnosticSanitizationError()
+        if sanitized is None:
+            continue
         sanitized_lines.append(
             json.dumps(sanitized, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
         )
@@ -494,7 +503,7 @@ def _is_unsafe_archive_name(name: str) -> bool:
 
 def _is_known_dropped_member(name: str) -> bool:
     normalized = name.replace("\\", "/").lower()
-    if normalized == "trace.network":
+    if normalized in {"trace.network", "trace.stacks"}:
         return True
     dropped_prefixes = (
         "resources/",
@@ -514,10 +523,12 @@ def _is_known_dropped_member(name: str) -> bool:
     )
 
 
-def _project_trace_event(value: dict[str, Any]) -> dict[str, Any]:
+def _project_trace_event(value: dict[str, Any]) -> dict[str, Any] | None:
     if any(_HTTP_URL.search(key) for key in value):
         raise FlowDiagnosticSanitizationError()
     event_type = value.get("type")
+    if event_type == "log":
+        return None
     if not isinstance(event_type, str) or event_type not in _TRACE_EVENT_PROJECTIONS:
         raise FlowDiagnosticSanitizationError()
     required_keys = _TRACE_REQUIRED_KEYS[event_type]
@@ -530,7 +541,7 @@ def _project_trace_event(value: dict[str, Any]) -> dict[str, Any]:
             continue
         if event_type == "context-options" and key == "options":
             continue
-        if event_type == "before" and key == "params":
+        if event_type in {"before", "event"} and key == "params":
             continue
         if event_type in {"before", "after"} and key in {"error", "result"}:
             continue
@@ -548,7 +559,12 @@ def _project_trace_event(value: dict[str, Any]) -> dict[str, Any]:
 
     if event_type == "before":
         params = value.get("params")
-        if isinstance(params, dict) and "url" in params:
+        if (
+            isinstance(params, dict)
+            and "url" in params
+            and isinstance(params["url"], str)
+            and urlsplit(params["url"]).scheme.lower() in {"http", "https"}
+        ):
             sanitized["url"] = _sanitize_trace_scalar("url", params["url"])
     return sanitized
 
