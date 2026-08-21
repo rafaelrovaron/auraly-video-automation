@@ -148,11 +148,10 @@ class FlowDiagnosticWriter:
         evidence: FlowFailureEvidence,
     ) -> FlowPreflightResult:
         """Sanitize in staging, publish one exclusive run, and return artifact references."""
-        if result.success or result.status == "ready" or result.failed_step is None:
-            raise FlowDiagnosticSanitizationError(evidence=evidence)
-        _validate_result_diagnostic_policy(result, evidence=evidence)
-
         try:
+            if result.success or result.status == "ready" or result.failed_step is None:
+                raise FlowDiagnosticSanitizationError(evidence=evidence)
+            _validate_result_diagnostic_policy(result, evidence=evidence)
             self._diagnostics_dir.mkdir(parents=True, exist_ok=True)
             self._staging_root.mkdir(parents=True, exist_ok=True)
             return self._write_failure_with_retries(result, evidence=evidence)

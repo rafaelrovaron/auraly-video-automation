@@ -693,6 +693,43 @@ def test_writer_rejects_ready_result_without_creating_a_run(tmp_path: Path) -> N
     assert not any((tmp_path / "diagnostics").iterdir())
 
 
+@pytest.mark.parametrize(
+    "result",
+    (
+        FlowPreflightResult.ready(timestamp=TIMESTAMP),
+        _failure_result(
+            "ui_contract_failed",
+            authenticated=False,
+            failed_step="navigate_flow",
+        ),
+        FlowPreflightResult.failure(
+            status="runtime_busy",
+            authenticated=False,
+            ui_ready=False,
+            failed_step="acquire_runtime_lock",
+            diagnostic_run_id="20260821T000000Z-12345678",
+            screenshot="screenshot.png",
+            timestamp=TIMESTAMP,
+        ),
+    ),
+)
+def test_writer_cleans_staged_raw_trace_for_early_result_rejections(
+    tmp_path: Path, result: FlowPreflightResult
+) -> None:
+    writer = _writer(tmp_path)
+    raw_trace = _write_trace_archive(
+        tmp_path / "staging" / "raw" / "trace.zip",
+        [{"type": "event", "url": FLOW_URL}],
+    )
+
+    with pytest.raises(FlowDiagnosticSanitizationError):
+        writer.write_failure(result, evidence=FlowFailureEvidence(raw_trace_path=raw_trace))
+
+    assert not raw_trace.exists()
+    assert not list((tmp_path / "staging").rglob("*"))
+    assert not list((tmp_path / "diagnostics").rglob("*"))
+
+
 def test_writer_writes_result_json_after_final_artifacts(tmp_path: Path) -> None:
     class RecordingWriter(FlowDiagnosticWriter):
         def __init__(self, diagnostics_dir: Path, staging_root: Path) -> None:
