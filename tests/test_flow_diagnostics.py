@@ -147,7 +147,7 @@ def _writer(tmp_path: Path) -> FlowDiagnosticWriter:
     return FlowDiagnosticWriter(diagnostics_dir, staging_root)
 
 
-def _trusted_evidence(staging_root: Path) -> FlowFailureEvidence:
+def _trusted_evidence(staging_root: Path, *, trusted_page: bool = True) -> FlowFailureEvidence:
     raw_trace = _write_trace_archive(
         staging_root / "raw" / "trace.zip",
         [
@@ -170,7 +170,28 @@ def _trusted_evidence(staging_root: Path) -> FlowFailureEvidence:
         screenshot_png=PNG_BYTES,
         raw_trace_path=raw_trace,
         deny_values=("SECRET", "COOKIE_SECRET", "PRIVATE_PROMPT"),
+        trusted_page=trusted_page,
     )
+
+
+def _png_with_idat(
+    *,
+    width: int = 1,
+    height: int = 1,
+    color_type: int = 6,
+    idat_payload: bytes | None = None,
+) -> bytes:
+    if idat_payload is None:
+        channels = 4 if color_type == 6 else 3
+        rows = b"".join(b"\x00" + (b"\x00" * (width * channels)) for _ in range(height))
+        idat_payload = zlib.compress(rows)
+    ihdr = _png_chunk(
+        b"IHDR",
+        struct.pack(">IIBBBBB", width, height, 8, color_type, 0, 0, 0),
+    )
+    idat = _png_chunk(b"IDAT", idat_payload)
+    iend = _png_chunk(b"IEND", b"")
+    return b"\x89PNG\r\n\x1a\n" + ihdr + idat + iend
 
 
 def _run_dir(tmp_path: Path, result: FlowPreflightResult) -> Path:
@@ -186,6 +207,8 @@ def test_trace_sanitizer_drops_network_resources_sources_and_url_secrets(
         [
             {
                 "type": "before",
+                "callId": "call@1",
+                "startTime": 1.0,
                 "url": "https://labs.google/fx/tools/flow?token=SECRET#fragment",
                 "request": {"headers": {"cookie": "session=SECRET"}},
                 "snapshot": {"html": "<main>PRIVATE_PROMPT</main>"},
@@ -272,7 +295,7 @@ def test_trace_sanitizer_removes_headers_bodies_cookies_auth_and_prompt_content(
         assert forbidden not in expanded
 
 
-def test_trace_sanitizer_sanitizes_uppercase_urls_and_urls_used_as_keys(
+def test_trace_sanitizer_sanitizes_uppercase_urls_in_values(
     tmp_path: Path,
 ) -> None:
     raw = _write_trace_archive(
@@ -280,9 +303,7 @@ def test_trace_sanitizer_sanitizes_uppercase_urls_and_urls_used_as_keys(
         [
             {
                 "type": "event",
-                "HTTPS://person:SECRET@EXAMPLE.test/KeyPath?token=SECRET#fragment": {
-                    "url": "HTTP://person:SECRET@EXAMPLE.test/ValuePath?token=SECRET#fragment"
-                },
+                "url": "HTTP://person:SECRET@EXAMPLE.test/ValuePath?token=SECRET#fragment",
             }
         ],
     )
@@ -291,7 +312,6 @@ def test_trace_sanitizer_sanitizes_uppercase_urls_and_urls_used_as_keys(
     sanitize_trace_archive(raw, safe, deny_values=("SECRET", "person:SECRET"))
 
     expanded = _expanded_zip_bytes(safe)
-    assert b"https://example.test/KeyPath" in expanded
     assert b"http://example.test/ValuePath" in expanded
     for forbidden in (b"person:SECRET", b"?token=", b"#fragment", b"SECRET"):
         assert forbidden not in expanded
@@ -303,6 +323,105 @@ def test_trace_sanitizer_rejects_unknown_json_content_without_relying_on_deny_va
     raw = _write_trace_archive(
         tmp_path / "raw.zip",
         [{"type": "event", "note": "PRIVATE_PROMPT should never be retained"}],
+    )
+    safe = tmp_path / "safe.zip"
+
+    with pytest.raises(FlowDiagnosticSanitizationError):
+        sanitize_trace_archive(raw, safe)
+
+    assert not safe.exists()
+
+
+def test_trace_sanitizer_rejects_unknown_event_type_without_deny_values(
+    tmp_path: Path,
+) -> None:
+    raw = _write_trace_archive(tmp_path / "raw.zip", [{"type": "PRIVATE_PROMPT"}])
+    safe = tmp_path / "safe.zip"
+
+    with pytest.raises(FlowDiagnosticSanitizationError):
+        sanitize_trace_archive(raw, safe)
+
+    assert not safe.exists()
+
+
+def test_trace_sanitizer_rejects_sensitive_value_under_allowlisted_key(
+    tmp_path: Path,
+) -> None:
+    raw = _write_trace_archive(
+        tmp_path / "raw.zip",
+        [{"type": "before", "callId": "PRIVATE_PROMPT", "startTime": 1.0}],
+    )
+    safe = tmp_path / "safe.zip"
+
+    with pytest.raises(FlowDiagnosticSanitizationError):
+        sanitize_trace_archive(raw, safe)
+
+    assert not safe.exists()
+
+
+def test_trace_sanitizer_rejects_url_shaped_keys_even_after_canonicalization(
+    tmp_path: Path,
+) -> None:
+    raw = _write_trace_archive(
+        tmp_path / "raw.zip",
+        [
+            {
+                "type": "before",
+                "callId": "call@1",
+                "startTime": 1.0,
+                "HTTPS://person:SECRET@example.test/path?token=SECRET#fragment": "safe",
+            }
+        ],
+    )
+    safe = tmp_path / "safe.zip"
+
+    with pytest.raises(FlowDiagnosticSanitizationError):
+        sanitize_trace_archive(raw, safe)
+
+    assert not safe.exists()
+
+
+def test_trace_sanitizer_accepts_representative_playwright_context_options_record(
+    tmp_path: Path,
+) -> None:
+    raw = _write_trace_archive(
+        tmp_path / "raw.zip",
+        [
+            {
+                "version": 8,
+                "type": "context-options",
+                "browserName": "chromium",
+                "platform": "win32",
+                "wallTime": 1_777_777_777_000,
+                "monotonicTime": 123.4,
+                "sdkLanguage": "python",
+                "testIdAttributeName": "data-testid",
+                "contextId": "browser-context@1",
+                "options": {
+                    "baseURL": "https://person:SECRET@example.test/root?token=SECRET",
+                    "extraHTTPHeaders": {"authorization": "Bearer SECRET"},
+                    "storageState": {"cookies": [{"value": "SECRET"}]},
+                },
+            }
+        ],
+    )
+    safe = tmp_path / "safe.zip"
+
+    sanitize_trace_archive(raw, safe, deny_values=("SECRET", "person:SECRET"))
+
+    expanded = _expanded_zip_bytes(safe)
+    assert b'"type":"context-options"' in expanded
+    assert b'"browserName":"chromium"' in expanded
+    assert b'"options"' not in expanded
+    assert b"SECRET" not in expanded
+
+
+def test_trace_sanitizer_rejects_unknown_playwright_event_shape(
+    tmp_path: Path,
+) -> None:
+    raw = _write_trace_archive(
+        tmp_path / "raw.zip",
+        [{"type": "before", "startTime": 1.0, "method": "goto"}],
     )
     safe = tmp_path / "safe.zip"
 
@@ -460,6 +579,47 @@ def test_trace_sanitizer_reports_malformed_encrypted_and_unsupported_zips_as_typ
         assert not safe.exists()
 
 
+def test_trace_sanitizer_rejects_raw_archives_over_configured_input_bound(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    raw = _write_trace_archive(tmp_path / "raw.zip", [{"type": "event", "url": FLOW_URL}])
+    safe = tmp_path / "safe.zip"
+    monkeypatch.setattr(diagnostics_module, "_MAX_RAW_TRACE_ARCHIVE_BYTES", 32, raising=False)
+
+    with pytest.raises(FlowDiagnosticSanitizationError):
+        sanitize_trace_archive(raw, safe)
+
+    assert not safe.exists()
+
+
+def test_trace_sanitizer_rejects_excessive_compression_ratio(tmp_path: Path) -> None:
+    events = [{"type": "event", "callId": f"call@{index}", "url": FLOW_URL} for index in range(200)]
+    raw = _write_trace_archive(tmp_path / "raw.zip", events, compression=ZIP_DEFLATED)
+    safe = tmp_path / "safe.zip"
+
+    with pytest.raises(FlowDiagnosticSanitizationError):
+        sanitize_trace_archive(raw, safe)
+
+    assert not safe.exists()
+
+
+def test_trace_sanitizer_maps_zlib_errors_to_typed_sanitization_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    raw = _write_trace_archive(tmp_path / "raw.zip", [{"type": "event", "url": FLOW_URL}])
+    safe = tmp_path / "safe.zip"
+
+    def fail_with_zlib_error(_raw_path: Path) -> bytes:
+        raise zlib.error("malformed deflate stream")
+
+    monkeypatch.setattr(diagnostics_module, "_sanitize_trace_member", fail_with_zlib_error)
+
+    with pytest.raises(FlowDiagnosticSanitizationError):
+        sanitize_trace_archive(raw, safe)
+
+    assert not safe.exists()
+
+
 def test_trace_sanitizer_rejects_serialized_windows_drive_and_unc_private_paths(
     tmp_path: Path,
 ) -> None:
@@ -565,7 +725,7 @@ def test_authenticated_untrusted_human_intervention_publishes_result_only(
         authenticated=True,
         failed_step="navigate_flow",
     )
-    evidence = _trusted_evidence(tmp_path / "staging")
+    evidence = _trusted_evidence(tmp_path / "staging", trusted_page=False)
 
     published = writer.write_failure(result, evidence=evidence)
 
@@ -573,6 +733,42 @@ def test_authenticated_untrusted_human_intervention_publishes_result_only(
     assert published.screenshot is None
     assert published.trace is None
     assert {path.name for path in run_dir.iterdir()} == {"result.json"}
+
+
+def test_authenticated_verify_ui_human_intervention_requires_trusted_page_for_artifacts(
+    tmp_path: Path,
+) -> None:
+    writer = _writer(tmp_path)
+    result = _failure_result(
+        "human_intervention_required",
+        authenticated=True,
+        failed_step="verify_flow_ui",
+    )
+    evidence = _trusted_evidence(tmp_path / "staging", trusted_page=False)
+
+    published = writer.write_failure(result, evidence=evidence)
+
+    run_dir = _run_dir(tmp_path, published)
+    assert published.screenshot is None
+    assert published.trace is None
+    assert {path.name for path in run_dir.iterdir()} == {"result.json"}
+
+
+def test_authenticated_ui_contract_failure_requires_trusted_page_evidence(
+    tmp_path: Path,
+) -> None:
+    writer = _writer(tmp_path)
+    result = _failure_result(
+        "ui_contract_failed",
+        authenticated=True,
+        failed_step="verify_flow_ui",
+    )
+    evidence = _trusted_evidence(tmp_path / "staging", trusted_page=False)
+
+    with pytest.raises(FlowDiagnosticSanitizationError):
+        writer.write_failure(result, evidence=evidence)
+
+    assert not list((tmp_path / "diagnostics").rglob("*"))
 
 
 def test_malformed_untrusted_ui_contract_result_is_rejected_without_a_run(
@@ -639,7 +835,11 @@ def test_writer_rejects_raw_trace_paths_outside_staging_before_reading(
     with pytest.raises(FlowDiagnosticSanitizationError):
         writer.write_failure(
             result,
-            evidence=FlowFailureEvidence(screenshot_png=PNG_BYTES, raw_trace_path=outside_raw),
+            evidence=FlowFailureEvidence(
+                screenshot_png=PNG_BYTES,
+                raw_trace_path=outside_raw,
+                trusted_page=True,
+            ),
         )
 
     assert outside_raw.exists()
@@ -675,6 +875,42 @@ def test_writer_rejects_invalid_polyglot_or_text_png_screenshot_bytes(
                 screenshot_png=screenshot_png,
                 raw_trace_path=raw_trace,
                 deny_values=("SECRET",),
+                trusted_page=True,
+            ),
+        )
+
+    assert not raw_trace.exists()
+    assert not list((tmp_path / "diagnostics").rglob("*"))
+
+
+@pytest.mark.parametrize(
+    "screenshot_png",
+    (
+        _png_with_idat(idat_payload=b"not deflate"),
+        _png_with_idat(width=100_000, height=100_000, idat_payload=zlib.compress(b"")),
+    ),
+)
+def test_writer_rejects_malformed_deflate_and_huge_png_dimensions(
+    tmp_path: Path, screenshot_png: bytes
+) -> None:
+    writer = _writer(tmp_path)
+    raw_trace = _write_trace_archive(
+        tmp_path / "staging" / "raw" / "trace.zip",
+        [{"type": "event", "url": FLOW_URL}],
+    )
+    result = _failure_result(
+        "ui_contract_failed",
+        authenticated=True,
+        failed_step="verify_flow_ui",
+    )
+
+    with pytest.raises(FlowDiagnosticSanitizationError):
+        writer.write_failure(
+            result,
+            evidence=FlowFailureEvidence(
+                screenshot_png=screenshot_png,
+                raw_trace_path=raw_trace,
+                trusted_page=True,
             ),
         )
 
@@ -760,6 +996,27 @@ def test_writer_writes_result_json_after_final_artifacts(tmp_path: Path) -> None
     assert writer.final_write_order == ["screenshot.png", "trace.zip", "result.json"]
 
 
+def test_writer_does_not_make_result_json_visible_until_payload_copy_completes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    writer = _writer(tmp_path)
+    observed_visible_marker_during_copy = False
+    real_copyfileobj = diagnostics_module.shutil.copyfileobj
+
+    def observing_copyfileobj(source: Any, destination: Any, *args: Any) -> None:
+        nonlocal observed_visible_marker_during_copy
+        destination_name = Path(getattr(destination, "name", ""))
+        if destination_name.name == "result.json" and destination_name.exists():
+            observed_visible_marker_during_copy = True
+        real_copyfileobj(source, destination, *args)
+
+    monkeypatch.setattr(diagnostics_module.shutil, "copyfileobj", observing_copyfileobj)
+
+    writer.write_failure(_failure_result("runtime_busy"), evidence=FlowFailureEvidence())
+
+    assert observed_visible_marker_during_copy is False
+
+
 def test_writer_cleans_staging_raw_and_incomplete_runs_on_sanitization_failure(
     tmp_path: Path,
 ) -> None:
@@ -768,7 +1025,11 @@ def test_writer_cleans_staging_raw_and_incomplete_runs_on_sanitization_failure(
         tmp_path / "staging" / "raw" / "trace.zip",
         [{"type": "event", "url": FLOW_URL}],
     )
-    evidence = FlowFailureEvidence(screenshot_png=b"not a png", raw_trace_path=raw_trace)
+    evidence = FlowFailureEvidence(
+        screenshot_png=b"not a png",
+        raw_trace_path=raw_trace,
+        trusted_page=True,
+    )
     result = _failure_result(
         "ui_contract_failed",
         authenticated=True,
@@ -812,6 +1073,75 @@ def test_writer_removes_incomplete_final_run_if_result_json_write_fails(
     assert not list(diagnostics_dir.rglob("*"))
 
 
+def test_writer_surfaces_staging_cleanup_failure_and_removes_completion_marker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    real_rmtree = diagnostics_module.shutil.rmtree
+    diagnostics_dir = tmp_path / "diagnostics"
+    staging_root = tmp_path / "staging"
+    diagnostics_dir.mkdir()
+    staging_root.mkdir()
+    writer = FlowDiagnosticWriter(diagnostics_dir, staging_root)
+    result = _failure_result(
+        "ui_contract_failed",
+        authenticated=True,
+        failed_step="verify_flow_ui",
+    )
+    evidence = _trusted_evidence(staging_root)
+
+    def fail_for_stage(path: Path) -> None:
+        if str(path).endswith(".stage"):
+            raise OSError("cleanup failed")
+        real_rmtree(path)
+
+    monkeypatch.setattr(diagnostics_module.shutil, "rmtree", fail_for_stage)
+
+    with pytest.raises(FlowDiagnosticSanitizationError):
+        writer.write_failure(result, evidence=evidence)
+
+    assert not any(path.name == "result.json" for path in diagnostics_dir.rglob("*"))
+
+
+def test_writer_surfaces_raw_trace_cleanup_failure_and_removes_completion_marker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    writer = _writer(tmp_path)
+    raw_trace = _write_trace_archive(
+        tmp_path / "staging" / "raw" / "trace.zip",
+        [{"type": "event", "url": FLOW_URL}],
+    )
+
+    def fail_raw_cleanup(_raw_trace_path: Path | None, _staging_root: Path) -> None:
+        raise OSError("cleanup failed")
+
+    monkeypatch.setattr(diagnostics_module, "_cleanup_raw_trace", fail_raw_cleanup)
+
+    with pytest.raises(FlowDiagnosticSanitizationError):
+        writer.write_failure(_failure_result("runtime_busy"), evidence=FlowFailureEvidence(raw_trace_path=raw_trace))
+
+    assert not any(path.name == "result.json" for path in (tmp_path / "diagnostics").rglob("*"))
+
+
+def test_writer_normalizes_diagnostics_root_creation_errors(
+    tmp_path: Path,
+) -> None:
+    diagnostics_dir = tmp_path / "diagnostics"
+    diagnostics_dir.write_text("not a directory", encoding="utf-8")
+    staging_root = tmp_path / "staging"
+    staging_root.mkdir()
+    raw_trace = _write_trace_archive(
+        staging_root / "raw" / "trace.zip",
+        [{"type": "event", "url": FLOW_URL}],
+    )
+
+    with pytest.raises(FlowDiagnosticSanitizationError):
+        FlowDiagnosticWriter(diagnostics_dir, staging_root).write_failure(
+            _failure_result("runtime_busy"), evidence=FlowFailureEvidence(raw_trace_path=raw_trace)
+        )
+
+    assert not raw_trace.exists()
+
+
 def test_result_json_contains_only_allowlisted_public_fields_and_no_private_values(
     tmp_path: Path,
 ) -> None:
@@ -834,6 +1164,7 @@ def test_result_json_contains_only_allowlisted_public_fields_and_no_private_valu
             "C:\\Users\\PrivateUser\\",
             "/home/private-user/",
         ),
+        trusted_page=True,
     )
 
     published = writer.write_failure(result, evidence=evidence)

@@ -3,6 +3,7 @@ from __future__ import annotations
 import ast
 from dataclasses import dataclass, field, fields
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlsplit
 
 from playwright.sync_api import Page
@@ -10,6 +11,7 @@ import pytest
 
 from auraly_pipeline.flow.domain import FlowLocatorName, FlowUiContractError
 from auraly_pipeline.flow.locators import (
+    PageProtocol,
     REQUIRED_FLOW_LOCATORS,
     LocatorStrategy,
     RequiredLocator,
@@ -161,6 +163,12 @@ def test_ready_page_resolves_exactly_one_required_semantic_element(flow_page: Pa
         assert resolved.count() == 1
         assert resolved.is_visible()
         assert resolved.is_enabled()
+
+
+def test_playwright_page_satisfies_base_semantic_page_protocol(flow_page: Page) -> None:
+    page_protocol: PageProtocol[Any] = flow_page
+
+    assert page_protocol is flow_page
 
 
 def test_prompt_resolution_falls_back_to_placeholder_when_label_is_not_applicable(

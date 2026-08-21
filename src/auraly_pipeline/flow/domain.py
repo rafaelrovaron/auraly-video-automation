@@ -176,6 +176,7 @@ class FlowFailureEvidence:
     screenshot_png: bytes | None = None
     raw_trace_path: Path | None = None
     deny_values: tuple[str, ...] = ()
+    trusted_page: bool = False
 
 
 class FlowRuntimeError(RuntimeError):

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal, Protocol, Self, TypeVar
+from typing import Literal, Protocol, Self, TypeVar, runtime_checkable
 
 from .domain import FlowLocatorName, FlowUiContractError
 
@@ -59,6 +59,11 @@ class PageProtocol(Protocol[_LocatorT_co]):
         *,
         exact: bool | None = None,
     ) -> _LocatorT_co: ...
+
+
+@runtime_checkable
+class AttributePageProtocol(Protocol[_LocatorT_co]):
+    """Narrow reviewed stable-attribute lookup seam for tests or adapters."""
 
     def get_by_attribute(
         self,
@@ -167,5 +172,7 @@ def _resolve_strategy(
     if strategy.kind == "text":
         return page.get_by_text(strategy.value, exact=True)
     if strategy.kind == "attribute" and strategy.attribute_name is not None:
+        if not isinstance(page, AttributePageProtocol):
+            raise FlowUiContractError()
         return page.get_by_attribute(strategy.attribute_name, strategy.value, exact=True)
     raise FlowUiContractError()

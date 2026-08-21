@@ -6,6 +6,7 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 import json
 import math
+import os
 from pathlib import Path, PurePosixPath, PureWindowsPath
 import re
 import secrets
@@ -32,15 +33,19 @@ _PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 _SAFE_RUN_ID = re.compile(r"^[0-9]{8}T[0-9]{6}Z-[0-9a-f]{8}$")
 _HTTP_URL = re.compile(r"https?://[^\s\"'<>}\\]+", re.IGNORECASE)
 _SAFE_TRACE_TEXT = re.compile(r"^[A-Za-z0-9_.:-]{1,256}$")
+_SAFE_TRACE_IDENTIFIER = re.compile(r"^[A-Za-z0-9_.:@/-]{1,256}$")
 _MAX_ZIP_MEMBERS = 20
+_MAX_RAW_TRACE_ARCHIVE_BYTES = 512 * 1024
+_MAX_ZIP_MEMBER_COMPRESSED_BYTES = 128 * 1024
+_MAX_ZIP_COMPRESSION_RATIO = 40
 _MAX_ARCHIVE_UNCOMPRESSED_BYTES = 262_144
 _MAX_TRACE_MEMBER_BYTES = 16_384
 _MAX_TRACE_LINE_BYTES = 8_192
-_MAX_JSON_DEPTH = 16
-_MAX_JSON_LIST_ITEMS = 100
 _MAX_TRACE_STRING_LENGTH = 2_048
 _MAX_SCREENSHOT_BYTES = 5 * 1024 * 1024
 _MAX_PNG_CHUNK_BYTES = 4 * 1024 * 1024
+_MAX_PNG_PIXELS = 16_777_216
+_MAX_PNG_INFLATED_BYTES = 64 * 1024 * 1024
 _SENSITIVE_KEY_PARTS = (
     "headers",
     "request",
@@ -63,12 +68,14 @@ _SENSITIVE_KEY_PARTS = (
     "prompt",
     "payload",
 )
-_ALLOWED_TRACE_KEYS = frozenset(
+_SAFE_TRACE_SCALAR_KEYS = frozenset(
     {
         "apiName",
+        "browserName",
         "callId",
         "class",
         "column",
+        "contextId",
         "duration",
         "endTime",
         "frameId",
@@ -76,16 +83,81 @@ _ALLOWED_TRACE_KEYS = frozenset(
         "height",
         "line",
         "method",
+        "monotonicTime",
         "pageId",
         "parentId",
+        "platform",
+        "sdkLanguage",
         "startTime",
+        "testIdAttributeName",
         "timestamp",
         "type",
         "url",
+        "version",
         "wallTime",
         "width",
     }
 )
+_TRACE_EVENT_PROJECTIONS: dict[str, frozenset[str]] = {
+    "context-options": frozenset(
+        {
+            "browserName",
+            "contextId",
+            "monotonicTime",
+            "platform",
+            "sdkLanguage",
+            "testIdAttributeName",
+            "type",
+            "version",
+            "wallTime",
+        }
+    ),
+    "before": frozenset(
+        {
+            "apiName",
+            "callId",
+            "class",
+            "frameId",
+            "guid",
+            "method",
+            "pageId",
+            "startTime",
+            "type",
+            "url",
+            "wallTime",
+        }
+    ),
+    "after": frozenset(
+        {
+            "callId",
+            "duration",
+            "endTime",
+            "type",
+            "wallTime",
+        }
+    ),
+    "event": frozenset(
+        {
+            "apiName",
+            "callId",
+            "class",
+            "frameId",
+            "guid",
+            "method",
+            "pageId",
+            "timestamp",
+            "type",
+            "url",
+            "wallTime",
+        }
+    ),
+}
+_TRACE_REQUIRED_KEYS: dict[str, frozenset[str]] = {
+    "context-options": frozenset({"type", "version", "browserName"}),
+    "before": frozenset({"type", "callId", "startTime"}),
+    "after": frozenset({"type", "callId", "endTime"}),
+    "event": frozenset({"type"}),
+}
 _FIXED_DENY_PATTERNS: tuple[re.Pattern[bytes], ...] = (
     re.compile(rb"(?i)[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}"),
     re.compile(rb"(?i)[a-z]:(?:\\\\|/)+users(?:\\\\|/)+"),
@@ -94,6 +166,18 @@ _FIXED_DENY_PATTERNS: tuple[re.Pattern[bytes], ...] = (
     re.compile(rb"(?i)/(?:home|users)/[^\"'\s]+"),
     re.compile(rb"https?://[^\"'\s]*(?:\?|#)"),
     re.compile(rb"(?i)\b(?:authorization|cookie|set-cookie|postdata|storagestate)\b"),
+)
+_SENSITIVE_VALUE_PARTS = (
+    "authorization",
+    "bearer",
+    "cookie",
+    "credential",
+    "password",
+    "privateprompt",
+    "prompt",
+    "secret",
+    "storage",
+    "token",
 )
 
 
@@ -127,6 +211,7 @@ def sanitize_trace_archive(
         TypeError,
         UnicodeDecodeError,
         ValueError,
+        zlib.error,
         json.JSONDecodeError,
     ):
         if output_created:
@@ -148,15 +233,33 @@ class FlowDiagnosticWriter:
         evidence: FlowFailureEvidence,
     ) -> FlowPreflightResult:
         """Sanitize in staging, publish one exclusive run, and return artifact references."""
+        published: FlowPreflightResult | None = None
+        cleanup_failed = False
+        operation_error: FlowDiagnosticSanitizationError | None = None
         try:
             if result.success or result.status == "ready" or result.failed_step is None:
                 raise FlowDiagnosticSanitizationError(evidence=evidence)
             _validate_result_diagnostic_policy(result, evidence=evidence)
             self._diagnostics_dir.mkdir(parents=True, exist_ok=True)
             self._staging_root.mkdir(parents=True, exist_ok=True)
-            return self._write_failure_with_retries(result, evidence=evidence)
-        finally:
+            published = self._write_failure_with_retries(result, evidence=evidence)
+        except FlowDiagnosticSanitizationError as exc:
+            operation_error = exc
+        except OSError:
+            operation_error = FlowDiagnosticSanitizationError(evidence=evidence)
+        try:
             _cleanup_raw_trace(evidence.raw_trace_path, self._staging_root)
+        except (FlowDiagnosticSanitizationError, OSError):
+            cleanup_failed = True
+        if cleanup_failed and published is not None and published.diagnostic_run_id is not None:
+            _remove_incomplete_final_run(self._diagnostics_dir / published.diagnostic_run_id)
+        if operation_error is not None:
+            raise operation_error
+        if cleanup_failed:
+            raise FlowDiagnosticSanitizationError(evidence=evidence)
+        if published is None:
+            raise FlowDiagnosticSanitizationError(evidence=evidence)
+        return published
 
     def _write_failure_with_retries(
         self,
@@ -190,10 +293,11 @@ class FlowDiagnosticWriter:
     ) -> FlowPreflightResult:
         staging_dir = self._staging_root / f"{run_id}-{secrets.token_hex(4)}.stage"
         final_created = False
+        published_result: FlowPreflightResult | None = None
         try:
             staging_dir.mkdir(parents=False, exist_ok=False)
 
-            publish_rich_evidence = _requires_rich_evidence(result)
+            publish_rich_evidence = _requires_rich_evidence(result, evidence=evidence)
             screenshot_stage: Path | None = None
             trace_stage: Path | None = None
             result_stage = staging_dir / _RESULT_NAME
@@ -231,21 +335,23 @@ class FlowDiagnosticWriter:
             if trace_stage is not None:
                 self._publish_file_exclusive(trace_stage, final_dir / _TRACE_NAME)
             self._publish_result_json_exclusive(result_stage, final_dir / _RESULT_NAME)
+            _remove_tree_if_present(staging_dir)
             return published_result
         except FlowDiagnosticSanitizationError:
             if final_created:
                 _remove_incomplete_final_run(final_dir)
+            _remove_tree_for_failure(staging_dir)
             raise
         except FileExistsError:
             if final_created:
                 _remove_incomplete_final_run(final_dir)
+            _remove_tree_for_failure(staging_dir)
             raise
         except OSError:
             if final_created:
                 _remove_incomplete_final_run(final_dir)
+            _remove_tree_for_failure(staging_dir)
             raise FlowDiagnosticSanitizationError(evidence=evidence) from None
-        finally:
-            _remove_tree_if_present(staging_dir)
 
     def _publish_file_exclusive(self, source: Path, destination: Path) -> None:
         with source.open("rb") as source_file:
@@ -260,26 +366,40 @@ class FlowDiagnosticWriter:
             result_file.write(encoded)
 
     def _publish_result_json_exclusive(self, source: Path, destination: Path) -> None:
-        created = False
+        temp_destination = destination.with_name(f".{destination.name}.{secrets.token_hex(8)}.tmp")
         try:
-            with destination.open("xb") as result_file:
-                created = True
+            with temp_destination.open("xb") as result_file:
                 with source.open("rb") as source_file:
                     shutil.copyfileobj(source_file, result_file)
+                result_file.flush()
+                os.fsync(result_file.fileno())
+            if destination.exists():
+                raise FileExistsError(destination)
+            temp_destination.replace(destination)
         except OSError:
-            if created:
-                _unlink_if_present(destination)
+            _unlink_if_present(temp_destination)
             raise
 
 
 def _sanitize_trace_member(raw_path: Path) -> bytes:
+    try:
+        if raw_path.stat().st_size > _MAX_RAW_TRACE_ARCHIVE_BYTES:
+            raise FlowDiagnosticSanitizationError()
+    except OSError:
+        raise FlowDiagnosticSanitizationError() from None
     with ZipFile(raw_path) as archive:
         members = archive.infolist()
         if len(members) > _MAX_ZIP_MEMBERS:
             raise FlowDiagnosticSanitizationError()
         total_size = 0
         for info in members:
-            _validate_zip_info(info.filename, info.flag_bits, info.compress_type, info.file_size)
+            _validate_zip_info(
+                info.filename,
+                info.flag_bits,
+                info.compress_type,
+                info.file_size,
+                info.compress_size,
+            )
             total_size += info.file_size
         if total_size > _MAX_ARCHIVE_UNCOMPRESSED_BYTES:
             raise FlowDiagnosticSanitizationError()
@@ -303,7 +423,7 @@ def _sanitize_trace_member(raw_path: Path) -> bytes:
         value = json.loads(line)
         if not isinstance(value, dict):
             raise FlowDiagnosticSanitizationError()
-        sanitized = _sanitize_trace_object(value, depth=0)
+        sanitized = _project_trace_event(value)
         if not isinstance(sanitized, dict):
             raise FlowDiagnosticSanitizationError()
         sanitized_lines.append(
@@ -314,10 +434,20 @@ def _sanitize_trace_member(raw_path: Path) -> bytes:
     return ("\n".join(sanitized_lines) + "\n").encode("utf-8")
 
 
-def _validate_zip_info(name: str, flag_bits: int, compress_type: int, file_size: int) -> None:
+def _validate_zip_info(
+    name: str,
+    flag_bits: int,
+    compress_type: int,
+    file_size: int,
+    compress_size: int,
+) -> None:
     if flag_bits & 0x1:
         raise FlowDiagnosticSanitizationError()
     if compress_type not in {ZIP_STORED, ZIP_DEFLATED}:
+        raise FlowDiagnosticSanitizationError()
+    if compress_size < 0 or compress_size > _MAX_ZIP_MEMBER_COMPRESSED_BYTES:
+        raise FlowDiagnosticSanitizationError()
+    if compress_size > 0 and file_size // compress_size > _MAX_ZIP_COMPRESSION_RATIO:
         raise FlowDiagnosticSanitizationError()
     if name == _TRACE_MEMBER and file_size > _MAX_TRACE_MEMBER_BYTES:
         raise FlowDiagnosticSanitizationError()
@@ -369,34 +499,44 @@ def _is_known_dropped_member(name: str) -> bool:
     )
 
 
-def _sanitize_trace_object(value: dict[str, Any], *, depth: int) -> dict[str, Any]:
-    if depth > _MAX_JSON_DEPTH:
+def _project_trace_event(value: dict[str, Any]) -> dict[str, Any]:
+    if any(_HTTP_URL.search(key) for key in value):
         raise FlowDiagnosticSanitizationError()
+    event_type = value.get("type")
+    if not isinstance(event_type, str) or event_type not in _TRACE_EVENT_PROJECTIONS:
+        raise FlowDiagnosticSanitizationError()
+    required_keys = _TRACE_REQUIRED_KEYS[event_type]
+    if any(key not in value for key in required_keys):
+        raise FlowDiagnosticSanitizationError()
+
+    projection = _TRACE_EVENT_PROJECTIONS[event_type]
+    for key in value:
+        if key in projection:
+            continue
+        if event_type == "context-options" and key == "options":
+            continue
+        if event_type == "before" and key == "params":
+            continue
+        if _is_sensitive_key(key):
+            continue
+        raise FlowDiagnosticSanitizationError()
+
     sanitized: dict[str, Any] = {}
-    for raw_key, child in value.items():
-        if not isinstance(raw_key, str):
-            raise FlowDiagnosticSanitizationError()
-        key = _sanitize_urls(raw_key)
-        if _is_canonical_http_url(key):
-            sanitized[key] = _sanitize_json_value(child, key=key, depth=depth + 1)
+    for key in sorted(projection):
+        if key not in value:
             continue
-        if _is_sensitive_key(raw_key) or _is_sensitive_key(key):
-            continue
-        if key not in _ALLOWED_TRACE_KEYS:
+        if key not in _SAFE_TRACE_SCALAR_KEYS:
             raise FlowDiagnosticSanitizationError()
-        sanitized[key] = _sanitize_json_value(child, key=key, depth=depth + 1)
+        sanitized[key] = _sanitize_trace_scalar(key, value[key])
+
+    if event_type == "before":
+        params = value.get("params")
+        if isinstance(params, dict) and "url" in params:
+            sanitized["url"] = _sanitize_trace_scalar("url", params["url"])
     return sanitized
 
 
-def _sanitize_json_value(value: Any, *, key: str, depth: int) -> Any:
-    if depth > _MAX_JSON_DEPTH:
-        raise FlowDiagnosticSanitizationError()
-    if isinstance(value, dict):
-        return _sanitize_trace_object(value, depth=depth + 1)
-    if isinstance(value, list):
-        if len(value) > _MAX_JSON_LIST_ITEMS:
-            raise FlowDiagnosticSanitizationError()
-        return [_sanitize_json_value(child, key=key, depth=depth + 1) for child in value]
+def _sanitize_trace_scalar(key: str, value: Any) -> Any:
     if isinstance(value, str):
         return _sanitize_trace_string(key, value)
     if value is None or isinstance(value, bool | int | float):
@@ -444,6 +584,13 @@ def _sanitize_trace_string(key: str, value: str) -> str:
     sanitized = _sanitize_urls(value)
     if key == "url" or _is_canonical_http_url(sanitized):
         if not _is_canonical_http_url(sanitized):
+            raise FlowDiagnosticSanitizationError()
+        return sanitized
+    normalized = re.sub(r"[^a-z0-9]", "", sanitized.lower())
+    if any(part in normalized for part in _SENSITIVE_VALUE_PARTS):
+        raise FlowDiagnosticSanitizationError()
+    if key in {"callId", "contextId", "frameId", "guid", "pageId", "parentId"}:
+        if not _SAFE_TRACE_IDENTIFIER.fullmatch(sanitized):
             raise FlowDiagnosticSanitizationError()
         return sanitized
     if not _SAFE_TRACE_TEXT.fullmatch(sanitized):
@@ -503,6 +650,10 @@ def _validate_png_screenshot(data: bytes, *, deny_values: Sequence[str]) -> None
     seen_ihdr = False
     seen_idat = False
     seen_iend = False
+    width = 0
+    height = 0
+    color_type = 0
+    idat_chunks: list[bytes] = []
     while offset < len(data):
         if offset + 8 > len(data):
             raise FlowDiagnosticSanitizationError()
@@ -522,12 +673,13 @@ def _validate_png_screenshot(data: bytes, *, deny_values: Sequence[str]) -> None
         if chunk_type == b"IHDR":
             if seen_ihdr or offset != len(_PNG_SIGNATURE) or chunk_length != 13:
                 raise FlowDiagnosticSanitizationError()
-            _validate_ihdr_chunk(chunk_data)
+            width, height, color_type = _validate_ihdr_chunk(chunk_data)
             seen_ihdr = True
         elif chunk_type == b"IDAT":
             if not seen_ihdr or seen_iend:
                 raise FlowDiagnosticSanitizationError()
             seen_idat = True
+            idat_chunks.append(chunk_data)
         elif chunk_type == b"IEND":
             if chunk_length != 0 or not seen_ihdr or not seen_idat:
                 raise FlowDiagnosticSanitizationError()
@@ -539,34 +691,63 @@ def _validate_png_screenshot(data: bytes, *, deny_values: Sequence[str]) -> None
         offset = crc_end
     if not seen_iend or offset != len(data):
         raise FlowDiagnosticSanitizationError()
+    _validate_png_idat_stream(b"".join(idat_chunks), width=width, height=height, color_type=color_type)
     _validate_sanitized_bytes(data, deny_values)
 
 
-def _validate_ihdr_chunk(data: bytes) -> None:
+def _validate_ihdr_chunk(data: bytes) -> tuple[int, int, int]:
     width, height, bit_depth, color_type, compression, filter_method, interlace = struct.unpack(
         ">IIBBBBB", data
     )
     if width <= 0 or height <= 0:
         raise FlowDiagnosticSanitizationError()
+    if width * height > _MAX_PNG_PIXELS:
+        raise FlowDiagnosticSanitizationError()
     if bit_depth != 8 or color_type not in {2, 6}:
         raise FlowDiagnosticSanitizationError()
     if compression != 0 or filter_method != 0 or interlace not in {0, 1}:
         raise FlowDiagnosticSanitizationError()
+    return width, height, color_type
 
 
-def _requires_rich_evidence(result: FlowPreflightResult) -> bool:
+def _validate_png_idat_stream(data: bytes, *, width: int, height: int, color_type: int) -> None:
+    channels = 4 if color_type == 6 else 3
+    expected_scanline_bytes = height * (1 + width * channels)
+    if expected_scanline_bytes > _MAX_PNG_INFLATED_BYTES:
+        raise FlowDiagnosticSanitizationError()
+    decompressor = zlib.decompressobj()
+    try:
+        inflated = decompressor.decompress(data, _MAX_PNG_INFLATED_BYTES + 1)
+        inflated += decompressor.flush(_MAX_PNG_INFLATED_BYTES + 1 - len(inflated))
+    except zlib.error:
+        raise FlowDiagnosticSanitizationError() from None
+    if decompressor.unused_data or decompressor.unconsumed_tail:
+        raise FlowDiagnosticSanitizationError()
+    if len(inflated) > _MAX_PNG_INFLATED_BYTES or len(inflated) != expected_scanline_bytes:
+        raise FlowDiagnosticSanitizationError()
+
+
+def _requires_rich_evidence(
+    result: FlowPreflightResult,
+    *,
+    evidence: FlowFailureEvidence,
+) -> bool:
     if not result.authenticated:
         return False
     if result.status == "ui_contract_failed":
-        return result.failed_step == "verify_flow_ui"
-    return result.status == "human_intervention_required" and result.failed_step == "verify_flow_ui"
+        return result.failed_step == "verify_flow_ui" and evidence.trusted_page
+    return (
+        result.status == "human_intervention_required"
+        and result.failed_step == "verify_flow_ui"
+        and evidence.trusted_page
+    )
 
 
 def _validate_result_diagnostic_policy(
     result: FlowPreflightResult, *, evidence: FlowFailureEvidence
 ) -> None:
     if result.status == "ui_contract_failed" and (
-        not result.authenticated or result.failed_step != "verify_flow_ui"
+        not result.authenticated or result.failed_step != "verify_flow_ui" or not evidence.trusted_page
     ):
         raise FlowDiagnosticSanitizationError(evidence=evidence)
     if result.screenshot is not None or result.trace is not None:
@@ -620,22 +801,26 @@ def _new_run_id() -> str:
 
 
 def _unlink_if_present(path: Path) -> None:
-    try:
-        path.unlink(missing_ok=True)
-    except OSError:
-        pass
+    path.unlink(missing_ok=True)
 
 
 def _remove_tree_if_present(path: Path) -> None:
-    try:
-        if path.exists():
-            shutil.rmtree(path)
-    except OSError:
-        pass
+    if path.exists():
+        shutil.rmtree(path)
 
 
 def _remove_incomplete_final_run(path: Path) -> None:
-    _remove_tree_if_present(path)
+    try:
+        _remove_tree_if_present(path)
+    except OSError:
+        raise FlowDiagnosticSanitizationError() from None
+
+
+def _remove_tree_for_failure(path: Path) -> None:
+    try:
+        _remove_tree_if_present(path)
+    except OSError:
+        raise FlowDiagnosticSanitizationError() from None
 
 
 def _cleanup_raw_trace(raw_trace_path: Path | None, staging_root: Path) -> None:
@@ -644,7 +829,7 @@ def _cleanup_raw_trace(raw_trace_path: Path | None, staging_root: Path) -> None:
     try:
         resolved_root = staging_root.resolve(strict=False)
         resolved_raw = raw_trace_path.resolve(strict=False)
-        if not resolved_raw.is_relative_to(resolved_root):
+        if resolved_raw == resolved_root or not resolved_raw.is_relative_to(resolved_root):
             return
         raw_trace_path.unlink(missing_ok=True)
         parent = raw_trace_path.parent
@@ -655,4 +840,4 @@ def _cleanup_raw_trace(raw_trace_path: Path | None, staging_root: Path) -> None:
                 break
             parent = parent.parent
     except OSError:
-        pass
+        raise FlowDiagnosticSanitizationError() from None
