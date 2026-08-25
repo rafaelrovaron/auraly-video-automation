@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import ast
 from datetime import UTC, datetime
+import errno
 import json
+import os
 from pathlib import Path
 from typing import Callable, cast
 from zipfile import ZIP_STORED, ZipFile
@@ -228,19 +230,26 @@ def _service(
         assert staging_root == config.staging_root
         return writer
 
-    service_kwargs: dict[str, object] = {}
-    if raw_trace_cleanup is not None:
-        service_kwargs["_raw_trace_cleanup"] = raw_trace_cleanup
-    service = FlowPreflightService(
-        _config_resolver=_resolver(config, resolver_calls),
-        _lock_factory=cast(LockFactory, lock_factory),
-        _runtime_factory=cast(RuntimeFactory, runtime_factory),
-        _diagnostic_writer_factory=(
-            FlowDiagnosticWriter if use_real_writer else cast(DiagnosticWriterFactory, writer_factory)
-        ),
-        _now=lambda: TIMESTAMP,
-        **service_kwargs,
+    diagnostic_writer_factory = (
+        FlowDiagnosticWriter if use_real_writer else cast(DiagnosticWriterFactory, writer_factory)
     )
+    if raw_trace_cleanup is None:
+        service = FlowPreflightService(
+            _config_resolver=_resolver(config, resolver_calls),
+            _lock_factory=cast(LockFactory, lock_factory),
+            _runtime_factory=cast(RuntimeFactory, runtime_factory),
+            _diagnostic_writer_factory=diagnostic_writer_factory,
+            _now=lambda: TIMESTAMP,
+        )
+    else:
+        service = FlowPreflightService(
+            _config_resolver=_resolver(config, resolver_calls),
+            _lock_factory=cast(LockFactory, lock_factory),
+            _runtime_factory=cast(RuntimeFactory, runtime_factory),
+            _diagnostic_writer_factory=diagnostic_writer_factory,
+            _raw_trace_cleanup=raw_trace_cleanup,
+            _now=lambda: TIMESTAMP,
+        )
     return service, events, writer, resolver_calls
 
 
@@ -941,6 +950,50 @@ def test_lock_release_failure_refuses_unsafe_raw_trace_paths(
     assert result.screenshot is None
     assert result.trace is None
     assert str(raw_trace) not in result.model_dump_json(by_alias=True)
+    assert writer.evidence == [FlowFailureEvidence()]
+
+
+def test_lock_release_failure_refuses_staging_symlink_to_outside_raw_trace(
+    tmp_path: Path,
+) -> None:
+    config = _config(tmp_path)
+    config.staging_root.mkdir()
+    outside_raw_trace = tmp_path / "outside" / "private-trace.zip"
+    outside_raw_trace.parent.mkdir()
+    outside_raw_trace.write_bytes(b"private raw trace")
+    staged_link = config.staging_root / "private-trace.zip"
+    try:
+        os.symlink(outside_raw_trace, staged_link, target_is_directory=False)
+    except OSError as error:
+        if error.winerror == 1314 or error.errno in {errno.EPERM, errno.ENOTSUP}:
+            pytest.skip(
+                f"symlink creation is unsupported: winerror={error.winerror!r}, errno={error.errno!r}"
+            )
+        raise
+
+    service, _, writer, _ = _service(
+        tmp_path,
+        runtime_error=FlowUiContractError(
+            evidence=FlowFailureEvidence(raw_trace_path=staged_link, trusted_page=True)
+        ),
+        lock_release_error=RuntimeError("release failed"),
+    )
+
+    result = service.preflight()
+
+    assert result == FlowPreflightResult.failure(
+        status="human_intervention_required",
+        authenticated=True,
+        ui_ready=False,
+        failed_step="sanitize_diagnostics",
+        timestamp=TIMESTAMP,
+    )
+    assert staged_link.is_symlink()
+    assert outside_raw_trace.exists()
+    assert result.screenshot is None
+    assert result.trace is None
+    assert str(staged_link) not in result.model_dump_json(by_alias=True)
+    assert str(outside_raw_trace) not in result.model_dump_json(by_alias=True)
     assert writer.evidence == [FlowFailureEvidence()]
 
 
