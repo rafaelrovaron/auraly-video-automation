@@ -542,6 +542,36 @@ def test_trace_stop_write_then_keyboard_interrupt_removes_raw_trace_and_reraises
     assert context.manager_exit_calls == 1
 
 
+def test_keyboard_interrupt_after_trace_attachment_removes_raw_trace_and_reraises(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An interrupt after evidence attachment still revokes the staged raw trace."""
+    target = local_target("ready.html")
+    page = _FakePage(url=target.flow_url, empty_roles={"main"})
+    context = _FakeContext(page=page)
+
+    def interrupt_after_attachment(state: object, name: str, value: object) -> None:
+        object.__setattr__(state, name, value)
+        if name == "attached" and value is True:
+            raise KeyboardInterrupt()
+
+    monkeypatch.setattr(
+        runtime_module._RawTraceState,
+        "__setattr__",
+        interrupt_after_attachment,
+    )
+
+    with pytest.raises(KeyboardInterrupt):
+        GoogleFlowRuntime(
+            config(tmp_path), _target=target, _playwright_factory=_playwright_factory(context)
+        ).run()
+
+    assert not list(configured_trace_paths(tmp_path))
+    assert context.close_calls == 1
+    assert context.manager_exit_calls == 1
+
+
 def test_close_redirect_after_attached_trace_removes_now_untrusted_raw_trace(tmp_path: Path) -> None:
     """Close-time route loss revokes evidence that was safe when initially captured."""
     target = local_target("ready.html")

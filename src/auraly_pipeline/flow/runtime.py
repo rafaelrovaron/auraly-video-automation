@@ -199,12 +199,15 @@ class GoogleFlowRuntime:
         finally:
             if tracing_started:
                 self._stop_trace_without_artifact(context)
-            if raw_trace.path is not None and not raw_trace.attached:
+            base_exception_escaping = sys.exc_info()[0] is not None
+            if raw_trace.path is not None and (
+                not raw_trace.attached or base_exception_escaping
+            ):
                 raw_trace_cleanup_failure = self._discard_raw_trace(
                     raw_trace,
                     trusted_page=trusted_page and page is not None and self._current_page_is_flow(page),
                 )
-                if raw_trace_cleanup_failure is not None and sys.exc_info()[0] is None:
+                if raw_trace_cleanup_failure is not None and not base_exception_escaping:
                     failure = raw_trace_cleanup_failure
                     observation = None
             close_failed = self._close_resources(manager, context, playwright is not None)
