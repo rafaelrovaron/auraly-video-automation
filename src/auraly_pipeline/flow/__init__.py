@@ -4,6 +4,7 @@ from .config import FlowRuntimeConfig, resolve_flow_runtime_config
 from .diagnostics import FlowDiagnosticWriter, sanitize_trace_archive
 from .lock import BrowserRuntimeLock
 from .runtime import GoogleFlowRuntime
+from .service import FlowPreflightService
 from .domain import (
     FLOW_URL,
     FlowAuthenticationTimeoutError,
@@ -33,6 +34,7 @@ __all__ = [
     "FlowFailedStep",
     "FlowLocatorName",
     "FlowPreflightResult",
+    "FlowPreflightService",
     "FlowPreflightStatus",
     "FlowRuntimeBusyError",
     "FlowRuntimeError",
