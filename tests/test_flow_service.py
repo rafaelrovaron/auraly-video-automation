@@ -953,6 +953,50 @@ def test_lock_release_failure_refuses_unsafe_raw_trace_paths(
     assert writer.evidence == [FlowFailureEvidence()]
 
 
+def test_create_symlink_skips_posix_permission_error_without_winerror(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def reject_symlink(source: Path, target: Path, *, target_is_directory: bool) -> None:
+        del source, target, target_is_directory
+        raise OSError(errno.EPERM, "operation not permitted")
+
+    monkeypatch.setattr(os, "symlink", reject_symlink)
+
+    with pytest.raises(pytest.skip.Exception):
+        _create_symlink_or_skip(tmp_path / "outside", tmp_path / "staging-link")
+
+
+def test_create_symlink_reraises_unrecognized_os_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    expected_error = OSError(errno.EIO, "input/output error")
+
+    def reject_symlink(source: Path, target: Path, *, target_is_directory: bool) -> None:
+        del source, target, target_is_directory
+        raise expected_error
+
+    monkeypatch.setattr(os, "symlink", reject_symlink)
+
+    with pytest.raises(OSError) as raised:
+        _create_symlink_or_skip(tmp_path / "outside", tmp_path / "staging-link")
+
+    assert raised.value is expected_error
+
+
+def _create_symlink_or_skip(source: Path, target: Path) -> None:
+    try:
+        os.symlink(source, target, target_is_directory=False)
+    except OSError as error:
+        winerror = getattr(error, "winerror", None)
+        if winerror == 1314 or error.errno in {errno.EPERM, errno.ENOTSUP}:
+            pytest.skip(
+                f"symlink creation is unsupported: winerror={winerror!r}, errno={error.errno!r}"
+            )
+        raise
+
+
 def test_lock_release_failure_refuses_staging_symlink_to_outside_raw_trace(
     tmp_path: Path,
 ) -> None:
@@ -962,14 +1006,7 @@ def test_lock_release_failure_refuses_staging_symlink_to_outside_raw_trace(
     outside_raw_trace.parent.mkdir()
     outside_raw_trace.write_bytes(b"private raw trace")
     staged_link = config.staging_root / "private-trace.zip"
-    try:
-        os.symlink(outside_raw_trace, staged_link, target_is_directory=False)
-    except OSError as error:
-        if error.winerror == 1314 or error.errno in {errno.EPERM, errno.ENOTSUP}:
-            pytest.skip(
-                f"symlink creation is unsupported: winerror={error.winerror!r}, errno={error.errno!r}"
-            )
-        raise
+    _create_symlink_or_skip(outside_raw_trace, staged_link)
 
     service, _, writer, _ = _service(
         tmp_path,
