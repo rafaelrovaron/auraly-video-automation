@@ -13,6 +13,7 @@ from pydantic import ValidationError
 from auraly_pipeline.campaigns.domain import CampaignCreate
 from auraly_pipeline.campaigns.persistence import default_database_path
 from auraly_pipeline.campaigns.service import CampaignError, CampaignService
+from auraly_pipeline.flow import FlowPreflightService
 from auraly_pipeline.image_generation import (
     DEFAULT_RETRY_COUNT,
     DEFAULT_TIMEOUT_SECONDS,
@@ -76,6 +77,10 @@ image_generation_app = typer.Typer(help="Inspect image generations.", no_args_is
 image_app.add_typer(image_generation_app, name="generation")
 image_candidate_app = typer.Typer(help="Inspect and review image candidates.", no_args_is_help=True)
 image_app.add_typer(image_candidate_app, name="candidate")
+flow_app = typer.Typer(
+    help="Safely inspect the local Google Flow browser runtime.", no_args_is_help=True
+)
+app.add_typer(flow_app, name="flow")
 
 
 @app.command("ingest")
@@ -194,6 +199,25 @@ def _configure_image_logging() -> None:
 
 def _json_echo(payload: dict[str, object]) -> None:
     typer.echo(json.dumps(payload, indent=2, ensure_ascii=False, sort_keys=True, allow_nan=False))
+
+
+@flow_app.command("preflight")
+def flow_preflight_command(
+    profile_dir: Annotated[Path | None, typer.Option("--profile-dir")] = None,
+    diagnostics_dir: Annotated[Path | None, typer.Option("--diagnostics-dir")] = None,
+    login_timeout: Annotated[int | None, typer.Option("--login-timeout", min=1)] = None,
+    navigation_timeout: Annotated[int | None, typer.Option("--navigation-timeout", min=1)] = None,
+) -> None:
+    """Inspect the Google Flow browser runtime without generating media."""
+    result = FlowPreflightService().preflight(
+        profile_dir=profile_dir,
+        diagnostics_dir=diagnostics_dir,
+        login_timeout_seconds=login_timeout,
+        navigation_timeout_seconds=navigation_timeout,
+    )
+    _json_echo(result.model_dump(by_alias=True, mode="json", exclude_none=False))
+    if not result.success:
+        raise typer.Exit(code=1)
 
 
 def _reject_non_standard_json_constant(value: str) -> None:
