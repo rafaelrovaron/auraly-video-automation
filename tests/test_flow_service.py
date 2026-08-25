@@ -110,6 +110,24 @@ class SequencedDiagnosticWriter(RecordingDiagnosticWriter):
         return outcome
 
 
+class DistinctDiagnosticWriterFactory:
+    def __init__(
+        self,
+        events: list[str],
+        outcome_batches: list[list[Exception | FlowPreflightResult]],
+    ) -> None:
+        self._events = events
+        self._outcome_batches = outcome_batches
+        self.calls: list[tuple[Path, Path]] = []
+        self.writers: list[SequencedDiagnosticWriter] = []
+
+    def __call__(self, diagnostics_dir: Path, staging_root: Path) -> SequencedDiagnosticWriter:
+        self.calls.append((diagnostics_dir, staging_root))
+        writer = SequencedDiagnosticWriter(self._events, self._outcome_batches.pop(0))
+        self.writers.append(writer)
+        return writer
+
+
 class UnknownRuntimeError(RuntimeError):
     def __init__(self, *, trusted_page: bool, message: str) -> None:
         super().__init__(message)
@@ -210,6 +228,34 @@ def _service(
         _now=lambda: TIMESTAMP,
     )
     return service, events, writer, resolver_calls
+
+
+def _service_with_distinct_writers(
+    tmp_path: Path,
+    *,
+    runtime_error: Exception,
+    writer_outcome_batches: list[list[Exception | FlowPreflightResult]],
+) -> tuple[FlowPreflightService, list[str], DistinctDiagnosticWriterFactory]:
+    events: list[str] = []
+    config = _config(tmp_path)
+    writer_factory = DistinctDiagnosticWriterFactory(events, writer_outcome_batches)
+
+    def lock_factory(path: Path) -> RecordingLock:
+        assert path == config.lock_path
+        return RecordingLock(events)
+
+    def runtime_factory(received_config: FlowRuntimeConfig) -> RecordingRuntime:
+        assert received_config is config
+        return RecordingRuntime(events, error=runtime_error)
+
+    service = FlowPreflightService(
+        _config_resolver=_resolver(config, []),
+        _lock_factory=cast(LockFactory, lock_factory),
+        _runtime_factory=cast(RuntimeFactory, runtime_factory),
+        _diagnostic_writer_factory=cast(DiagnosticWriterFactory, writer_factory),
+        _now=lambda: TIMESTAMP,
+    )
+    return service, events, writer_factory
 
 
 def test_service_holds_lock_until_runtime_has_closed_returns_ready_and_forwards_options(
@@ -393,10 +439,10 @@ def test_writer_failure_retries_once_with_empty_evidence_and_returns_fallback_pu
         deny_values=("PRIVATE",),
         trusted_page=True,
     )
-    service, events, writer, _ = _service(
+    service, events, writer_factory = _service_with_distinct_writers(
         tmp_path,
         runtime_error=FlowUiContractError(evidence=original_evidence),
-        writer_outcomes=[FlowDiagnosticSanitizationError(), fallback_result],
+        writer_outcome_batches=[[FlowDiagnosticSanitizationError()], [fallback_result]],
     )
 
     result = service.preflight()
@@ -410,22 +456,30 @@ def test_writer_failure_retries_once_with_empty_evidence_and_returns_fallback_pu
         "diagnostics.write",
         "diagnostics.write",
     ]
-    assert writer.results[0].status == "ui_contract_failed"
-    assert writer.results[1] == FlowPreflightResult.failure(
-        status="human_intervention_required",
-        authenticated=True,
-        ui_ready=False,
-        failed_step="sanitize_diagnostics",
-        timestamp=TIMESTAMP,
-    )
-    assert writer.evidence == [original_evidence, FlowFailureEvidence()]
+    assert writer_factory.calls == [
+        (_config(tmp_path).diagnostics_dir, _config(tmp_path).staging_root),
+        (_config(tmp_path).diagnostics_dir, _config(tmp_path).staging_root),
+    ]
+    first_writer, second_writer = writer_factory.writers
+    assert first_writer.results[0].status == "ui_contract_failed"
+    assert first_writer.evidence == [original_evidence]
+    assert second_writer.results == [
+        FlowPreflightResult.failure(
+            status="human_intervention_required",
+            authenticated=True,
+            ui_ready=False,
+            failed_step="sanitize_diagnostics",
+            timestamp=TIMESTAMP,
+        )
+    ]
+    assert second_writer.evidence == [FlowFailureEvidence()]
 
 
 def test_two_writer_failures_return_fresh_result_only_failure_without_recursion(tmp_path: Path) -> None:
-    service, events, writer, _ = _service(
+    service, events, writer_factory = _service_with_distinct_writers(
         tmp_path,
         runtime_error=FlowUiContractError(),
-        writer_outcomes=[FlowDiagnosticSanitizationError(), FlowDiagnosticSanitizationError()],
+        writer_outcome_batches=[[FlowDiagnosticSanitizationError()], [FlowDiagnosticSanitizationError()]],
     )
 
     result = service.preflight()
@@ -445,8 +499,22 @@ def test_two_writer_failures_return_fresh_result_only_failure_without_recursion(
         "diagnostics.write",
         "diagnostics.write",
     ]
-    assert len(writer.results) == 2
-    assert writer.evidence[1] == FlowFailureEvidence()
+    assert writer_factory.calls == [
+        (_config(tmp_path).diagnostics_dir, _config(tmp_path).staging_root),
+        (_config(tmp_path).diagnostics_dir, _config(tmp_path).staging_root),
+    ]
+    first_writer, second_writer = writer_factory.writers
+    assert first_writer.results[0].status == "ui_contract_failed"
+    assert second_writer.results == [
+        FlowPreflightResult.failure(
+            status="human_intervention_required",
+            authenticated=True,
+            ui_ready=False,
+            failed_step="sanitize_diagnostics",
+            timestamp=TIMESTAMP,
+        )
+    ]
+    assert second_writer.evidence == [FlowFailureEvidence()]
 
 
 @pytest.mark.parametrize(
