@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 from datetime import UTC, datetime
 import json
 from pathlib import Path
@@ -9,6 +10,7 @@ import pytest
 
 from auraly_pipeline.flow.config import FlowRuntimeConfig
 from auraly_pipeline.flow.diagnostics import FlowDiagnosticWriter
+from auraly_pipeline.flow import service as service_module
 from auraly_pipeline.flow.domain import (
     FlowAuthenticationTimeoutError,
     FlowBrowserLaunchError,
@@ -357,6 +359,202 @@ def test_busy_lock_never_constructs_or_runs_the_runtime(tmp_path: Path) -> None:
     assert result.status == "runtime_busy"
     assert events == ["lock.acquire", "diagnostics.write"]
     assert writer.results == [result]
+    assert result.diagnostic_run_id is None
+    assert result.screenshot is None
+    assert result.trace is None
+
+
+def test_ui_contract_failure_preserves_allowlisted_locator_and_fixed_timestamp(tmp_path: Path) -> None:
+    service, _, writer, _ = _service(
+        tmp_path,
+        runtime_error=FlowUiContractError(failed_locator="PROMPT_INPUT"),
+    )
+
+    result = service.preflight()
+
+    assert result == FlowPreflightResult.failure(
+        status="ui_contract_failed",
+        authenticated=True,
+        ui_ready=False,
+        failed_step="verify_flow_ui",
+        failed_locator="PROMPT_INPUT",
+        timestamp=TIMESTAMP,
+    )
+    assert writer.results == [result]
+
+
+def test_service_constructs_config_lock_and_runtime_in_lifecycle_order(tmp_path: Path) -> None:
+    events: list[str] = []
+    config = _config(tmp_path)
+
+    def resolver(
+        *,
+        profile_dir: Path | None = None,
+        diagnostics_dir: Path | None = None,
+        login_timeout_seconds: int | None = None,
+        navigation_timeout_seconds: int | None = None,
+    ) -> FlowRuntimeConfig:
+        events.append("config")
+        return config
+
+    def lock_factory(path: Path) -> RecordingLock:
+        assert path == config.lock_path
+        events.append("lock.create")
+        return RecordingLock(events)
+
+    def runtime_factory(received_config: FlowRuntimeConfig) -> RecordingRuntime:
+        assert received_config is config
+        events.append("runtime.create")
+        return RecordingRuntime(events)
+
+    service = FlowPreflightService(
+        _config_resolver=resolver,
+        _lock_factory=cast(LockFactory, lock_factory),
+        _runtime_factory=cast(RuntimeFactory, runtime_factory),
+        _now=lambda: TIMESTAMP,
+    )
+
+    result = service.preflight()
+
+    assert result == FlowPreflightResult.ready(timestamp=TIMESTAMP)
+    assert events == [
+        "config",
+        "lock.create",
+        "lock.acquire",
+        "runtime.create",
+        "runtime.run",
+        "runtime.close",
+        "lock.release",
+    ]
+
+
+@pytest.mark.parametrize("failure_phase", ["runtime_factory", "runtime_run"])
+def test_unknown_runtime_or_factory_error_releases_lock_then_writes_sanitized_result(
+    tmp_path: Path,
+    failure_phase: str,
+) -> None:
+    events: list[str] = []
+    config = _config(tmp_path)
+    raw_path = r"C:\\Users\\Rovaron\\secret-profile"
+    unknown_error = UnknownRuntimeError(
+        trusted_page=True,
+        message=f"unexpected failure at {raw_path}",
+    )
+    writer = RecordingDiagnosticWriter(events)
+
+    def resolver(
+        *,
+        profile_dir: Path | None = None,
+        diagnostics_dir: Path | None = None,
+        login_timeout_seconds: int | None = None,
+        navigation_timeout_seconds: int | None = None,
+    ) -> FlowRuntimeConfig:
+        events.append("config")
+        return config
+
+    def lock_factory(path: Path) -> RecordingLock:
+        assert path == config.lock_path
+        events.append("lock.create")
+        return RecordingLock(events)
+
+    def runtime_factory(received_config: FlowRuntimeConfig) -> RecordingRuntime:
+        assert received_config is config
+        events.append("runtime.create")
+        if failure_phase == "runtime_factory":
+            raise unknown_error
+        return RecordingRuntime(events, error=unknown_error)
+
+    def writer_factory(diagnostics_dir: Path, staging_root: Path) -> RecordingDiagnosticWriter:
+        assert diagnostics_dir == config.diagnostics_dir
+        assert staging_root == config.staging_root
+        return writer
+
+    service = FlowPreflightService(
+        _config_resolver=resolver,
+        _lock_factory=cast(LockFactory, lock_factory),
+        _runtime_factory=cast(RuntimeFactory, runtime_factory),
+        _diagnostic_writer_factory=cast(DiagnosticWriterFactory, writer_factory),
+        _now=lambda: TIMESTAMP,
+    )
+
+    result = service.preflight()
+
+    assert result == FlowPreflightResult.failure(
+        status="browser_launch_failed",
+        authenticated=False,
+        ui_ready=False,
+        failed_step="launch_browser",
+        timestamp=TIMESTAMP,
+    )
+    assert events.index("lock.release") < events.index("diagnostics.write")
+    assert writer.results == [result]
+    public_payload = result.model_dump_json(by_alias=True)
+    assert "unexpected failure" not in public_payload
+    assert raw_path not in public_payload
+
+
+def _service_tree() -> ast.Module:
+    module_path = Path(service_module.__file__)
+    return ast.parse(module_path.read_text(encoding="utf-8"))
+
+
+def test_service_constructs_public_results_only_through_contract_factories() -> None:
+    tree = _service_tree()
+    direct_result_construction = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "FlowPreflightResult"
+    ]
+    result_factory_calls = [
+        node.func.attr
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "FlowPreflightResult"
+    ]
+
+    assert direct_result_construction == []
+    assert set(result_factory_calls) == {"ready", "failure"}
+
+
+def test_service_import_and_preflight_surface_exclude_browser_targets_urls_and_app_domains() -> None:
+    tree = _service_tree()
+    imported_modules = {
+        alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Import)
+        for alias in node.names
+    } | {
+        node.module
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom) and node.module is not None
+    }
+    identifiers = {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)}
+    preflight = next(
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef) and node.name == "preflight"
+    )
+    public_options = {argument.arg for argument in (*preflight.args.args, *preflight.args.kwonlyargs)}
+
+    forbidden_module_prefixes = (
+        "playwright",
+        "auraly_pipeline.images",
+        "auraly_pipeline.jobs",
+        "auraly_pipeline.db",
+    )
+    assert all(
+        not (
+            module == forbidden_prefix or module.startswith(f"{forbidden_prefix}.")
+        )
+        for module in imported_modules
+        for forbidden_prefix in forbidden_module_prefixes
+    )
+    assert {"_FlowRuntimeTarget", "_local_test_target", "PRODUCTION_TARGET"}.isdisjoint(identifiers)
+    assert "url" not in public_options
 
 
 @pytest.mark.parametrize(
