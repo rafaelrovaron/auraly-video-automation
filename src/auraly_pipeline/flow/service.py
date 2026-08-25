@@ -126,7 +126,12 @@ class FlowPreflightService:
             writer = self._diagnostic_writer_factory(config.diagnostics_dir, config.staging_root)
             return writer.write_failure(result, evidence=evidence)
         except Exception:
-            return self._result_from_error(FlowDiagnosticSanitizationError())
+            fallback = self._result_from_error(FlowDiagnosticSanitizationError())
+            try:
+                writer = self._diagnostic_writer_factory(config.diagnostics_dir, config.staging_root)
+                return writer.write_failure(fallback, evidence=FlowFailureEvidence())
+            except Exception:
+                return self._result_from_error(FlowDiagnosticSanitizationError())
 
     def _result_from_error(self, error: FlowRuntimeError) -> FlowPreflightResult:
         return FlowPreflightResult.failure(

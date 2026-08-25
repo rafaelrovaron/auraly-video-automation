@@ -92,6 +92,24 @@ class RecordingDiagnosticWriter:
         return result
 
 
+class SequencedDiagnosticWriter(RecordingDiagnosticWriter):
+    def __init__(self, events: list[str], outcomes: list[Exception | FlowPreflightResult]) -> None:
+        super().__init__(events)
+        self._outcomes = outcomes
+
+    def write_failure(
+        self,
+        result: FlowPreflightResult,
+        *,
+        evidence: FlowFailureEvidence,
+    ) -> FlowPreflightResult:
+        super().write_failure(result, evidence=evidence)
+        outcome = self._outcomes.pop(0)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+
 class UnknownRuntimeError(RuntimeError):
     def __init__(self, *, trusted_page: bool, message: str) -> None:
         super().__init__(message)
@@ -153,12 +171,17 @@ def _service(
     lock_acquire_error: Exception | None = None,
     lock_release_error: Exception | None = None,
     writer_error: Exception | None = None,
+    writer_outcomes: list[Exception | FlowPreflightResult] | None = None,
     use_real_writer: bool = False,
 ) -> tuple[FlowPreflightService, list[str], RecordingDiagnosticWriter, list[dict[str, object]]]:
     events: list[str] = []
     resolver_calls: list[dict[str, object]] = []
     config = _config(tmp_path)
-    writer = RecordingDiagnosticWriter(events, error=writer_error)
+    writer: RecordingDiagnosticWriter
+    if writer_outcomes is None:
+        writer = RecordingDiagnosticWriter(events, error=writer_error)
+    else:
+        writer = SequencedDiagnosticWriter(events, writer_outcomes)
 
     def lock_factory(path: Path) -> RecordingLock:
         assert path == config.lock_path
@@ -333,8 +356,17 @@ def test_diagnostic_sanitization_failure_returns_fresh_result_only_failure(tmp_p
         "runtime.close",
         "lock.release",
         "diagnostics.write",
+        "diagnostics.write",
     ]
     assert writer.results[0].status == "ui_contract_failed"
+    assert writer.results[1] == FlowPreflightResult.failure(
+        status="human_intervention_required",
+        authenticated=True,
+        ui_ready=False,
+        failed_step="sanitize_diagnostics",
+        timestamp=TIMESTAMP,
+    )
+    assert writer.evidence[1] == FlowFailureEvidence()
     assert result == FlowPreflightResult.failure(
         status="human_intervention_required",
         authenticated=True,
@@ -342,6 +374,79 @@ def test_diagnostic_sanitization_failure_returns_fresh_result_only_failure(tmp_p
         failed_step="sanitize_diagnostics",
         timestamp=TIMESTAMP,
     )
+
+
+def test_writer_failure_retries_once_with_empty_evidence_and_returns_fallback_publication(
+    tmp_path: Path,
+) -> None:
+    fallback_result = FlowPreflightResult.failure(
+        status="human_intervention_required",
+        authenticated=True,
+        ui_ready=False,
+        failed_step="sanitize_diagnostics",
+        diagnostic_run_id="20260816T000000Z-1234abcd",
+        timestamp=TIMESTAMP,
+    )
+    original_evidence = FlowFailureEvidence(
+        screenshot_png=b"private screenshot",
+        raw_trace_path=tmp_path / "staging" / "private-trace.zip",
+        deny_values=("PRIVATE",),
+        trusted_page=True,
+    )
+    service, events, writer, _ = _service(
+        tmp_path,
+        runtime_error=FlowUiContractError(evidence=original_evidence),
+        writer_outcomes=[FlowDiagnosticSanitizationError(), fallback_result],
+    )
+
+    result = service.preflight()
+
+    assert result == fallback_result
+    assert events == [
+        "lock.acquire",
+        "runtime.run",
+        "runtime.close",
+        "lock.release",
+        "diagnostics.write",
+        "diagnostics.write",
+    ]
+    assert writer.results[0].status == "ui_contract_failed"
+    assert writer.results[1] == FlowPreflightResult.failure(
+        status="human_intervention_required",
+        authenticated=True,
+        ui_ready=False,
+        failed_step="sanitize_diagnostics",
+        timestamp=TIMESTAMP,
+    )
+    assert writer.evidence == [original_evidence, FlowFailureEvidence()]
+
+
+def test_two_writer_failures_return_fresh_result_only_failure_without_recursion(tmp_path: Path) -> None:
+    service, events, writer, _ = _service(
+        tmp_path,
+        runtime_error=FlowUiContractError(),
+        writer_outcomes=[FlowDiagnosticSanitizationError(), FlowDiagnosticSanitizationError()],
+    )
+
+    result = service.preflight()
+
+    assert result == FlowPreflightResult.failure(
+        status="human_intervention_required",
+        authenticated=True,
+        ui_ready=False,
+        failed_step="sanitize_diagnostics",
+        timestamp=TIMESTAMP,
+    )
+    assert events == [
+        "lock.acquire",
+        "runtime.run",
+        "runtime.close",
+        "lock.release",
+        "diagnostics.write",
+        "diagnostics.write",
+    ]
+    assert len(writer.results) == 2
+    assert writer.evidence[1] == FlowFailureEvidence()
 
 
 @pytest.mark.parametrize(
