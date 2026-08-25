@@ -20,7 +20,12 @@ from auraly_pipeline.flow import (
     FlowUnexpectedStateError,
     GoogleFlowRuntime,
 )
-from auraly_pipeline.flow.runtime import _FlowRuntimeTarget, _local_test_target
+from auraly_pipeline.flow.runtime import (
+    PRODUCTION_TARGET,
+    _FlowRuntimeTarget,
+    _classify_url,
+    _local_test_target,
+)
 from auraly_pipeline.flow import runtime as runtime_module
 from tests.flow_browser_support import fake_flow_url
 
@@ -477,6 +482,136 @@ def test_unlink_failure_after_evidence_redirect_is_sanitized_untrusted_failure(
     assert cleanup_attempts == staged_traces
 
 
+def test_close_failure_cannot_replace_raw_trace_cleanup_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The sanitization failure remains authoritative when close cleanup fails afterward."""
+    target = local_target("ready.html")
+    page = _FakePage(
+        url=target.flow_url,
+        empty_roles={"main"},
+        evidence_redirect_stage="trace",
+        redirect_url=fake_flow_url("login-required.html"),
+    )
+    context = _FakeContext(page=page, close_error=RuntimeError("private close failure"))
+    monkeypatch.setattr(runtime_module, "_remove_raw_trace", lambda _path: False)
+
+    with pytest.raises(FlowUnexpectedStateError) as caught:
+        GoogleFlowRuntime(
+            config(tmp_path), _target=target, _playwright_factory=_playwright_factory(context)
+        ).run()
+
+    assert caught.value.failed_step == "sanitize_diagnostics"
+    assert caught.value.trusted_page is False
+    assert caught.value.evidence == FlowFailureEvidence()
+
+
+def test_trace_stop_write_then_runtime_error_removes_unattached_raw_trace(tmp_path: Path) -> None:
+    """A trace finalization error cannot leak the archive it wrote before raising."""
+    target = local_target("ready.html")
+    page = _FakePage(url=target.flow_url, empty_roles={"main"})
+    context = _FakeContext(page=page, trace_stop_error=RuntimeError("private trace failure"))
+
+    with pytest.raises(FlowUiContractError) as caught:
+        GoogleFlowRuntime(
+            config(tmp_path), _target=target, _playwright_factory=_playwright_factory(context)
+        ).run()
+
+    assert caught.value.evidence.raw_trace_path is None
+    assert not list(configured_trace_paths(tmp_path))
+    assert context.close_calls == 1
+    assert context.manager_exit_calls == 1
+
+
+def test_trace_stop_write_then_keyboard_interrupt_removes_raw_trace_and_reraises(
+    tmp_path: Path,
+) -> None:
+    """Interrupts retain their original control flow only after the allocated raw trace is removed."""
+    target = local_target("ready.html")
+    page = _FakePage(url=target.flow_url, empty_roles={"main"})
+    context = _FakeContext(page=page, trace_stop_error=KeyboardInterrupt())
+
+    with pytest.raises(KeyboardInterrupt):
+        GoogleFlowRuntime(
+            config(tmp_path), _target=target, _playwright_factory=_playwright_factory(context)
+        ).run()
+
+    assert not list(configured_trace_paths(tmp_path))
+    assert context.close_calls == 1
+    assert context.manager_exit_calls == 1
+
+
+def test_close_redirect_after_attached_trace_removes_now_untrusted_raw_trace(tmp_path: Path) -> None:
+    """Close-time route loss revokes evidence that was safe when initially captured."""
+    target = local_target("ready.html")
+    page = _FakePage(url=target.flow_url, empty_roles={"main"})
+    context = _FakeContext(
+        page=page,
+        close_error=RuntimeError("private close failure"),
+        close_redirect_url=fake_flow_url("login-required.html"),
+    )
+
+    with pytest.raises(FlowUnexpectedStateError) as caught:
+        GoogleFlowRuntime(
+            config(tmp_path), _target=target, _playwright_factory=_playwright_factory(context)
+        ).run()
+
+    assert caught.value.failed_step == "close_browser"
+    assert caught.value.trusted_page is False
+    assert caught.value.evidence == FlowFailureEvidence()
+    assert not list(configured_trace_paths(tmp_path))
+    assert context.close_calls == 1
+    assert context.manager_exit_calls == 1
+
+
+def test_empty_account_masks_fail_closed_without_screenshot_or_trace_evidence(tmp_path: Path) -> None:
+    """A screenshot cannot be safely retained when no semantic account identity mask is available."""
+    target = local_target("ready.html")
+    page = _FakePage(url=target.flow_url, empty_roles={"main"}, account_mask_count=0)
+    context = _FakeContext(page=page)
+
+    with pytest.raises(FlowUnexpectedStateError) as caught:
+        GoogleFlowRuntime(
+            config(tmp_path), _target=target, _playwright_factory=_playwright_factory(context)
+        ).run()
+
+    assert caught.value.failed_step == "sanitize_diagnostics"
+    assert caught.value.trusted_page is True
+    assert caught.value.evidence.trusted_page is True
+    assert caught.value.evidence.screenshot_png is None
+    assert caught.value.evidence.raw_trace_path is None
+    assert page.screenshot_calls == []
+    assert not list(configured_trace_paths(tmp_path))
+    assert context.tracing.stop_paths == [None]
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/signin/v2/challenge/recaptcha",
+        "/o/oauth2/approval",
+        "/arbitrary-state",
+    ],
+)
+def test_production_auth_classifier_rejects_unrecognized_google_routes(path: str) -> None:
+    """Only immutable approved manual-auth paths can consume the login-timeout budget."""
+    assert _classify_url(f"https://accounts.google.com{path}?secret=value#fragment", PRODUCTION_TARGET) == (
+        "unexpected"
+    )
+
+
+def test_production_auth_classifier_keeps_ordinary_manual_auth_and_mfa_paths_recognized() -> None:
+    """The narrow immutable policy permits identifier, password, selection, and MFA challenge states."""
+    for path in (
+        "/signin/v2/identifier",
+        "/signin/v2/challenge/pwd",
+        "/signin/v2/challenge/selection",
+        "/signin/v2/challenge/totp",
+    ):
+        assert _classify_url(f"https://accounts.google.com{path}", PRODUCTION_TARGET) == "login"
+
+
 def configured_trace_paths(tmp_path: Path) -> Iterator[Path]:
     """Yield the only Task 6 raw-trace location without reading profile or diagnostics data."""
     return (tmp_path / "staging").glob("flow-trace-*.zip")
@@ -546,6 +681,7 @@ class _FakePage:
         empty_roles: set[str] | None = None,
         evidence_redirect_stage: str | None = None,
         goto_error: BaseException | None = None,
+        account_mask_count: int = 1,
     ) -> None:
         self.url = url
         self._ready = ready
@@ -555,6 +691,7 @@ class _FakePage:
         self._empty_roles = empty_roles or set()
         self._evidence_redirect_stage = evidence_redirect_stage
         self._goto_error = goto_error
+        self._account_mask_count = account_mask_count
         self.waits: list[int] = []
         self.account_locator = _FakeLocator()
         self.screenshot_calls: list[dict[str, object]] = []
@@ -579,7 +716,7 @@ class _FakePage:
         if role == "button" and name == "Google Account":
             if self._evidence_redirect_stage == "mask" and self._redirect_url is not None:
                 self.url = self._redirect_url
-            return self.account_locator
+            return _FakeLocator(candidates=[self.account_locator] * self._account_mask_count)
         return _FakeLocator()
 
     def get_by_label(self, text: str, *, exact: bool | None = None) -> _FakeLocator:
@@ -604,9 +741,11 @@ class _FakeTracing:
         *,
         page: _FakePage,
         start_error: BaseException | None = None,
+        stop_error: BaseException | None = None,
     ) -> None:
         self._page = page
         self._start_error = start_error
+        self._stop_error = stop_error
         self.start_arguments: list[dict[str, object]] = []
         self.stop_paths: list[Path | None] = []
 
@@ -621,6 +760,8 @@ class _FakeTracing:
             path.write_bytes(b"trace")
         if self._page._evidence_redirect_stage == "trace" and self._page._redirect_url is not None:
             self._page.url = self._page._redirect_url
+        if path is not None and self._stop_error is not None:
+            raise self._stop_error
 
 
 class _FakeContext:
@@ -629,11 +770,18 @@ class _FakeContext:
         *,
         page: _FakePage,
         trace_start_error: BaseException | None = None,
+        trace_stop_error: BaseException | None = None,
         close_error: BaseException | None = None,
+        close_redirect_url: str | None = None,
     ) -> None:
         self.pages = [page]
-        self.tracing = _FakeTracing(page=page, start_error=trace_start_error)
+        self.tracing = _FakeTracing(
+            page=page,
+            start_error=trace_start_error,
+            stop_error=trace_stop_error,
+        )
         self._close_error = close_error
+        self._close_redirect_url = close_redirect_url
         self.launch_arguments: dict[str, object] | None = None
         self.navigation_timeout: int | None = None
         self.close_calls = 0
@@ -644,6 +792,8 @@ class _FakeContext:
 
     def close(self) -> None:
         self.close_calls += 1
+        if self._close_redirect_url is not None:
+            self.pages[0].url = self._close_redirect_url
         if self._close_error is not None:
             raise self._close_error
 

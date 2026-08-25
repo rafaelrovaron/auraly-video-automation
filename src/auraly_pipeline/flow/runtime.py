@@ -6,6 +6,7 @@ from collections.abc import Callable
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from pathlib import Path
+import sys
 import time
 from typing import Literal, cast
 from urllib.parse import urlsplit
@@ -39,13 +40,34 @@ class _FlowRuntimeTarget:
     authentication_paths: frozenset[str] | None
 
 
+@dataclass
+class _RawTraceState:
+    """One allocated raw trace remains owned until it is attached safely or removed once."""
+
+    path: Path | None = None
+    attached: bool = False
+    cleanup_attempted: bool = False
+
+
 PRODUCTION_TARGET = _FlowRuntimeTarget(
     navigation_url=FLOW_URL,
     flow_url=FLOW_URL,
     flow_origin="https://labs.google",
     flow_path="/fx/tools/flow",
     authentication_origin="https://accounts.google.com",
-    authentication_paths=None,
+    authentication_paths=frozenset(
+        {
+            "/signin/v2/identifier",
+            "/signin/v2/challenge/pwd",
+            "/signin/v2/challenge/selection",
+            "/signin/v2/challenge/totp",
+            "/signin/v2/challenge/ipp",
+            "/signin/v2/challenge/dp",
+            "/signin/v2/challenge/sk",
+            "/signin/v2/challenge/wa",
+            "/signin/v2/challenge/az",
+        }
+    ),
 )
 
 
@@ -97,6 +119,8 @@ class GoogleFlowRuntime:
         observation: FlowRuntimeObservation | None = None
         phase: Literal["launch_browser", "navigate_flow", "verify_flow_ui"] = "launch_browser"
         close_failed = False
+        raw_trace = _RawTraceState()
+        raw_trace_cleanup_failure: FlowRuntimeError | None = None
 
         try:
             try:
@@ -161,22 +185,37 @@ class GoogleFlowRuntime:
                         page=page,
                         context=context,
                         tracing_started=tracing_started,
+                        raw_trace=raw_trace,
                     )
                     tracing_started = False
                     if evidence is None:
                         failure = self._route_safe_failure(failure, page)
                     else:
                         failure.evidence = evidence
+                        raw_trace.attached = evidence.raw_trace_path is not None
                 elif tracing_started:
                     self._stop_trace_without_artifact(context)
                     tracing_started = False
         finally:
             if tracing_started:
                 self._stop_trace_without_artifact(context)
+            if raw_trace.path is not None and not raw_trace.attached:
+                raw_trace_cleanup_failure = self._discard_raw_trace(
+                    raw_trace,
+                    trusted_page=trusted_page and page is not None and self._current_page_is_flow(page),
+                )
+                if raw_trace_cleanup_failure is not None and sys.exc_info()[0] is None:
+                    failure = raw_trace_cleanup_failure
+                    observation = None
             close_failed = self._close_resources(manager, context, playwright is not None)
 
         if close_failed:
-            failure = self._close_failure(failure, page, trusted_page)
+            close_failure = self._close_failure(failure, page, trusted_page)
+            if close_failure.trusted_page:
+                failure = close_failure
+            else:
+                cleanup_failure = self._discard_raw_trace(raw_trace, trusted_page=False)
+                failure = cleanup_failure if cleanup_failure is not None else close_failure
             observation = None
 
         if failure is not None:
@@ -255,9 +294,9 @@ class GoogleFlowRuntime:
         page: Page,
         context: BrowserContext | None,
         tracing_started: bool,
+        raw_trace: _RawTraceState,
     ) -> FlowFailureEvidence | None:
         screenshot_png: bytes | None = None
-        raw_trace_path: Path | None = None
         trace_stopped = False
         try:
             if not self._current_page_is_flow(page):
@@ -265,6 +304,13 @@ class GoogleFlowRuntime:
             masks = _screenshot_masks(page)
             if not self._current_page_is_flow(page):
                 return None
+            if not masks:
+                raise FlowUnexpectedStateError(
+                    failed_step="sanitize_diagnostics",
+                    authenticated=True,
+                    trusted_page=True,
+                    evidence=FlowFailureEvidence(trusted_page=True),
+                )
             screenshot_png = page.screenshot(
                 mask=masks,
                 mask_color="#000000",
@@ -272,28 +318,52 @@ class GoogleFlowRuntime:
             if not self._current_page_is_flow(page):
                 return None
             if tracing_started and context is not None:
-                raw_trace_path = self._config.staging_root / f"flow-trace-{uuid4().hex}.zip"
-                context.tracing.stop(path=raw_trace_path)
+                raw_trace.path = self._config.staging_root / f"flow-trace-{uuid4().hex}.zip"
+                context.tracing.stop(path=raw_trace.path)
                 trace_stopped = True
                 if not self._current_page_is_flow(page):
                     return None
+        except FlowRuntimeError:
+            raise
         except Exception:
             if not self._current_page_is_flow(page):
                 return None
+            cleanup_failure = self._discard_raw_trace(raw_trace, trusted_page=True)
+            if cleanup_failure is not None:
+                raise cleanup_failure
             return FlowFailureEvidence(trusted_page=True)
         finally:
             if not self._current_page_is_flow(page):
-                raw_trace_cleanup_failed = False
-                if raw_trace_path is not None:
-                    raw_trace_cleanup_failed = not _remove_raw_trace(raw_trace_path)
+                cleanup_failure = self._discard_raw_trace(raw_trace, trusted_page=False)
                 if tracing_started and not trace_stopped:
                     self._stop_trace_without_artifact(context)
-                if raw_trace_cleanup_failed:
-                    raise FlowUnexpectedStateError(failed_step="sanitize_diagnostics")
+                if cleanup_failure is not None:
+                    raise cleanup_failure
         return FlowFailureEvidence(
             screenshot_png=screenshot_png,
-            raw_trace_path=raw_trace_path,
+            raw_trace_path=raw_trace.path,
             trusted_page=True,
+        )
+
+    @staticmethod
+    def _discard_raw_trace(
+        raw_trace: _RawTraceState,
+        *,
+        trusted_page: bool,
+    ) -> FlowRuntimeError | None:
+        """Remove a trace that cannot safely remain attached, exactly once and without path output."""
+        if raw_trace.path is None or raw_trace.cleanup_attempted:
+            return None
+        raw_trace.cleanup_attempted = True
+        raw_trace.attached = False
+        if _remove_raw_trace(raw_trace.path):
+            raw_trace.path = None
+            return None
+        return FlowUnexpectedStateError(
+            failed_step="sanitize_diagnostics",
+            authenticated=trusted_page,
+            trusted_page=trusted_page,
+            evidence=FlowFailureEvidence(trusted_page=trusted_page),
         )
 
     def _current_page_is_flow(self, page: Page) -> bool:
