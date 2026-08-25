@@ -107,6 +107,24 @@ def test_ui_failure_captures_masked_screenshot_and_raw_trace_before_close(
     assert evidence.raw_trace_path is not None and evidence.raw_trace_path.is_file()
 
 
+@pytest.mark.parametrize("fixture", ["missing-prompt.html", "ambiguous-ui.html"])
+def test_ui_failure_preserves_attached_trace_inside_ambient_exception(
+    tmp_path: Path, fixture: str
+) -> None:
+    """A caller's handled exception cannot revoke normal trusted failure evidence."""
+    runtime = GoogleFlowRuntime(config(tmp_path), _target=local_target(fixture))
+
+    try:
+        raise RuntimeError("ambient caller exception")
+    except RuntimeError:
+        with pytest.raises(FlowUiContractError) as caught:
+            runtime.run()
+
+    evidence = caught.value.evidence
+    assert evidence.raw_trace_path is not None and evidence.raw_trace_path.is_file()
+    assert list(configured_trace_paths(tmp_path)) == [evidence.raw_trace_path]
+
+
 def test_blocking_modal_requires_human_intervention_with_trusted_evidence(tmp_path: Path) -> None:
     """A visible overlay is uncertain state, rather than a UI locator failure or automated action."""
     runtime = GoogleFlowRuntime(config(tmp_path), _target=local_target("blocking-modal.html"))

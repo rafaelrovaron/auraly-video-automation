@@ -6,7 +6,6 @@ from collections.abc import Callable
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from pathlib import Path
-import sys
 import time
 from typing import Literal, cast
 from urllib.parse import urlsplit
@@ -121,6 +120,7 @@ class GoogleFlowRuntime:
         close_failed = False
         raw_trace = _RawTraceState()
         raw_trace_cleanup_failure: FlowRuntimeError | None = None
+        base_exception_escaping = False
 
         try:
             try:
@@ -196,10 +196,12 @@ class GoogleFlowRuntime:
                 elif tracing_started:
                     self._stop_trace_without_artifact(context)
                     tracing_started = False
+        except BaseException:
+            base_exception_escaping = True
+            raise
         finally:
             if tracing_started:
                 self._stop_trace_without_artifact(context)
-            base_exception_escaping = sys.exc_info()[0] is not None
             if raw_trace.path is not None and (
                 not raw_trace.attached or base_exception_escaping
             ):
