@@ -4,6 +4,9 @@ import ast
 from datetime import UTC, datetime
 import json
 from pathlib import Path
+import re
+import subprocess
+import sys
 from typing import Literal, Protocol, TypeAlias, cast
 
 import pytest
@@ -38,6 +41,29 @@ _PUBLIC_RESULT_KEYS = {
     "trace",
     "timestamp",
 }
+_ANSI_ESCAPE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+
+
+def _run_auraly(*arguments: str) -> subprocess.CompletedProcess[str]:
+    """Run the installed entrypoint; CliRunner does not capture Rich help on Linux."""
+
+    entrypoint_name = "auraly.exe" if sys.platform == "win32" else "auraly"
+    return subprocess.run(
+        [str(Path(sys.executable).with_name(entrypoint_name)), *arguments],
+        capture_output=True,
+        check=False,
+        cwd=Path(__file__).parents[1],
+        encoding="utf-8",
+        errors="replace",
+        text=True,
+        timeout=15,
+    )
+
+
+def _help_output(invocation: subprocess.CompletedProcess[str]) -> str:
+    return _ANSI_ESCAPE.sub("", invocation.stdout + invocation.stderr)
+
+
 NonReadyStatus: TypeAlias = Literal[
     "authentication_required",
     "human_intervention_required",
@@ -304,6 +330,56 @@ def test_flow_preflight_registers_only_approved_options() -> None:
         "--login-timeout",
         "--navigation-timeout",
     }
+
+
+def test_flow_preflight_help_uses_only_approved_public_options() -> None:
+    invocation = _run_auraly("flow", "preflight", "--help")
+
+    help_output = _help_output(invocation)
+    assert invocation.returncode == 0
+    assert help_output
+    assert set(re.findall(r"--[a-z][a-z-]*", help_output)) == {
+        "--help",
+        "--profile-dir",
+        "--diagnostics-dir",
+        "--login-timeout",
+        "--navigation-timeout",
+    }
+    for forbidden in (
+        "--url",
+        "--headless",
+        "--browser",
+        "--channel",
+        "--executable-path",
+        "--generate",
+        "--download",
+        "--storage-state",
+        "--cookie",
+        "--token",
+        "generate",
+        "download",
+    ):
+        assert forbidden not in help_output.casefold()
+
+
+def test_flow_help_exposes_preflight_without_generation_commands() -> None:
+    invocation = _run_auraly("flow", "--help")
+
+    help_output = _help_output(invocation)
+    assert invocation.returncode == 0
+    assert help_output
+    assert "preflight" in help_output
+    assert "generate" not in help_output.casefold()
+
+
+def test_root_help_retains_existing_public_command_groups() -> None:
+    invocation = _run_auraly("--help")
+
+    help_output = _help_output(invocation)
+    assert invocation.returncode == 0
+    assert help_output
+    for command_name in ("campaign", "job", "voice", "image", "flow", "ingest", "validate"):
+        assert command_name in help_output
 
 
 def test_flow_group_registers_only_preflight() -> None:
