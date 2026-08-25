@@ -437,6 +437,46 @@ def test_close_failure_cannot_establish_trust_from_a_navigation_failed_page_url(
     assert caught.value.evidence == FlowFailureEvidence()
 
 
+def test_unlink_failure_after_evidence_redirect_is_sanitized_untrusted_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A remaining raw staged trace is never hidden behind an ordinary auth-timeout outcome."""
+    target = local_target("ready.html")
+    page = _FakePage(
+        url=target.flow_url,
+        empty_roles={"main"},
+        evidence_redirect_stage="trace",
+        redirect_url=fake_flow_url("login-required.html"),
+    )
+    context = _FakeContext(page=page)
+    cleanup_attempts: list[Path] = []
+
+    def fail_unlink(path: Path) -> bool:
+        cleanup_attempts.append(path)
+        return False
+
+    monkeypatch.setattr(runtime_module, "_remove_raw_trace", fail_unlink)
+
+    with pytest.raises(FlowUnexpectedStateError) as caught:
+        GoogleFlowRuntime(
+            config(tmp_path), _target=target, _playwright_factory=_playwright_factory(context)
+        ).run()
+
+    error = caught.value
+    staged_traces = list(configured_trace_paths(tmp_path))
+    assert error.status == "human_intervention_required"
+    assert error.failed_step == "sanitize_diagnostics"
+    assert error.authenticated is False
+    assert error.trusted_page is False
+    assert error.evidence.trusted_page is False
+    assert error.evidence.screenshot_png is None
+    assert error.evidence.raw_trace_path is None
+    assert str(error) == ""
+    assert len(staged_traces) == 1
+    assert cleanup_attempts == staged_traces
+
+
 def configured_trace_paths(tmp_path: Path) -> Iterator[Path]:
     """Yield the only Task 6 raw-trace location without reading profile or diagnostics data."""
     return (tmp_path / "staging").glob("flow-trace-*.zip")

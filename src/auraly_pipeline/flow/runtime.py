@@ -283,10 +283,13 @@ class GoogleFlowRuntime:
             return FlowFailureEvidence(trusted_page=True)
         finally:
             if not self._current_page_is_flow(page):
+                raw_trace_cleanup_failed = False
                 if raw_trace_path is not None:
-                    _remove_raw_trace(raw_trace_path)
+                    raw_trace_cleanup_failed = not _remove_raw_trace(raw_trace_path)
                 if tracing_started and not trace_stopped:
                     self._stop_trace_without_artifact(context)
+                if raw_trace_cleanup_failed:
+                    raise FlowUnexpectedStateError(failed_step="sanitize_diagnostics")
         return FlowFailureEvidence(
             screenshot_png=screenshot_png,
             raw_trace_path=raw_trace_path,
@@ -345,12 +348,13 @@ def _origin(url: str) -> str:
     return f"{parsed.scheme}://{parsed.netloc}"
 
 
-def _remove_raw_trace(path: Path) -> None:
-    """Best-effort removal prevents a redirect-time staged trace from becoming orphaned evidence."""
+def _remove_raw_trace(path: Path) -> bool:
+    """Remove a redirect-time trace and report whether staging no longer contains it."""
     try:
         path.unlink(missing_ok=True)
     except OSError:
-        return
+        return False
+    return True
 
 
 def _screenshot_masks(page: Page) -> list[Locator]:
