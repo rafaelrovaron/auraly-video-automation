@@ -157,12 +157,16 @@ class GoogleFlowRuntime:
             if failure is not None:
                 failure = self._route_safe_failure(failure, page)
                 if failure.trusted_page and page is not None:
-                    failure.evidence = self._capture_trusted_evidence(
+                    evidence = self._capture_trusted_evidence(
                         page=page,
                         context=context,
                         tracing_started=tracing_started,
                     )
                     tracing_started = False
+                    if evidence is None:
+                        failure = self._route_safe_failure(failure, page)
+                    else:
+                        failure.evidence = evidence
                 elif tracing_started:
                     self._stop_trace_without_artifact(context)
                     tracing_started = False
@@ -172,7 +176,7 @@ class GoogleFlowRuntime:
             close_failed = self._close_resources(manager, context, playwright is not None)
 
         if close_failed:
-            failure = self._close_failure(failure, page)
+            failure = self._close_failure(failure, page, trusted_page)
             observation = None
 
         if failure is not None:
@@ -209,9 +213,14 @@ class GoogleFlowRuntime:
         self,
         previous_failure: FlowRuntimeError | None,
         page: Page | None,
+        trusted_flow_established: bool,
     ) -> FlowUnexpectedStateError:
         """Override a result only after preserving evidence whose route remains trusted."""
-        trusted_page = page is not None and _classify_url(page.url, self._target) == "flow"
+        trusted_page = (
+            trusted_flow_established
+            and page is not None
+            and _classify_url(page.url, self._target) == "flow"
+        )
         previous_evidence = (
             previous_failure.evidence if previous_failure is not None else FlowFailureEvidence()
         )
@@ -246,24 +255,47 @@ class GoogleFlowRuntime:
         page: Page,
         context: BrowserContext | None,
         tracing_started: bool,
-    ) -> FlowFailureEvidence:
+    ) -> FlowFailureEvidence | None:
         screenshot_png: bytes | None = None
         raw_trace_path: Path | None = None
+        trace_stopped = False
         try:
+            if not self._current_page_is_flow(page):
+                return None
+            masks = _screenshot_masks(page)
+            if not self._current_page_is_flow(page):
+                return None
             screenshot_png = page.screenshot(
-                mask=_screenshot_masks(page),
+                mask=masks,
                 mask_color="#000000",
             )
+            if not self._current_page_is_flow(page):
+                return None
             if tracing_started and context is not None:
                 raw_trace_path = self._config.staging_root / f"flow-trace-{uuid4().hex}.zip"
                 context.tracing.stop(path=raw_trace_path)
+                trace_stopped = True
+                if not self._current_page_is_flow(page):
+                    return None
         except Exception:
+            if not self._current_page_is_flow(page):
+                return None
             return FlowFailureEvidence(trusted_page=True)
+        finally:
+            if not self._current_page_is_flow(page):
+                if raw_trace_path is not None:
+                    _remove_raw_trace(raw_trace_path)
+                if tracing_started and not trace_stopped:
+                    self._stop_trace_without_artifact(context)
         return FlowFailureEvidence(
             screenshot_png=screenshot_png,
             raw_trace_path=raw_trace_path,
             trusted_page=True,
         )
+
+    def _current_page_is_flow(self, page: Page) -> bool:
+        """Check the current page after each evidence-bearing browser observation."""
+        return _classify_url(page.url, self._target) == "flow"
 
     @staticmethod
     def _stop_trace_without_artifact(context: BrowserContext | None) -> None:
@@ -311,6 +343,14 @@ def _classify_url(url: str, target: _FlowRuntimeTarget) -> Literal["flow", "logi
 def _origin(url: str) -> str:
     parsed = urlsplit(url)
     return f"{parsed.scheme}://{parsed.netloc}"
+
+
+def _remove_raw_trace(path: Path) -> None:
+    """Best-effort removal prevents a redirect-time staged trace from becoming orphaned evidence."""
+    try:
+        path.unlink(missing_ok=True)
+    except OSError:
+        return
 
 
 def _screenshot_masks(page: Page) -> list[Locator]:

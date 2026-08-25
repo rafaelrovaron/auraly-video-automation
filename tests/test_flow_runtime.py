@@ -395,6 +395,48 @@ def test_trusted_failure_trace_staging_paths_are_unique(tmp_path: Path) -> None:
     assert first_trace.name != second_trace.name
 
 
+@pytest.mark.parametrize("redirect_stage", ["mask", "screenshot", "trace"])
+def test_evidence_time_login_redirect_never_retains_screenshot_or_trace(
+    tmp_path: Path,
+    redirect_stage: str,
+) -> None:
+    """Every evidence observation is bracketed by route trust checks before data can be retained."""
+    target = local_target("ready.html")
+    page = _FakePage(
+        url=target.flow_url,
+        empty_roles={"main"},
+        evidence_redirect_stage=redirect_stage,
+        redirect_url=fake_flow_url("login-required.html"),
+    )
+    context = _FakeContext(page=page)
+
+    with pytest.raises(FlowAuthenticationTimeoutError) as caught:
+        GoogleFlowRuntime(
+            config(tmp_path), _target=target, _playwright_factory=_playwright_factory(context)
+        ).run()
+
+    assert caught.value.trusted_page is False
+    assert caught.value.evidence == FlowFailureEvidence()
+    assert not list(configured_trace_paths(tmp_path))
+
+
+def test_close_failure_cannot_establish_trust_from_a_navigation_failed_page_url(tmp_path: Path) -> None:
+    """The fixed Flow URL alone never proves authentication after navigation has failed."""
+    target = local_target("ready.html")
+    page = _FakePage(url=target.flow_url, goto_error=RuntimeError("private navigation failure"))
+    context = _FakeContext(page=page, close_error=RuntimeError("private close failure"))
+
+    with pytest.raises(FlowUnexpectedStateError) as caught:
+        GoogleFlowRuntime(
+            config(tmp_path), _target=target, _playwright_factory=_playwright_factory(context)
+        ).run()
+
+    assert caught.value.failed_step == "close_browser"
+    assert caught.value.authenticated is False
+    assert caught.value.trusted_page is False
+    assert caught.value.evidence == FlowFailureEvidence()
+
+
 def configured_trace_paths(tmp_path: Path) -> Iterator[Path]:
     """Yield the only Task 6 raw-trace location without reading profile or diagnostics data."""
     return (tmp_path / "staging").glob("flow-trace-*.zip")
@@ -462,6 +504,8 @@ class _FakePage:
         redirect_on_role: str | None = None,
         redirect_url: str | None = None,
         empty_roles: set[str] | None = None,
+        evidence_redirect_stage: str | None = None,
+        goto_error: BaseException | None = None,
     ) -> None:
         self.url = url
         self._ready = ready
@@ -469,12 +513,16 @@ class _FakePage:
         self._redirect_on_role = redirect_on_role
         self._redirect_url = redirect_url
         self._empty_roles = empty_roles or set()
+        self._evidence_redirect_stage = evidence_redirect_stage
+        self._goto_error = goto_error
         self.waits: list[int] = []
         self.account_locator = _FakeLocator()
         self.screenshot_calls: list[dict[str, object]] = []
 
     def goto(self, url: str, *, wait_until: str, timeout: int) -> None:
         self.url = url
+        if self._goto_error is not None:
+            raise self._goto_error
 
     def wait_for_timeout(self, timeout: int) -> None:
         self.waits.append(timeout)
@@ -489,6 +537,8 @@ class _FakePage:
         if role in self._empty_roles:
             return _FakeLocator(candidates=[])
         if role == "button" and name == "Google Account":
+            if self._evidence_redirect_stage == "mask" and self._redirect_url is not None:
+                self.url = self._redirect_url
             return self.account_locator
         return _FakeLocator()
 
@@ -503,11 +553,19 @@ class _FakePage:
 
     def screenshot(self, **kwargs: object) -> bytes:
         self.screenshot_calls.append(kwargs)
+        if self._evidence_redirect_stage == "screenshot" and self._redirect_url is not None:
+            self.url = self._redirect_url
         return b"masked-screenshot"
 
 
 class _FakeTracing:
-    def __init__(self, *, start_error: BaseException | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        page: _FakePage,
+        start_error: BaseException | None = None,
+    ) -> None:
+        self._page = page
         self._start_error = start_error
         self.start_arguments: list[dict[str, object]] = []
         self.stop_paths: list[Path | None] = []
@@ -521,6 +579,8 @@ class _FakeTracing:
         self.stop_paths.append(path)
         if path is not None:
             path.write_bytes(b"trace")
+        if self._page._evidence_redirect_stage == "trace" and self._page._redirect_url is not None:
+            self._page.url = self._page._redirect_url
 
 
 class _FakeContext:
@@ -532,7 +592,7 @@ class _FakeContext:
         close_error: BaseException | None = None,
     ) -> None:
         self.pages = [page]
-        self.tracing = _FakeTracing(start_error=trace_start_error)
+        self.tracing = _FakeTracing(page=page, start_error=trace_start_error)
         self._close_error = close_error
         self.launch_arguments: dict[str, object] | None = None
         self.navigation_timeout: int | None = None
