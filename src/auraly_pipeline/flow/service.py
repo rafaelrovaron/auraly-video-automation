@@ -94,8 +94,8 @@ class FlowPreflightService:
             runtime_succeeded = True
         except FlowRuntimeError as error:
             runtime_error = error
-        except Exception as error:
-            runtime_error = self._unknown_error_result(error)
+        except Exception:
+            runtime_error = FlowBrowserLaunchError()
         finally:
             if lock_acquired and lock is not None:
                 try:
@@ -142,13 +142,3 @@ class FlowPreflightService:
             failed_locator=error.failed_locator,
             timestamp=self._now(),
         )
-
-    @staticmethod
-    def _unknown_error_result(error: Exception) -> FlowRuntimeError:
-        if getattr(error, "trusted_page", False) is True:
-            return FlowUnexpectedStateError(
-                failed_step="verify_flow_ui",
-                authenticated=True,
-                trusted_page=True,
-            )
-        return FlowBrowserLaunchError()

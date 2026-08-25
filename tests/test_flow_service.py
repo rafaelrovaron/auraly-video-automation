@@ -518,33 +518,34 @@ def test_two_writer_failures_return_fresh_result_only_failure_without_recursion(
 
 
 @pytest.mark.parametrize(
-    ("trusted_page", "status", "failed_step", "authenticated"),
+    "runtime_error",
     [
-        (False, "browser_launch_failed", "launch_browser", False),
-        (True, "human_intervention_required", "verify_flow_ui", True),
+        UnknownRuntimeError(
+            trusted_page=False,
+            message=r"secret exception at C:\\Users\\Rovaron\\secret-profile",
+        ),
+        UnknownRuntimeError(
+            trusted_page=True,
+            message=r"secret exception at C:\\Users\\Rovaron\\secret-profile",
+        ),
     ],
+    ids=["untrusted_attribute", "forged_trusted_attribute"],
 )
-def test_unknown_runtime_errors_map_conservatively_from_trusted_page_state(
+def test_unknown_runtime_errors_always_map_to_untrusted_launch_failure(
     tmp_path: Path,
-    trusted_page: bool,
-    status: str,
-    failed_step: str,
-    authenticated: bool,
+    runtime_error: UnknownRuntimeError,
 ) -> None:
     secret_path = r"C:\\Users\\Rovaron\\secret-profile"
     service, _, _, _ = _service(
         tmp_path,
-        runtime_error=UnknownRuntimeError(
-            trusted_page=trusted_page,
-            message=f"secret exception at {secret_path}",
-        ),
+        runtime_error=runtime_error,
     )
 
     result = service.preflight()
 
-    assert result.status == status
-    assert result.failed_step == failed_step
-    assert result.authenticated is authenticated
+    assert result.status == "browser_launch_failed"
+    assert result.failed_step == "launch_browser"
+    assert result.authenticated is False
     public_payload = result.model_dump_json(by_alias=True)
     assert "secret exception" not in public_payload
     assert secret_path not in public_payload
