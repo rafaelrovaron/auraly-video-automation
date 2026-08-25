@@ -36,10 +36,23 @@ class ConfigResolver(Protocol):
 LockFactory: TypeAlias = Callable[[Path], BrowserRuntimeLock]
 RuntimeFactory: TypeAlias = Callable[[FlowRuntimeConfig], GoogleFlowRuntime]
 DiagnosticWriterFactory: TypeAlias = Callable[[Path, Path], FlowDiagnosticWriter]
+RawTraceCleanup: TypeAlias = Callable[[Path, Path], None]
 
 
 def utc_now() -> datetime:
     return datetime.now(UTC)
+
+
+def _discard_overridden_raw_trace(raw_trace_path: Path, staging_root: Path) -> None:
+    """Discard transient raw evidence only after proving it belongs to this staging root."""
+    try:
+        resolved_root = staging_root.resolve(strict=False)
+        resolved_raw_trace = raw_trace_path.resolve(strict=False)
+        if resolved_raw_trace == resolved_root or not resolved_raw_trace.is_relative_to(resolved_root):
+            raise ValueError("raw trace is not strictly inside the staging root")
+        resolved_raw_trace.unlink(missing_ok=True)
+    except (OSError, RuntimeError, ValueError):
+        raise FlowDiagnosticSanitizationError() from None
 
 
 class FlowPreflightService:
@@ -52,12 +65,14 @@ class FlowPreflightService:
         _lock_factory: LockFactory = BrowserRuntimeLock,
         _runtime_factory: RuntimeFactory = GoogleFlowRuntime,
         _diagnostic_writer_factory: DiagnosticWriterFactory = FlowDiagnosticWriter,
+        _raw_trace_cleanup: RawTraceCleanup = _discard_overridden_raw_trace,
         _now: Callable[[], datetime] = utc_now,
     ) -> None:
         self._config_resolver = _config_resolver
         self._lock_factory = _lock_factory
         self._runtime_factory = _runtime_factory
         self._diagnostic_writer_factory = _diagnostic_writer_factory
+        self._raw_trace_cleanup = _raw_trace_cleanup
         self._now = _now
 
     def preflight(
@@ -85,6 +100,7 @@ class FlowPreflightService:
         runtime_succeeded = False
         lock: BrowserRuntimeLock | None = None
         lock_acquired = False
+        lock_release_failed = False
         try:
             lock = self._lock_factory(config.lock_path)
             lock.acquire()
@@ -102,7 +118,7 @@ class FlowPreflightService:
                     lock.release()
                 except Exception:
                     runtime_succeeded = False
-                    runtime_error = FlowUnexpectedStateError(failed_step="close_browser")
+                    lock_release_failed = True
 
         if runtime_error is None and runtime_succeeded:
             return FlowPreflightResult.ready(timestamp=self._now())
@@ -112,8 +128,21 @@ class FlowPreflightService:
             if runtime_error is not None
             else FlowUnexpectedStateError(failed_step="close_browser")
         )
+        evidence = failure.evidence
+        if lock_release_failed:
+            raw_trace_path = evidence.raw_trace_path
+            if raw_trace_path is not None:
+                try:
+                    self._raw_trace_cleanup(raw_trace_path, config.staging_root)
+                except Exception:
+                    failure = FlowDiagnosticSanitizationError()
+                else:
+                    failure = FlowUnexpectedStateError(failed_step="close_browser")
+            else:
+                failure = FlowUnexpectedStateError(failed_step="close_browser")
+            evidence = FlowFailureEvidence()
         result = self._result_from_error(failure)
-        return self._publish_failure(config, result, evidence=failure.evidence)
+        return self._publish_failure(config, result, evidence=evidence)
 
     def _publish_failure(
         self,
