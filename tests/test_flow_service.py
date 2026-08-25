@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 import json
 from pathlib import Path
 from typing import cast
+from zipfile import ZIP_STORED, ZipFile
 
 import pytest
 
@@ -33,6 +34,12 @@ from auraly_pipeline.flow.service import (
 
 
 TIMESTAMP = datetime(2026, 8, 16, tzinfo=UTC)
+PNG_BYTES = (
+    b"\x89PNG\r\n\x1a\n"
+    b"\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89"
+    b"\x00\x00\x00\rIDATx\x9cc```\xf8\x0f\x00\x01\x04\x01\x00_\xe5\xc3K"
+    b"\x00\x00\x00\x00IEND\xaeB`\x82"
+)
 
 
 class RecordingLock:
@@ -498,47 +505,81 @@ def _service_tree() -> ast.Module:
     return ast.parse(module_path.read_text(encoding="utf-8"))
 
 
+def _resolved_imports(tree: ast.Module) -> set[str]:
+    package = ("auraly_pipeline", "flow")
+    imports: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imports.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            base = () if node.level == 0 else package[: len(package) - node.level + 1]
+            module = () if node.module is None else tuple(node.module.split("."))
+            imports.add(".".join((*base, *module)))
+    return imports
+
+
+def _result_constructor_names(tree: ast.Module) -> set[str]:
+    return {
+        alias.asname or alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom)
+        for alias in node.names
+        if alias.name == "FlowPreflightResult"
+    }
+
+
 def test_service_constructs_public_results_only_through_contract_factories() -> None:
     tree = _service_tree()
+    constructor_names = _result_constructor_names(tree)
     direct_result_construction = [
         node
         for node in ast.walk(tree)
         if isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Name)
-        and node.func.id == "FlowPreflightResult"
+        and (
+            (isinstance(node.func, ast.Name) and node.func.id in constructor_names)
+            or (isinstance(node.func, ast.Attribute) and node.func.attr == "FlowPreflightResult")
+        )
     ]
     result_factory_calls = [
         node.func.attr
         for node in ast.walk(tree)
         if isinstance(node, ast.Call)
         and isinstance(node.func, ast.Attribute)
-        and isinstance(node.func.value, ast.Name)
-        and node.func.value.id == "FlowPreflightResult"
+        and (
+            (isinstance(node.func.value, ast.Name) and node.func.value.id in constructor_names)
+            or (
+                isinstance(node.func.value, ast.Attribute)
+                and node.func.value.attr == "FlowPreflightResult"
+            )
+        )
     ]
 
     assert direct_result_construction == []
+    assert constructor_names == {"FlowPreflightResult"}
     assert set(result_factory_calls) == {"ready", "failure"}
 
 
 def test_service_import_and_preflight_surface_exclude_browser_targets_urls_and_app_domains() -> None:
     tree = _service_tree()
-    imported_modules = {
-        alias.name
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Import)
-        for alias in node.names
-    } | {
-        node.module
-        for node in ast.walk(tree)
-        if isinstance(node, ast.ImportFrom) and node.module is not None
-    }
+    imported_modules = _resolved_imports(tree)
     identifiers = {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)}
-    preflight = next(
-        node
+    private_target_attributes = {
+        node.attr
         for node in ast.walk(tree)
-        if isinstance(node, ast.FunctionDef) and node.name == "preflight"
-    )
-    public_options = {argument.arg for argument in (*preflight.args.args, *preflight.args.kwonlyargs)}
+        if isinstance(node, ast.Attribute)
+        and node.attr in {"_target", "_FlowRuntimeTarget", "_local_test_target", "PRODUCTION_TARGET"}
+    }
+    public_option_names = {
+        argument.arg
+        for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef) and not node.name.startswith("_")
+        for argument in (*node.args.args, *node.args.kwonlyargs)
+    }
+    public_attribute_names = {
+        node.attr
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Attribute) and not node.attr.startswith("_")
+    }
 
     forbidden_module_prefixes = (
         "playwright",
@@ -554,7 +595,9 @@ def test_service_import_and_preflight_surface_exclude_browser_targets_urls_and_a
         for forbidden_prefix in forbidden_module_prefixes
     )
     assert {"_FlowRuntimeTarget", "_local_test_target", "PRODUCTION_TARGET"}.isdisjoint(identifiers)
-    assert "url" not in public_options
+    assert private_target_attributes == set()
+    assert all("url" not in name.casefold() for name in public_option_names)
+    assert all("url" not in name.casefold() for name in public_attribute_names)
 
 
 @pytest.mark.parametrize(
@@ -583,6 +626,70 @@ def test_every_non_ready_runtime_result_publishes_result_json_after_lock_release
     published = json.loads((run_dir / "result.json").read_text(encoding="utf-8"))
     assert published["status"] == result.status
     assert published["failedStep"] == result.failed_step
+
+
+def _trusted_ui_evidence(tmp_path: Path) -> FlowFailureEvidence:
+    raw_trace = tmp_path / "staging" / "raw" / "trace.zip"
+    raw_trace.parent.mkdir(parents=True)
+    with ZipFile(raw_trace, "w", compression=ZIP_STORED) as archive:
+        archive.writestr("trace.trace", '{"type":"event"}\n')
+    return FlowFailureEvidence(
+        screenshot_png=PNG_BYTES,
+        raw_trace_path=raw_trace,
+        trusted_page=True,
+    )
+
+
+@pytest.mark.parametrize(
+    ("failure_kind", "status"),
+    [
+        ("runtime_busy", "runtime_busy"),
+        ("browser_launch", "browser_launch_failed"),
+        ("authentication", "authentication_required"),
+        ("unexpected", "human_intervention_required"),
+        ("ui_contract", "ui_contract_failed"),
+        ("sanitize", "human_intervention_required"),
+    ],
+)
+def test_valid_config_typed_failures_publish_real_result_json_and_return_run_id(
+    tmp_path: Path,
+    failure_kind: str,
+    status: str,
+) -> None:
+    runtime_error_by_kind: dict[str, FlowRuntimeError] = {
+        "browser_launch": FlowBrowserLaunchError(),
+        "authentication": FlowAuthenticationTimeoutError(),
+        "unexpected": FlowUnexpectedStateError(failed_step="navigate_flow"),
+        "ui_contract": FlowUiContractError(evidence=_trusted_ui_evidence(tmp_path)),
+        "sanitize": FlowDiagnosticSanitizationError(),
+    }
+    service, _, _, _ = _service(
+        tmp_path,
+        lock_acquire_error=FlowRuntimeBusyError() if failure_kind == "runtime_busy" else None,
+        runtime_error=runtime_error_by_kind.get(failure_kind),
+        use_real_writer=True,
+    )
+
+    result = service.preflight()
+
+    assert result.status == status
+    assert result.timestamp == TIMESTAMP
+    assert result.diagnostic_run_id is not None
+    run_dir = _config(tmp_path).diagnostics_dir / result.diagnostic_run_id
+    published = json.loads((run_dir / "result.json").read_text(encoding="utf-8"))
+    assert published["diagnosticRunId"] == result.diagnostic_run_id
+    assert published["status"] == status
+    if failure_kind == "ui_contract":
+        assert result.screenshot == "screenshot.png"
+        assert result.trace == "trace.zip"
+        assert (run_dir / "screenshot.png").is_file()
+        assert (run_dir / "trace.zip").is_file()
+    else:
+        assert result.screenshot is None
+        assert result.trace is None
+    if failure_kind == "runtime_busy":
+        assert result.screenshot is None
+        assert result.trace is None
 
 
 def test_diagnostic_sanitization_failure_returns_fresh_result_only_failure(tmp_path: Path) -> None:
