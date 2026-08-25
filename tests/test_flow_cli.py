@@ -4,10 +4,11 @@ import ast
 from datetime import UTC, datetime
 import json
 from pathlib import Path
-import re
 from typing import Literal, Protocol, TypeAlias, cast
 
 import pytest
+import typer.main
+from typer.core import TyperGroup
 from typer.testing import CliRunner
 
 from auraly_pipeline.cli import app
@@ -292,12 +293,12 @@ def test_flow_preflight_rejects_non_positive_timeouts_without_calling_service(
     assert calls == 0
 
 
-def test_flow_preflight_help_exposes_only_approved_options() -> None:
-    invocation = runner.invoke(app, ["flow", "preflight", "--help"])
+def test_flow_preflight_registers_only_approved_options() -> None:
+    root_command = cast(TyperGroup, typer.main.get_command(app))
+    flow_command = cast(TyperGroup, root_command.commands["flow"])
+    command = flow_command.commands["preflight"]
 
-    assert invocation.exit_code == 0
-    assert set(re.findall(r"--[a-z-]+", invocation.output)) == {
-        "--help",
+    assert {option for parameter in command.params for option in parameter.opts} == {
         "--profile-dir",
         "--diagnostics-dir",
         "--login-timeout",
@@ -305,12 +306,11 @@ def test_flow_preflight_help_exposes_only_approved_options() -> None:
     }
 
 
-def test_flow_group_help_contains_only_preflight() -> None:
-    invocation = runner.invoke(app, ["flow", "--help"])
+def test_flow_group_registers_only_preflight() -> None:
+    root_command = cast(TyperGroup, typer.main.get_command(app))
+    command = cast(TyperGroup, root_command.commands["flow"])
 
-    assert invocation.exit_code == 0
-    assert "preflight" in invocation.stdout
-    assert "generate" not in invocation.stdout
+    assert set(command.commands) == {"preflight"}
 
 
 def test_flow_preflight_does_not_leak_private_paths_or_exception_text(
@@ -376,9 +376,8 @@ def test_flow_cli_depends_only_on_public_preflight_boundary() -> None:
     assert not any(isinstance(node, ast.Try) for node in ast.walk(flow_command))
 
 
-def test_root_help_retains_existing_command_groups() -> None:
-    invocation = runner.invoke(app, ["--help"])
+def test_root_command_retains_existing_command_groups() -> None:
+    root_command = cast(TyperGroup, typer.main.get_command(app))
 
-    assert invocation.exit_code == 0
-    for command in ("campaign", "job", "voice", "image", "flow", "ingest", "validate"):
-        assert command in invocation.stdout
+    for command_name in ("campaign", "job", "voice", "image", "flow", "ingest", "validate"):
+        assert command_name in root_command.commands
