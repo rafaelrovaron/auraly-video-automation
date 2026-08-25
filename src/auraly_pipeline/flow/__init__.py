@@ -3,6 +3,7 @@
 from .config import FlowRuntimeConfig, resolve_flow_runtime_config
 from .diagnostics import FlowDiagnosticWriter, sanitize_trace_archive
 from .lock import BrowserRuntimeLock
+from .runtime import GoogleFlowRuntime
 from .domain import (
     FLOW_URL,
     FlowAuthenticationTimeoutError,
@@ -38,6 +39,7 @@ __all__ = [
     "FlowRuntimeObservation",
     "FlowUiContractError",
     "FlowUnexpectedStateError",
+    "GoogleFlowRuntime",
     "resolve_flow_runtime_config",
     "sanitize_trace_archive",
 ]
