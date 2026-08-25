@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import ast
 from datetime import UTC, datetime
+import errno
 import json
+import os
 from pathlib import Path
-from typing import cast
+from typing import Callable, cast
 from zipfile import ZIP_STORED, ZipFile
 
 import pytest
@@ -200,6 +202,7 @@ def _service(
     writer_error: Exception | None = None,
     writer_outcomes: list[Exception | FlowPreflightResult] | None = None,
     use_real_writer: bool = False,
+    raw_trace_cleanup: Callable[[Path, Path], None] | None = None,
 ) -> tuple[FlowPreflightService, list[str], RecordingDiagnosticWriter, list[dict[str, object]]]:
     events: list[str] = []
     resolver_calls: list[dict[str, object]] = []
@@ -227,15 +230,26 @@ def _service(
         assert staging_root == config.staging_root
         return writer
 
-    service = FlowPreflightService(
-        _config_resolver=_resolver(config, resolver_calls),
-        _lock_factory=cast(LockFactory, lock_factory),
-        _runtime_factory=cast(RuntimeFactory, runtime_factory),
-        _diagnostic_writer_factory=(
-            FlowDiagnosticWriter if use_real_writer else cast(DiagnosticWriterFactory, writer_factory)
-        ),
-        _now=lambda: TIMESTAMP,
+    diagnostic_writer_factory = (
+        FlowDiagnosticWriter if use_real_writer else cast(DiagnosticWriterFactory, writer_factory)
     )
+    if raw_trace_cleanup is None:
+        service = FlowPreflightService(
+            _config_resolver=_resolver(config, resolver_calls),
+            _lock_factory=cast(LockFactory, lock_factory),
+            _runtime_factory=cast(RuntimeFactory, runtime_factory),
+            _diagnostic_writer_factory=diagnostic_writer_factory,
+            _now=lambda: TIMESTAMP,
+        )
+    else:
+        service = FlowPreflightService(
+            _config_resolver=_resolver(config, resolver_calls),
+            _lock_factory=cast(LockFactory, lock_factory),
+            _runtime_factory=cast(RuntimeFactory, runtime_factory),
+            _diagnostic_writer_factory=diagnostic_writer_factory,
+            _raw_trace_cleanup=raw_trace_cleanup,
+            _now=lambda: TIMESTAMP,
+        )
     return service, events, writer, resolver_calls
 
 
@@ -859,12 +873,15 @@ def test_unknown_runtime_errors_always_map_to_untrusted_launch_failure(
 def test_lock_release_failure_discards_trusted_evidence_and_overrides_runtime_failure(
     tmp_path: Path,
 ) -> None:
+    raw_trace = tmp_path / "staging" / "private-trace.zip"
+    raw_trace.parent.mkdir(parents=True)
+    raw_trace.write_bytes(b"private raw trace")
     service, events, writer, _ = _service(
         tmp_path,
         runtime_error=FlowUiContractError(
             evidence=FlowFailureEvidence(
                 screenshot_png=b"private screenshot",
-                raw_trace_path=tmp_path / "staging" / "private-trace.zip",
+                raw_trace_path=raw_trace,
                 deny_values=("PRIVATE",),
                 trusted_page=True,
             )
@@ -888,4 +905,209 @@ def test_lock_release_failure_discards_trusted_evidence_and_overrides_runtime_fa
         failed_step="close_browser",
         timestamp=TIMESTAMP,
     )
+    assert not raw_trace.exists()
+    assert result.screenshot is None
+    assert result.trace is None
+    serialized = result.model_dump_json(by_alias=True)
+    assert "private screenshot" not in serialized
+    assert str(raw_trace) not in serialized
+    assert "PRIVATE" not in serialized
     assert writer.evidence == [FlowFailureEvidence()]
+
+
+@pytest.mark.parametrize("path_kind", ["staging_root", "outside_staging"])
+def test_lock_release_failure_refuses_unsafe_raw_trace_paths(
+    tmp_path: Path,
+    path_kind: str,
+) -> None:
+    config = _config(tmp_path)
+    config.staging_root.mkdir()
+    if path_kind == "staging_root":
+        raw_trace = config.staging_root
+    else:
+        raw_trace = tmp_path / "outside" / "private-trace.zip"
+        raw_trace.parent.mkdir()
+        raw_trace.write_bytes(b"private raw trace")
+
+    service, _, writer, _ = _service(
+        tmp_path,
+        runtime_error=FlowUiContractError(
+            evidence=FlowFailureEvidence(raw_trace_path=raw_trace, trusted_page=True)
+        ),
+        lock_release_error=RuntimeError("release failed"),
+    )
+
+    result = service.preflight()
+
+    assert result == FlowPreflightResult.failure(
+        status="human_intervention_required",
+        authenticated=True,
+        ui_ready=False,
+        failed_step="sanitize_diagnostics",
+        timestamp=TIMESTAMP,
+    )
+    assert raw_trace.exists()
+    assert result.screenshot is None
+    assert result.trace is None
+    assert str(raw_trace) not in result.model_dump_json(by_alias=True)
+    assert writer.evidence == [FlowFailureEvidence()]
+
+
+def test_create_symlink_skips_posix_permission_error_without_winerror(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def reject_symlink(source: Path, target: Path, *, target_is_directory: bool) -> None:
+        del source, target, target_is_directory
+        raise OSError(errno.EPERM, "operation not permitted")
+
+    monkeypatch.setattr(os, "symlink", reject_symlink)
+
+    with pytest.raises(pytest.skip.Exception):
+        _create_symlink_or_skip(tmp_path / "outside", tmp_path / "staging-link")
+
+
+def test_create_symlink_reraises_unrecognized_os_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    expected_error = OSError(errno.EIO, "input/output error")
+
+    def reject_symlink(source: Path, target: Path, *, target_is_directory: bool) -> None:
+        del source, target, target_is_directory
+        raise expected_error
+
+    monkeypatch.setattr(os, "symlink", reject_symlink)
+
+    with pytest.raises(OSError) as raised:
+        _create_symlink_or_skip(tmp_path / "outside", tmp_path / "staging-link")
+
+    assert raised.value is expected_error
+
+
+def _create_symlink_or_skip(source: Path, target: Path) -> None:
+    try:
+        os.symlink(source, target, target_is_directory=False)
+    except OSError as error:
+        winerror = getattr(error, "winerror", None)
+        if winerror == 1314 or error.errno in {errno.EPERM, errno.ENOTSUP}:
+            pytest.skip(
+                f"symlink creation is unsupported: winerror={winerror!r}, errno={error.errno!r}"
+            )
+        raise
+
+
+def test_lock_release_failure_refuses_staging_symlink_to_outside_raw_trace(
+    tmp_path: Path,
+) -> None:
+    config = _config(tmp_path)
+    config.staging_root.mkdir()
+    outside_raw_trace = tmp_path / "outside" / "private-trace.zip"
+    outside_raw_trace.parent.mkdir()
+    outside_raw_trace.write_bytes(b"private raw trace")
+    staged_link = config.staging_root / "private-trace.zip"
+    _create_symlink_or_skip(outside_raw_trace, staged_link)
+
+    service, _, writer, _ = _service(
+        tmp_path,
+        runtime_error=FlowUiContractError(
+            evidence=FlowFailureEvidence(raw_trace_path=staged_link, trusted_page=True)
+        ),
+        lock_release_error=RuntimeError("release failed"),
+    )
+
+    result = service.preflight()
+
+    assert result == FlowPreflightResult.failure(
+        status="human_intervention_required",
+        authenticated=True,
+        ui_ready=False,
+        failed_step="sanitize_diagnostics",
+        timestamp=TIMESTAMP,
+    )
+    assert staged_link.is_symlink()
+    assert outside_raw_trace.exists()
+    assert result.screenshot is None
+    assert result.trace is None
+    assert str(staged_link) not in result.model_dump_json(by_alias=True)
+    assert str(outside_raw_trace) not in result.model_dump_json(by_alias=True)
+    assert writer.evidence == [FlowFailureEvidence()]
+
+
+def test_lock_release_failure_maps_raw_trace_cleanup_error_to_sanitize_diagnostics(
+    tmp_path: Path,
+) -> None:
+    raw_trace = tmp_path / "staging" / "private-trace.zip"
+    raw_trace.parent.mkdir(parents=True)
+    raw_trace.write_bytes(b"private raw trace")
+    cleanup_calls: list[tuple[Path, Path]] = []
+
+    def reject_cleanup(path: Path, staging_root: Path) -> None:
+        cleanup_calls.append((path, staging_root))
+        raise OSError(r"private cleanup error at C:\\secret")
+
+    service, _, writer, _ = _service(
+        tmp_path,
+        runtime_error=FlowUiContractError(
+            evidence=FlowFailureEvidence(raw_trace_path=raw_trace, trusted_page=True)
+        ),
+        lock_release_error=RuntimeError("release failed"),
+        raw_trace_cleanup=reject_cleanup,
+    )
+
+    result = service.preflight()
+
+    assert cleanup_calls == [(raw_trace, _config(tmp_path).staging_root)]
+    assert raw_trace.exists()
+    assert result == FlowPreflightResult.failure(
+        status="human_intervention_required",
+        authenticated=True,
+        ui_ready=False,
+        failed_step="sanitize_diagnostics",
+        timestamp=TIMESTAMP,
+    )
+    serialized = result.model_dump_json(by_alias=True)
+    assert "private cleanup error" not in serialized
+    assert r"C:\\secret" not in serialized
+    assert result.screenshot is None
+    assert result.trace is None
+    assert writer.evidence == [FlowFailureEvidence()]
+
+
+def test_successful_lock_release_leaves_trusted_raw_trace_for_diagnostics_only(
+    tmp_path: Path,
+) -> None:
+    raw_trace = tmp_path / "staging" / "raw" / "trace.zip"
+    raw_trace.parent.mkdir(parents=True)
+    with ZipFile(raw_trace, "w", compression=ZIP_STORED) as archive:
+        archive.writestr("trace.trace", '{"type":"event"}\n')
+    cleanup_calls: list[tuple[Path, Path]] = []
+
+    def reject_service_cleanup(path: Path, staging_root: Path) -> None:
+        cleanup_calls.append((path, staging_root))
+        raise AssertionError("service cleanup must not run after a successful release")
+
+    service, events, _, _ = _service(
+        tmp_path,
+        runtime_error=FlowUiContractError(
+            evidence=FlowFailureEvidence(
+                screenshot_png=PNG_BYTES,
+                raw_trace_path=raw_trace,
+                trusted_page=True,
+            )
+        ),
+        use_real_writer=True,
+        raw_trace_cleanup=reject_service_cleanup,
+    )
+
+    result = service.preflight()
+
+    assert events == ["lock.acquire", "runtime.run", "runtime.close", "lock.release"]
+    assert cleanup_calls == []
+    assert result.screenshot == "screenshot.png"
+    assert result.trace == "trace.zip"
+    assert result.diagnostic_run_id is not None
+    run_dir = _config(tmp_path).diagnostics_dir / result.diagnostic_run_id
+    assert (run_dir / "screenshot.png").is_file()
+    assert (run_dir / "trace.zip").is_file()
+    assert not raw_trace.exists()
