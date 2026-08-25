@@ -23,6 +23,20 @@ from auraly_pipeline.flow import (
 runner = CliRunner()
 
 _TIMESTAMP = datetime(2026, 8, 25, tzinfo=UTC)
+_PUBLIC_RESULT_KEYS = {
+    "schemaVersion",
+    "success",
+    "status",
+    "flowUrl",
+    "authenticated",
+    "uiReady",
+    "failedStep",
+    "failedLocator",
+    "diagnosticRunId",
+    "screenshot",
+    "trace",
+    "timestamp",
+}
 NonReadyStatus: TypeAlias = Literal[
     "authentication_required",
     "human_intervention_required",
@@ -125,7 +139,8 @@ def test_flow_preflight_serializes_aliases_and_explicit_ready_nulls(
     invocation = runner.invoke(app, ["flow", "preflight"])
     payload = json.loads(invocation.stdout)
 
-    assert {"schemaVersion", "flowUrl", "uiReady", "failedStep", "failedLocator", "diagnosticRunId"} <= set(payload)
+    assert payload["success"] is True
+    assert set(payload) == _PUBLIC_RESULT_KEYS
     assert {"schema_version", "flow_url", "ui_ready"}.isdisjoint(payload)
     assert {key: payload[key] for key in ("failedStep", "failedLocator", "diagnosticRunId", "screenshot", "trace")} == {
         "failedStep": None,
@@ -170,8 +185,17 @@ def test_flow_preflight_keeps_result_only_failure_nulls(
 
     payload = json.loads(runner.invoke(app, ["flow", "preflight"]).stdout)
 
-    assert payload["screenshot"] is None
-    assert payload["trace"] is None
+    assert set(payload) == _PUBLIC_RESULT_KEYS
+    assert payload["failedStep"] == "await_manual_authentication"
+    assert {
+        key: payload[key]
+        for key in ("failedLocator", "diagnosticRunId", "screenshot", "trace")
+    } == {
+        "failedLocator": None,
+        "diagnosticRunId": None,
+        "screenshot": None,
+        "trace": None,
+    }
 
 
 def test_flow_preflight_forwards_all_options_once(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -325,6 +349,13 @@ def test_flow_cli_depends_only_on_public_preflight_boundary() -> None:
         if isinstance(node, (ast.Import, ast.ImportFrom))
         for alias in node.names
     }
+    preflight_service_imports = [
+        (node.module, alias.name)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom)
+        for alias in node.names
+        if alias.name == "FlowPreflightService"
+    ]
     flow_command = next(
         node
         for node in tree.body
@@ -334,10 +365,12 @@ def test_flow_cli_depends_only_on_public_preflight_boundary() -> None:
         "GoogleFlowRuntime",
         "BrowserRuntimeLock",
         "FlowDiagnosticWriter",
+        "FlowRuntimeConfig",
         "resolve_flow_runtime_config",
     }
 
     assert "FlowPreflightService" in names
+    assert preflight_service_imports == [("auraly_pipeline.flow", "FlowPreflightService")]
     assert lower_level_names.isdisjoint(names)
     assert lower_level_names.isdisjoint(imported_names)
     assert not any(isinstance(node, ast.Try) for node in ast.walk(flow_command))
