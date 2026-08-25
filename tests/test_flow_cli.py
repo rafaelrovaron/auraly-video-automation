@@ -296,7 +296,7 @@ def test_flow_preflight_help_exposes_only_approved_options() -> None:
     invocation = runner.invoke(app, ["flow", "preflight", "--help"])
 
     assert invocation.exit_code == 0
-    assert set(re.findall(r"--[a-z-]+", invocation.stdout)) == {
+    assert set(re.findall(r"--[a-z-]+", invocation.output)) == {
         "--help",
         "--profile-dir",
         "--diagnostics-dir",
