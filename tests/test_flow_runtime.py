@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 from collections.abc import Callable
 from contextlib import AbstractContextManager, contextmanager
 from pathlib import Path
@@ -20,6 +21,7 @@ from auraly_pipeline.flow import (
     GoogleFlowRuntime,
 )
 from auraly_pipeline.flow.runtime import _FlowRuntimeTarget, _local_test_target
+from auraly_pipeline.flow import runtime as runtime_module
 from tests.flow_browser_support import fake_flow_url
 
 
@@ -206,6 +208,12 @@ def test_launches_only_persistent_headed_context_with_the_validated_profile(tmp_
         "headless": False,
     }
     assert context.navigation_timeout == runtime_config.navigation_timeout_seconds * 1000
+    assert context.tracing.start_arguments == [
+        {"screenshots": False, "snapshots": False, "sources": False}
+    ]
+    assert context.tracing.stop_paths == [None]
+    assert context.close_calls == 1
+    assert context.manager_exit_calls == 1
 
 
 def test_close_failure_turns_would_be_ready_result_into_close_browser_intervention(
@@ -226,6 +234,172 @@ def test_close_failure_turns_would_be_ready_result_into_close_browser_interventi
     assert caught.value.trusted_page is True
 
 
+def test_login_redirect_before_ui_observation_never_returns_ready_or_captures_evidence(
+    tmp_path: Path,
+) -> None:
+    """A post-auth redirect invalidates the prior trust decision before overlay/UI observation."""
+    target = local_target("ready.html")
+    page = _FakePage(
+        url=target.flow_url,
+        redirect_on_role="dialog",
+        redirect_url=fake_flow_url("login-required.html"),
+    )
+    context = _FakeContext(page=page)
+
+    with pytest.raises(FlowAuthenticationTimeoutError) as caught:
+        GoogleFlowRuntime(
+            config(tmp_path), _target=target, _playwright_factory=_playwright_factory(context)
+        ).run()
+
+    assert caught.value.trusted_page is False
+    assert caught.value.evidence == FlowFailureEvidence()
+    assert page.screenshot_calls == []
+    assert context.tracing.stop_paths == [None]
+
+
+def test_login_redirect_during_locator_failure_never_captures_trusted_evidence(tmp_path: Path) -> None:
+    """A locator error cannot retain trust when the page changed to login during observation."""
+    target = local_target("ready.html")
+    page = _FakePage(
+        url=target.flow_url,
+        redirect_on_role="main",
+        redirect_url=fake_flow_url("login-required.html"),
+        empty_roles={"main"},
+    )
+    context = _FakeContext(page=page)
+
+    with pytest.raises(FlowAuthenticationTimeoutError) as caught:
+        GoogleFlowRuntime(
+            config(tmp_path), _target=target, _playwright_factory=_playwright_factory(context)
+        ).run()
+
+    assert caught.value.trusted_page is False
+    assert caught.value.evidence == FlowFailureEvidence()
+    assert page.screenshot_calls == []
+    assert context.tracing.stop_paths == [None]
+
+
+def test_keyboard_interrupt_during_tracing_closes_context_and_manager_then_reraises(
+    tmp_path: Path,
+) -> None:
+    """Cleanup is in a finally path and must not turn an interrupt into a typed runtime result."""
+    target = local_target("ready.html")
+    context = _FakeContext(
+        page=_FakePage(url=target.flow_url),
+        trace_start_error=KeyboardInterrupt(),
+    )
+
+    with pytest.raises(KeyboardInterrupt):
+        GoogleFlowRuntime(
+            config(tmp_path), _target=target, _playwright_factory=_playwright_factory(context)
+        ).run()
+
+    assert context.close_calls == 1
+    assert context.manager_exit_calls == 1
+
+
+def test_close_failure_after_trusted_ui_failure_preserves_managed_evidence_and_trust_consistency(
+    tmp_path: Path,
+) -> None:
+    """A close failure may override status, but must retain the eligible trace as managed evidence."""
+    target = local_target("ready.html")
+    page = _FakePage(url=target.flow_url, empty_roles={"main"})
+    context = _FakeContext(page=page, close_error=RuntimeError("private close failure"))
+
+    with pytest.raises(FlowUnexpectedStateError) as caught:
+        GoogleFlowRuntime(
+            config(tmp_path), _target=target, _playwright_factory=_playwright_factory(context)
+        ).run()
+
+    evidence = caught.value.evidence
+    assert caught.value.failed_step == "close_browser"
+    assert caught.value.trusted_page is True
+    assert evidence.trusted_page is True
+    assert evidence.raw_trace_path is not None and evidence.raw_trace_path.is_file()
+    assert list(configured_trace_paths(tmp_path)) == [evidence.raw_trace_path]
+    assert context.close_calls == 1
+    assert context.manager_exit_calls == 1
+
+
+def test_runtime_uses_only_observation_methods_and_exact_evidence_calls(tmp_path: Path) -> None:
+    """The source and fake boundary prevent interaction drift and pin evidence call semantics."""
+    forbidden = {
+        "click",
+        "dblclick",
+        "fill",
+        "type",
+        "press",
+        "check",
+        "uncheck",
+        "select_option",
+        "set_input_files",
+        "expect_download",
+    }
+    tree = ast.parse(Path(runtime_module.__file__).read_text(encoding="utf-8"))
+    called_attributes = {
+        call.func.attr
+        for call in ast.walk(tree)
+        if isinstance(call, ast.Call) and isinstance(call.func, ast.Attribute)
+    }
+    assert forbidden.isdisjoint(called_attributes)
+
+    target = local_target("ready.html")
+    page = _FakePage(url=target.flow_url, empty_roles={"main"})
+    context = _FakeContext(page=page)
+    runtime_config = config(tmp_path)
+
+    with pytest.raises(FlowUiContractError):
+        GoogleFlowRuntime(
+            runtime_config, _target=target, _playwright_factory=_playwright_factory(context)
+        ).run()
+
+    assert context.tracing.start_arguments == [
+        {"screenshots": False, "snapshots": False, "sources": False}
+    ]
+    assert len(context.tracing.stop_paths) == 1
+    trace_path = context.tracing.stop_paths[0]
+    assert trace_path is not None and trace_path.parent == runtime_config.staging_root
+    assert trace_path.is_file()
+    assert page.screenshot_calls == [
+        {"mask": [page.account_locator], "mask_color": "#000000"}
+    ]
+    assert context.close_calls == 1
+    assert context.manager_exit_calls == 1
+
+
+def test_trusted_failure_trace_staging_paths_are_unique(tmp_path: Path) -> None:
+    """Every raw trace has a unique staging name, so concurrent diagnostic publication cannot collide."""
+    first_root = tmp_path / "first"
+    second_root = tmp_path / "second"
+    first_root.mkdir()
+    second_root.mkdir()
+    first_config = config(first_root)
+    second_config = config(second_root)
+    target = local_target("ready.html")
+    first_context = _FakeContext(page=_FakePage(url=target.flow_url, empty_roles={"main"}))
+    second_context = _FakeContext(page=_FakePage(url=target.flow_url, empty_roles={"main"}))
+
+    with pytest.raises(FlowUiContractError) as first:
+        GoogleFlowRuntime(
+            first_config, _target=target, _playwright_factory=_playwright_factory(first_context)
+        ).run()
+    with pytest.raises(FlowUiContractError) as second:
+        GoogleFlowRuntime(
+            second_config, _target=target, _playwright_factory=_playwright_factory(second_context)
+        ).run()
+
+    first_trace = first.value.evidence.raw_trace_path
+    second_trace = second.value.evidence.raw_trace_path
+    assert first_trace is not None and first_trace.parent == first_config.staging_root
+    assert second_trace is not None and second_trace.parent == second_config.staging_root
+    assert first_trace.name != second_trace.name
+
+
+def configured_trace_paths(tmp_path: Path) -> Iterator[Path]:
+    """Yield the only Task 6 raw-trace location without reading profile or diagnostics data."""
+    return (tmp_path / "staging").glob("flow-trace-*.zip")
+
+
 @contextmanager
 def _raising_playwright_factory() -> Iterator[Playwright]:
     raise RuntimeError("private launch failure")
@@ -237,7 +411,10 @@ def _playwright_factory(
 ) -> Callable[[], AbstractContextManager[Playwright]]:
     @contextmanager
     def factory() -> Iterator[Playwright]:
-        yield cast(Playwright, _FakePlaywright(context))
+        try:
+            yield cast(Playwright, _FakePlaywright(context))
+        finally:
+            context.manager_exit_calls += 1
 
     return factory
 
@@ -276,11 +453,25 @@ class _FakeLocator:
 
 
 class _FakePage:
-    def __init__(self, *, url: str, ready: bool = False, clock: _Clock | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        url: str,
+        ready: bool = False,
+        clock: _Clock | None = None,
+        redirect_on_role: str | None = None,
+        redirect_url: str | None = None,
+        empty_roles: set[str] | None = None,
+    ) -> None:
         self.url = url
         self._ready = ready
         self._clock = clock
+        self._redirect_on_role = redirect_on_role
+        self._redirect_url = redirect_url
+        self._empty_roles = empty_roles or set()
         self.waits: list[int] = []
+        self.account_locator = _FakeLocator()
+        self.screenshot_calls: list[dict[str, object]] = []
 
     def goto(self, url: str, *, wait_until: str, timeout: int) -> None:
         self.url = url
@@ -291,8 +482,14 @@ class _FakePage:
             self._clock.advance(timeout)
 
     def get_by_role(self, role: str, *, name: str | None = None, exact: bool | None = None) -> _FakeLocator:
+        if role == self._redirect_on_role and self._redirect_url is not None:
+            self.url = self._redirect_url
         if role in {"dialog", "alertdialog"}:
             return _FakeLocator(candidates=[])
+        if role in self._empty_roles:
+            return _FakeLocator(candidates=[])
+        if role == "button" and name == "Google Account":
+            return self.account_locator
         return _FakeLocator()
 
     def get_by_label(self, text: str, *, exact: bool | None = None) -> _FakeLocator:
@@ -304,19 +501,24 @@ class _FakePage:
     def get_by_text(self, text: str, *, exact: bool | None = None) -> _FakeLocator:
         return _FakeLocator()
 
-    def screenshot(self, **_: object) -> bytes:
+    def screenshot(self, **kwargs: object) -> bytes:
+        self.screenshot_calls.append(kwargs)
         return b"masked-screenshot"
 
 
 class _FakeTracing:
     def __init__(self, *, start_error: BaseException | None = None) -> None:
         self._start_error = start_error
+        self.start_arguments: list[dict[str, object]] = []
+        self.stop_paths: list[Path | None] = []
 
-    def start(self, **_: object) -> None:
+    def start(self, **kwargs: object) -> None:
+        self.start_arguments.append(kwargs)
         if self._start_error is not None:
             raise self._start_error
 
     def stop(self, *, path: Path | None = None) -> None:
+        self.stop_paths.append(path)
         if path is not None:
             path.write_bytes(b"trace")
 
@@ -334,11 +536,14 @@ class _FakeContext:
         self._close_error = close_error
         self.launch_arguments: dict[str, object] | None = None
         self.navigation_timeout: int | None = None
+        self.close_calls = 0
+        self.manager_exit_calls = 0
 
     def set_default_navigation_timeout(self, timeout: int) -> None:
         self.navigation_timeout = timeout
 
     def close(self) -> None:
+        self.close_calls += 1
         if self._close_error is not None:
             raise self._close_error
 

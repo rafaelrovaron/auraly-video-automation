@@ -96,69 +96,83 @@ class GoogleFlowRuntime:
         failure: FlowRuntimeError | None = None
         observation: FlowRuntimeObservation | None = None
         phase: Literal["launch_browser", "navigate_flow", "verify_flow_ui"] = "launch_browser"
+        close_failed = False
 
         try:
-            manager = self._playwright_factory()
-            playwright = manager.__enter__()
-            context = playwright.chromium.launch_persistent_context(
-                user_data_dir=self._config.profile_dir,
-                headless=False,
-            )
-            context.set_default_navigation_timeout(self._config.navigation_timeout_seconds * 1000)
-            page = context.pages[0] if context.pages else context.new_page()
-            phase = "navigate_flow"
-            page.goto(
-                self._target.navigation_url,
-                wait_until="domcontentloaded",
-                timeout=self._config.navigation_timeout_seconds * 1000,
-            )
-            self._await_authenticated_flow_page(page)
-            trusted_page = True
-
-            context.tracing.start(screenshots=False, snapshots=False, sources=False)
-            tracing_started = True
-            phase = "verify_flow_ui"
-            if blocking_overlay_present(page):
-                raise FlowUnexpectedStateError(
-                    failed_step="verify_flow_ui",
-                    authenticated=True,
-                    trusted_page=True,
+            try:
+                manager = self._playwright_factory()
+                playwright = manager.__enter__()
+                context = playwright.chromium.launch_persistent_context(
+                    user_data_dir=self._config.profile_dir,
+                    headless=False,
                 )
-            for locator_name in REQUIRED_FLOW_LOCATORS:
-                resolve_required_locator(page, locator_name)
-
-            context.tracing.stop()
-            tracing_started = False
-            observation = FlowRuntimeObservation()
-        except FlowRuntimeError as caught:
-            failure = caught
-        except Exception:
-            if trusted_page:
-                failure = FlowUnexpectedStateError(
-                    failed_step="verify_flow_ui",
-                    authenticated=True,
-                    trusted_page=True,
+                context.set_default_navigation_timeout(self._config.navigation_timeout_seconds * 1000)
+                page = context.pages[0] if context.pages else context.new_page()
+                phase = "navigate_flow"
+                page.goto(
+                    self._target.navigation_url,
+                    wait_until="domcontentloaded",
+                    timeout=self._config.navigation_timeout_seconds * 1000,
                 )
-            elif phase == "navigate_flow":
-                failure = FlowBrowserLaunchError(failed_step="navigate_flow")
-            else:
-                failure = FlowBrowserLaunchError()
+                self._await_authenticated_flow_page(page)
+                trusted_page = True
 
-        if failure is not None and trusted_page and page is not None:
-            failure.evidence = self._capture_trusted_evidence(
-                page=page,
-                context=context,
-                tracing_started=tracing_started,
-            )
-            tracing_started = False
+                context.tracing.start(screenshots=False, snapshots=False, sources=False)
+                tracing_started = True
+                phase = "verify_flow_ui"
+                self._require_current_flow_page(page)
+                if blocking_overlay_present(page):
+                    raise FlowUnexpectedStateError(
+                        failed_step="verify_flow_ui",
+                        authenticated=True,
+                        trusted_page=True,
+                    )
+                for locator_name in REQUIRED_FLOW_LOCATORS:
+                    self._require_current_flow_page(page)
+                    resolve_required_locator(page, locator_name)
+                    self._require_current_flow_page(page)
+                self._require_current_flow_page(page)
 
-        close_failed = self._close_resources(manager, context, playwright is not None)
+                context.tracing.stop()
+                tracing_started = False
+                self._require_current_flow_page(page)
+                observation = FlowRuntimeObservation()
+            except FlowRuntimeError as caught:
+                failure = self._route_safe_failure(caught, page)
+            except Exception:
+                if trusted_page:
+                    failure = self._route_safe_failure(
+                        FlowUnexpectedStateError(
+                            failed_step="verify_flow_ui",
+                            authenticated=True,
+                            trusted_page=True,
+                        ),
+                        page,
+                    )
+                elif phase == "navigate_flow":
+                    failure = FlowBrowserLaunchError(failed_step="navigate_flow")
+                else:
+                    failure = FlowBrowserLaunchError()
+
+            if failure is not None:
+                failure = self._route_safe_failure(failure, page)
+                if failure.trusted_page and page is not None:
+                    failure.evidence = self._capture_trusted_evidence(
+                        page=page,
+                        context=context,
+                        tracing_started=tracing_started,
+                    )
+                    tracing_started = False
+                elif tracing_started:
+                    self._stop_trace_without_artifact(context)
+                    tracing_started = False
+        finally:
+            if tracing_started:
+                self._stop_trace_without_artifact(context)
+            close_failed = self._close_resources(manager, context, playwright is not None)
+
         if close_failed:
-            failure = FlowUnexpectedStateError(
-                failed_step="close_browser",
-                authenticated=trusted_page,
-                trusted_page=trusted_page,
-            )
+            failure = self._close_failure(failure, page)
             observation = None
 
         if failure is not None:
@@ -166,6 +180,53 @@ class GoogleFlowRuntime:
         if observation is None:
             raise FlowUnexpectedStateError(failed_step="close_browser", trusted_page=trusted_page)
         return observation
+
+    def _require_current_flow_page(self, page: Page) -> None:
+        """Fail closed when a once-authenticated page redirects during observation."""
+        classification = _classify_url(page.url, self._target)
+        if classification == "flow":
+            return
+        if classification == "login":
+            raise FlowAuthenticationTimeoutError()
+        raise FlowUnexpectedStateError(failed_step="navigate_flow")
+
+    def _route_safe_failure(
+        self,
+        failure: FlowRuntimeError,
+        page: Page | None,
+    ) -> FlowRuntimeError:
+        """Remove trusted status when the current page no longer matches the Flow route."""
+        if page is None or not failure.trusted_page:
+            return failure
+        classification = _classify_url(page.url, self._target)
+        if classification == "flow":
+            return failure
+        if classification == "login":
+            return FlowAuthenticationTimeoutError()
+        return FlowUnexpectedStateError(failed_step="navigate_flow")
+
+    def _close_failure(
+        self,
+        previous_failure: FlowRuntimeError | None,
+        page: Page | None,
+    ) -> FlowUnexpectedStateError:
+        """Override a result only after preserving evidence whose route remains trusted."""
+        trusted_page = page is not None and _classify_url(page.url, self._target) == "flow"
+        previous_evidence = (
+            previous_failure.evidence if previous_failure is not None else FlowFailureEvidence()
+        )
+        evidence = FlowFailureEvidence(
+            screenshot_png=previous_evidence.screenshot_png if trusted_page else None,
+            raw_trace_path=previous_evidence.raw_trace_path if trusted_page else None,
+            deny_values=previous_evidence.deny_values,
+            trusted_page=trusted_page,
+        )
+        return FlowUnexpectedStateError(
+            failed_step="close_browser",
+            authenticated=trusted_page,
+            trusted_page=trusted_page,
+            evidence=evidence,
+        )
 
     def _await_authenticated_flow_page(self, page: Page) -> None:
         deadline = self._monotonic() + self._config.login_timeout_seconds
@@ -205,6 +266,16 @@ class GoogleFlowRuntime:
         )
 
     @staticmethod
+    def _stop_trace_without_artifact(context: BrowserContext | None) -> None:
+        """Terminate tracing after an untrusted state without retaining a credential-bearing archive."""
+        if context is None:
+            return
+        try:
+            context.tracing.stop()
+        except BaseException:
+            return
+
+    @staticmethod
     def _close_resources(
         manager: AbstractContextManager[Playwright] | None,
         context: BrowserContext | None,
@@ -214,12 +285,12 @@ class GoogleFlowRuntime:
         if context is not None:
             try:
                 context.close()
-            except Exception:
+            except BaseException:
                 close_failed = True
         if entered and manager is not None:
             try:
                 manager.__exit__(None, None, None)
-            except Exception:
+            except BaseException:
                 close_failed = True
         return close_failed
 
