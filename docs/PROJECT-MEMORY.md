@@ -868,3 +868,24 @@ estabelece evidência independente de CI. Nenhuma delas estabelece `PROVIDER_VER
   do GitHub Actions foram aprovados no commit `1a96525` como evidência independente de CI;
 - provider verification é `N/A` para Goal 4A: runtime Google Flow, browser, downloads reais e QC
   pertencem aos Goals 4B–4D.
+
+### Goal 4B — Google Flow Browser Runtime (`IMPLEMENTED` / `LOCAL_VERIFIED`)
+
+- Google Flow + Python Playwright continua sendo o único caminho de imagem; o runtime é uma
+  fronteira de preflight independente, com rota de produção fixa e seam de alvo local privada,
+  exclusiva para testes;
+- somente Chromium gerenciado pelo Playwright, em modo headed, usa o perfil persistente externo
+  `~/.auraly/browser-profiles/google-flow`; não há fallback para browser do sistema;
+- autenticação e MFA são manuais. A configuração, os diagnósticos em
+  `~/.auraly/diagnostics/google-flow` e o lock fixo
+  `~/.auraly/locks/google-flow-browser.lock` permanecem fora do repositório;
+- um lock exclusivo não bloqueante do sistema operacional limita a concorrência a um browser. O
+  contrato de locators semânticos e a revalidação de rota confiável falham fechados;
+- o preflight não modifica o provider: não clica em Create/Generate, não insere prompt, não faz
+  upload/download e não inspeciona candidatas ou QC. Credenciais não são automatizadas;
+- screenshots, traces e resultados são sanitizados e diagnósticos são append-only; browser e
+  contexto são fechados antes do resultado. A CLI expõe contrato JSON estável de seis status e
+  respectivos códigos de saída;
+- a cobertura determinística inclui Linux/Xvfb e Windows. Goal 4C (geração/download) e Goal 4D
+  (canário de provider/QC) continuam pendentes. Nenhum preflight ao vivo foi executado: isso não
+  estabelece `BROWSER_PREFLIGHT_VERIFIED`, nem `PROVIDER_VERIFIED`.

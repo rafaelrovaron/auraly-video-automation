@@ -45,6 +45,7 @@ Provider verification is never inferred from mocks, local tests, or a commit nam
 | 3 — Voice Master | yes | yes | pending/unproven |
 | 3C — ElevenLabs Provider Canary | pending | pending | pending |
 | 4A — Image Domain & Persistence | yes | yes | not applicable |
+| 4B — Google Flow Browser Runtime | yes | yes | not established by Goal 4B |
 
 ## Resulting sequence
 
@@ -55,9 +56,9 @@ Goal 2   Persistent Job Orchestration                 IMPLEMENTED / LOCAL_VERIFI
 Goal 3   Voice Master                                 IMPLEMENTED / LOCAL_VERIFIED
 Goal 3C  ElevenLabs Provider Canary                   PENDING
 Goal 4A  Image Domain & Persistence                   IMPLEMENTED / LOCAL_VERIFIED / PROVIDER N/A
-Goal 4B  Google Flow Browser Runtime
-Goal 4C  Flow Generation, Download & Recovery
-Goal 4D  Image QC, Review & Provider Canary
+Goal 4B  Google Flow Browser Runtime                 IMPLEMENTED / LOCAL_VERIFIED / PROVIDER NOT ESTABLISHED
+Goal 4C  Flow Generation, Download & Recovery        PENDING
+Goal 4D  Image QC, Review & Provider Canary          PENDING
 Goal 5A  HeyGen Preflight & Asset Upload
 Goal 5B  Avatar Look & Avatar III Verification
 Goal 5C  Video Generation, Polling & Source QC
@@ -411,6 +412,10 @@ Goals 0–2 and approved Goal 4A design/plan. Goal 3C is not a dependency.
 ---
 
 ## Goal 4B — Google Flow Browser Runtime
+
+**Status:** `IMPLEMENTED` / `LOCAL_VERIFIED`. `PROVIDER_VERIFIED` is not established by Goal 4B;
+`BROWSER_PREFLIGHT_VERIFIED` remains not run/not established pending a separately approved,
+operator-attended live preflight.
 
 ### Objective
 

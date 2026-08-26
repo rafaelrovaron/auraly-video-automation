@@ -403,9 +403,22 @@ roadmap/process alignment
 ```
 
 Goal 4 foi decomposto em `4A Image Domain & Persistence`, `4B Google Flow Browser Runtime`,
-`4C Flow Generation, Download & Recovery` e `4D Image QC, Review & Provider Canary`. Goal 4A
-está `IMPLEMENTED` e `LOCAL_VERIFIED`, com evidência independente de CI Linux full e Windows
-focused aprovada no commit `1a96525`. Goals 4B, 4C e 4D permanecem planejados. Specs e planos
-futuros vivem respectivamente em
-`docs/superpowers/specs/` e `docs/superpowers/plans/`; qualquer canário real continua exigindo
-aprovação explícita.
+`4C Flow Generation, Download & Recovery` e `4D Image QC, Review & Provider Canary`. Goals 4A e
+4B estão `IMPLEMENTED` e `LOCAL_VERIFIED`; 4C e 4D permanecem planejados. Specs e planos futuros
+vivem respectivamente em `docs/superpowers/specs/` e `docs/superpowers/plans/`; qualquer canário
+real continua exigindo aprovação explícita.
+
+### Goal 4B — Google Flow Browser Runtime
+
+`auraly flow preflight` é uma fronteira independente, somente de observação, para verificar o
+browser e a UI do Flow. Ele usa Chromium persistente e headed, gerenciado pelo Playwright, com um
+perfil dedicado fora do repositório; login e MFA permanecem exclusivamente manuais. O contrato
+semântico da UI falha fechado, o lock nativo limita o browser a uma execução concorrente, e os
+diagnósticos sanitizados são publicados de forma append-only. Browser e contexto são fechados antes
+do retorno, e a CLI sempre expõe JSON estável.
+
+Esta etapa não clica em Create/Generate, não insere prompt, não faz upload ou download, não
+inspeciona candidatas, não executa QC, não integra `ImageGeneration` e não realiza geração no
+provider. `PROVIDER_VERIFIED` não foi estabelecido; `BROWSER_PREFLIGHT_VERIFIED` permanece não
+executado/não estabelecido até um preflight ao vivo, explicitamente aprovado e acompanhado por um
+operador.
