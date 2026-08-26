@@ -201,6 +201,24 @@ def _json_echo(payload: dict[str, object]) -> None:
     typer.echo(json.dumps(payload, indent=2, ensure_ascii=False, sort_keys=True, allow_nan=False))
 
 
+def _flow_preflight_boundary_failure_payload() -> dict[str, object]:
+    """Build the fixed safe payload used only when the public Flow boundary itself fails."""
+    return {
+        "schemaVersion": "1.0",
+        "success": False,
+        "status": "browser_launch_failed",
+        "flowUrl": "https://labs.google/fx/tools/flow",
+        "authenticated": False,
+        "uiReady": False,
+        "failedStep": "validate_config",
+        "failedLocator": None,
+        "diagnosticRunId": None,
+        "screenshot": None,
+        "trace": None,
+        "timestamp": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+    }
+
+
 @flow_app.command("preflight")
 def flow_preflight_command(
     profile_dir: Annotated[Path | None, typer.Option("--profile-dir")] = None,
@@ -209,14 +227,20 @@ def flow_preflight_command(
     navigation_timeout: Annotated[int | None, typer.Option("--navigation-timeout", min=1)] = None,
 ) -> None:
     """Inspect the Google Flow browser runtime without generating media."""
-    result = FlowPreflightService().preflight(
-        profile_dir=profile_dir,
-        diagnostics_dir=diagnostics_dir,
-        login_timeout_seconds=login_timeout,
-        navigation_timeout_seconds=navigation_timeout,
-    )
-    _json_echo(result.model_dump(by_alias=True, mode="json", exclude_none=False))
-    if not result.success:
+    try:
+        result = FlowPreflightService().preflight(
+            profile_dir=profile_dir,
+            diagnostics_dir=diagnostics_dir,
+            login_timeout_seconds=login_timeout,
+            navigation_timeout_seconds=navigation_timeout,
+        )
+        payload = result.model_dump(by_alias=True, mode="json", exclude_none=False)
+        success = result.success
+        _json_echo(payload)
+    except Exception:
+        _json_echo(_flow_preflight_boundary_failure_payload())
+        raise typer.Exit(code=1) from None
+    if not success:
         raise typer.Exit(code=1)
 
 

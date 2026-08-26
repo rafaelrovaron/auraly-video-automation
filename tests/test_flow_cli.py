@@ -415,6 +415,82 @@ def test_flow_preflight_does_not_leak_private_paths_or_exception_text(
         assert unsafe not in output
 
 
+@pytest.mark.parametrize("failure_point", ["service", "serialization"])
+def test_flow_preflight_unexpected_exception_emits_one_sanitized_boundary_failure(
+    failure_point: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    private_error = RuntimeError(r"SECRET from C:\Users\PrivateUser\profile")
+
+    def unexpected_preflight(*_args: object, **_kwargs: object) -> FlowPreflightResult:
+        if failure_point == "service":
+            raise private_error
+
+        class UnserializableResult:
+            success = False
+
+            @staticmethod
+            def model_dump(**_kwargs: object) -> dict[str, object]:
+                raise private_error
+
+        return cast(FlowPreflightResult, UnserializableResult())
+
+    monkeypatch.setattr(FlowPreflightService, "preflight", unexpected_preflight)
+
+    invocation = runner.invoke(
+        app,
+        [
+            "flow",
+            "preflight",
+            "--profile-dir",
+            r"C:\Users\PrivateUser\profile",
+            "--diagnostics-dir",
+            "/home/private-user/diagnostics",
+        ],
+    )
+
+    assert invocation.exit_code == 1
+    assert invocation.stdout.rstrip().count("{") == 1
+    payload = json.loads(invocation.stdout)
+    timestamp = datetime.fromisoformat(payload.pop("timestamp").replace("Z", "+00:00"))
+    assert timestamp.tzinfo is not None
+    assert payload == {
+        "schemaVersion": "1.0",
+        "success": False,
+        "status": "browser_launch_failed",
+        "flowUrl": "https://labs.google/fx/tools/flow",
+        "authenticated": False,
+        "uiReady": False,
+        "failedStep": "validate_config",
+        "failedLocator": None,
+        "diagnosticRunId": None,
+        "screenshot": None,
+        "trace": None,
+    }
+    output = invocation.stdout + invocation.stderr
+    for unsafe in (
+        r"C:\Users\PrivateUser",
+        "/home/private-user",
+        "Traceback",
+        "RuntimeError",
+        "SECRET",
+    ):
+        assert unsafe not in output
+
+
+def test_flow_preflight_preserves_keyboard_interrupt(monkeypatch: pytest.MonkeyPatch) -> None:
+    def interrupted_preflight(*_args: object, **_kwargs: object) -> FlowPreflightResult:
+        raise KeyboardInterrupt()
+
+    monkeypatch.setattr(FlowPreflightService, "preflight", interrupted_preflight)
+
+    invocation = runner.invoke(app, ["flow", "preflight"])
+
+    assert invocation.exit_code == 130
+    assert isinstance(invocation.exception, SystemExit)
+    assert invocation.stdout == ""
+
+
 def test_flow_cli_depends_only_on_public_preflight_boundary() -> None:
     cli_path = Path(__file__).parents[1] / "src" / "auraly_pipeline" / "cli.py"
     tree = ast.parse(cli_path.read_text(encoding="utf-8"))
@@ -449,7 +525,12 @@ def test_flow_cli_depends_only_on_public_preflight_boundary() -> None:
     assert preflight_service_imports == [("auraly_pipeline.flow", "FlowPreflightService")]
     assert lower_level_names.isdisjoint(names)
     assert lower_level_names.isdisjoint(imported_names)
-    assert not any(isinstance(node, ast.Try) for node in ast.walk(flow_command))
+    try_nodes = [node for node in ast.walk(flow_command) if isinstance(node, ast.Try)]
+    assert len(try_nodes) == 1
+    assert len(try_nodes[0].handlers) == 1
+    handler_type = try_nodes[0].handlers[0].type
+    assert isinstance(handler_type, ast.Name)
+    assert handler_type.id == "Exception"
 
 
 def test_root_command_retains_existing_command_groups() -> None:
