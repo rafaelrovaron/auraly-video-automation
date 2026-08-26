@@ -335,8 +335,13 @@ class GoogleFlowRuntime:
                 return None
             cleanup_failure = self._discard_raw_trace(raw_trace, trusted_page=True)
             if cleanup_failure is not None:
-                raise cleanup_failure
-            return FlowFailureEvidence(trusted_page=True)
+                raise cleanup_failure from None
+            raise FlowUnexpectedStateError(
+                failed_step="sanitize_diagnostics",
+                authenticated=True,
+                trusted_page=True,
+                evidence=FlowFailureEvidence(trusted_page=True),
+            ) from None
         finally:
             if not self._current_page_is_flow(page):
                 cleanup_failure = self._discard_raw_trace(raw_trace, trusted_page=False)

@@ -525,21 +525,59 @@ def test_close_failure_cannot_replace_raw_trace_cleanup_failure(
     assert caught.value.evidence == FlowFailureEvidence()
 
 
-def test_trace_stop_write_then_runtime_error_removes_unattached_raw_trace(tmp_path: Path) -> None:
-    """A trace finalization error cannot leak the archive it wrote before raising."""
+def test_screenshot_error_fails_closed_as_sanitization_failure_without_orphan(
+    tmp_path: Path,
+) -> None:
+    """A trusted screenshot failure cannot downgrade the original failure to empty evidence."""
     target = local_target("ready.html")
-    page = _FakePage(url=target.flow_url, empty_roles={"main"})
-    context = _FakeContext(page=page, trace_stop_error=RuntimeError("private trace failure"))
+    page = _FakePage(
+        url=target.flow_url,
+        empty_roles={"main"},
+        screenshot_error=RuntimeError(r"private C:\Users\operator\profile"),
+    )
+    context = _FakeContext(page=page)
 
-    with pytest.raises(FlowUiContractError) as caught:
+    with pytest.raises(FlowUnexpectedStateError) as caught:
         GoogleFlowRuntime(
             config(tmp_path), _target=target, _playwright_factory=_playwright_factory(context)
         ).run()
 
-    assert caught.value.evidence.raw_trace_path is None
+    error = caught.value
+    assert error.status == "human_intervention_required"
+    assert error.failed_step == "sanitize_diagnostics"
+    assert error.authenticated is True
+    assert error.trusted_page is True
+    assert error.evidence == FlowFailureEvidence(trusted_page=True)
+    assert not list(configured_trace_paths(tmp_path))
+    assert context.tracing.stop_paths == [None]
+    assert context.close_calls == 1
+    assert context.manager_exit_calls == 1
+    assert str(error) == ""
+
+
+def test_trace_stop_error_fails_closed_as_sanitization_failure_without_orphan(
+    tmp_path: Path,
+) -> None:
+    """A trace finalization error cannot leak its archive or retain the original UI failure."""
+    target = local_target("ready.html")
+    page = _FakePage(url=target.flow_url, empty_roles={"main"})
+    context = _FakeContext(page=page, trace_stop_error=RuntimeError("private trace failure"))
+
+    with pytest.raises(FlowUnexpectedStateError) as caught:
+        GoogleFlowRuntime(
+            config(tmp_path), _target=target, _playwright_factory=_playwright_factory(context)
+        ).run()
+
+    error = caught.value
+    assert error.status == "human_intervention_required"
+    assert error.failed_step == "sanitize_diagnostics"
+    assert error.authenticated is True
+    assert error.trusted_page is True
+    assert error.evidence == FlowFailureEvidence(trusted_page=True)
     assert not list(configured_trace_paths(tmp_path))
     assert context.close_calls == 1
     assert context.manager_exit_calls == 1
+    assert str(error) == ""
 
 
 def test_trace_stop_write_then_keyboard_interrupt_removes_raw_trace_and_reraises(
@@ -730,6 +768,7 @@ class _FakePage:
         evidence_redirect_stage: str | None = None,
         goto_error: BaseException | None = None,
         account_mask_count: int = 1,
+        screenshot_error: BaseException | None = None,
     ) -> None:
         self.url = url
         self._ready = ready
@@ -740,6 +779,7 @@ class _FakePage:
         self._evidence_redirect_stage = evidence_redirect_stage
         self._goto_error = goto_error
         self._account_mask_count = account_mask_count
+        self._screenshot_error = screenshot_error
         self.waits: list[int] = []
         self.account_locator = _FakeLocator()
         self.screenshot_calls: list[dict[str, object]] = []
@@ -778,6 +818,8 @@ class _FakePage:
 
     def screenshot(self, **kwargs: object) -> bytes:
         self.screenshot_calls.append(kwargs)
+        if self._screenshot_error is not None:
+            raise self._screenshot_error
         if self._evidence_redirect_stage == "screenshot" and self._redirect_url is not None:
             self.url = self._redirect_url
         return b"masked-screenshot"
