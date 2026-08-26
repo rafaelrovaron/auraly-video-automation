@@ -43,6 +43,47 @@ REPOSITORY_ROOT = Path(__file__).parents[1].resolve()
 FLOW_SOURCE_ROOT = REPOSITORY_ROOT / "src" / "auraly_pipeline" / "flow"
 FIXED_NOW = datetime(2026, 8, 25, 12, 0, tzinfo=UTC)
 APPROVED_FIXTURES = frozenset(path.name for path in FAKE_FLOW_ROOT.glob("*.html"))
+FORBIDDEN_FLOW_IMPORT_ROOTS = frozenset(
+    {
+        "auraly_pipeline.jobs",
+        "auraly_pipeline.images",
+        "auraly_pipeline.campaigns",
+        "sqlalchemy",
+    }
+)
+FORBIDDEN_BROWSER_CALLS = frozenset(
+    {
+        "click",
+        "dblclick",
+        "tap",
+        "fill",
+        "type",
+        "press",
+        "check",
+        "uncheck",
+        "select_option",
+        "set_input_files",
+        "drag_and_drop",
+        "drag_to",
+        "expect_download",
+        "expect_file_chooser",
+        "dispatch_event",
+        "insert_text",
+        "set_checked",
+        "clear",
+        "focus",
+        "blur",
+        "hover",
+        "select_text",
+        "set_content",
+        "add_init_script",
+        "add_script_tag",
+        "add_style_tag",
+        "evaluate",
+        "evaluate_handle",
+        "storage_state",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -69,6 +110,14 @@ class _MaskObservation:
     semantic_masks: tuple[Locator, ...] = ()
     screenshot_masks: tuple[object, ...] = ()
     mask_color: object | None = None
+
+
+@dataclass(frozen=True)
+class _FlowSourceInventory:
+    module_paths: tuple[str, ...]
+    imports: frozenset[str]
+    called_attributes: frozenset[str]
+    playwright_importers: frozenset[str]
 
 
 def _local_paths(tmp_path: Path) -> _LocalPaths:
@@ -315,13 +364,35 @@ def _module_tree(path: Path) -> ast.Module:
     return ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
 
 
-def _resolved_imports(tree: ast.Module) -> set[str]:
+def _resolved_imports(tree: ast.Module, *, package: str) -> set[str]:
     imports: set[str] = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             imports.update(alias.name for alias in node.names)
         elif isinstance(node, ast.ImportFrom) and node.module is not None:
-            imports.add(node.module)
+            package_parts = package.split(".")
+            if node.level:
+                parent_count = node.level - 1
+                if parent_count >= len(package_parts):
+                    continue
+                base_parts = package_parts[: len(package_parts) - parent_count]
+                resolved_module = ".".join((*base_parts, node.module))
+            else:
+                resolved_module = node.module
+            imports.add(resolved_module)
+            imports.update(
+                f"{resolved_module}.{alias.name}" for alias in node.names if alias.name != "*"
+            )
+        elif isinstance(node, ast.ImportFrom):
+            package_parts = package.split(".")
+            parent_count = node.level - 1
+            if node.level == 0 or parent_count >= len(package_parts):
+                continue
+            resolved_module = ".".join(package_parts[: len(package_parts) - parent_count])
+            imports.add(resolved_module)
+            imports.update(
+                f"{resolved_module}.{alias.name}" for alias in node.names if alias.name != "*"
+            )
     return imports
 
 
@@ -331,6 +402,51 @@ def _called_attributes(tree: ast.Module) -> set[str]:
         for node in ast.walk(tree)
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
     }
+
+
+def _scan_flow_source(source_root: Path) -> _FlowSourceInventory:
+    module_paths: list[str] = []
+    imports: set[str] = set()
+    called_attributes: set[str] = set()
+    playwright_importers: set[str] = set()
+    for path in sorted(source_root.rglob("*.py")):
+        relative_path = path.relative_to(source_root)
+        module_paths.append(relative_path.as_posix())
+        module_parts = list(relative_path.with_suffix("").parts)
+        is_package = bool(module_parts and module_parts[-1] == "__init__")
+        if is_package:
+            module_parts.pop()
+        module_name = ".".join(("auraly_pipeline", "flow", *module_parts))
+        package = module_name if is_package else module_name.rpartition(".")[0]
+        tree = _module_tree(path)
+        module_imports = _resolved_imports(tree, package=package)
+        imports.update(module_imports)
+        called_attributes.update(_called_attributes(tree))
+        if any(
+            imported == "playwright" or imported.startswith("playwright.")
+            for imported in module_imports
+        ):
+            playwright_importers.add(relative_path.as_posix())
+    return _FlowSourceInventory(
+        module_paths=tuple(module_paths),
+        imports=frozenset(imports),
+        called_attributes=frozenset(called_attributes),
+        playwright_importers=frozenset(playwright_importers),
+    )
+
+
+def _flow_source_findings(source_root: Path) -> set[str]:
+    inventory = _scan_flow_source(source_root)
+    findings = {
+        f"import:{forbidden}"
+        for imported in inventory.imports
+        for forbidden in FORBIDDEN_FLOW_IMPORT_ROOTS
+        if imported == forbidden or imported.startswith(f"{forbidden}.")
+    }
+    findings.update(
+        f"call:{attribute}" for attribute in inventory.called_attributes & FORBIDDEN_BROWSER_CALLS
+    )
+    return findings
 
 
 def _function_node(tree: ast.Module, name: str) -> ast.FunctionDef:
@@ -421,63 +537,48 @@ def test_authenticated_ui_failure_publishes_only_sanitized_evidence(
     assert not paths.profile.resolve().is_relative_to(REPOSITORY_ROOT)
 
 
+def test_flow_source_scan_recurses_into_nested_modules(tmp_path: Path) -> None:
+    """A forbidden module cannot hide below the immediate Flow package directory."""
+    source_root = tmp_path / "flow"
+    nested_module = source_root / "nested" / "unsafe_controls.py"
+    nested_module.parent.mkdir(parents=True)
+    nested_module.write_text("def observe() -> None:\n    return None\n", encoding="utf-8")
+
+    inventory = _scan_flow_source(source_root)
+
+    assert "nested/unsafe_controls.py" in inventory.module_paths
+
+
+def test_flow_source_scan_resolves_forbidden_relative_imports(tmp_path: Path) -> None:
+    """A relative import cannot disguise a dependency on the application Jobs package."""
+    source_root = tmp_path / "flow"
+    source_root.mkdir()
+    (source_root / "unsafe_import.py").write_text(
+        "from ..jobs import JobService\n",
+        encoding="utf-8",
+    )
+
+    assert "import:auraly_pipeline.jobs" in _flow_source_findings(source_root)
+
+
+def test_flow_source_scan_rejects_storage_state_calls(tmp_path: Path) -> None:
+    """Browser-profile export cannot evade the provider-mutation call policy."""
+    source_root = tmp_path / "flow"
+    source_root.mkdir()
+    (source_root / "unsafe_storage.py").write_text(
+        "def leak(context):\n    return context.storage_state()\n",
+        encoding="utf-8",
+    )
+
+    assert "call:storage_state" in _flow_source_findings(source_root)
+
+
 def test_flow_package_has_no_forbidden_integrations_or_provider_mutations() -> None:
     """A Goal 4B source change cannot add app coupling or provider-mutating browser methods."""
-    forbidden_import_roots = {
-        "auraly_pipeline.jobs",
-        "auraly_pipeline.images",
-        "auraly_pipeline.campaigns",
-        "sqlalchemy",
-    }
-    forbidden_browser_calls = {
-        "click",
-        "dblclick",
-        "tap",
-        "fill",
-        "type",
-        "press",
-        "check",
-        "uncheck",
-        "select_option",
-        "set_input_files",
-        "drag_and_drop",
-        "drag_to",
-        "expect_download",
-        "expect_file_chooser",
-        "dispatch_event",
-        "insert_text",
-        "set_checked",
-        "clear",
-        "focus",
-        "blur",
-        "hover",
-        "select_text",
-        "set_content",
-        "add_init_script",
-        "add_script_tag",
-        "add_style_tag",
-        "evaluate",
-        "evaluate_handle",
-    }
-    playwright_importers: set[str] = set()
-    all_calls: set[str] = set()
+    inventory = _scan_flow_source(FLOW_SOURCE_ROOT)
 
-    for path in sorted(FLOW_SOURCE_ROOT.glob("*.py")):
-        tree = _module_tree(path)
-        imports = _resolved_imports(tree)
-        assert not any(
-            imported == forbidden or imported.startswith(f"{forbidden}.")
-            for imported in imports
-            for forbidden in forbidden_import_roots
-        ), path.name
-        if any(
-            imported == "playwright" or imported.startswith("playwright.") for imported in imports
-        ):
-            playwright_importers.add(path.name)
-        all_calls.update(_called_attributes(tree))
-
-    assert playwright_importers == {"runtime.py"}
-    assert forbidden_browser_calls.isdisjoint(all_calls)
+    assert _flow_source_findings(FLOW_SOURCE_ROOT) == set()
+    assert inventory.playwright_importers == frozenset({"runtime.py"})
 
     runtime_tree = _module_tree(FLOW_SOURCE_ROOT / "runtime.py")
     launches = [
@@ -523,7 +624,10 @@ def test_flow_cli_and_service_expose_no_job_database_or_arbitrary_target_boundar
         "login_timeout_seconds",
         "navigation_timeout_seconds",
     }
-    service_imports = _resolved_imports(_module_tree(Path(service_module.__file__)))
+    service_imports = _resolved_imports(
+        _module_tree(Path(service_module.__file__)),
+        package="auraly_pipeline.flow",
+    )
     assert not any(
         value in imported
         for imported in service_imports
