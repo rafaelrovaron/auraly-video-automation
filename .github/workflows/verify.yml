@@ -32,6 +32,9 @@ jobs:
         with:
           enable-cache: true
 
+      - name: Synchronize locked dependencies
+        run: uv sync --locked --all-groups
+
       - name: Set up Node 22
         uses: actions/setup-node@v6
         with:
@@ -45,7 +48,7 @@ jobs:
       - name: Install FFmpeg and virtual display
         run: sudo apt-get install --yes ffmpeg xvfb
 
-      - name: Install Playwright Chromium
+      - name: Install Playwright-managed Chromium and system dependencies
         run: uv run playwright install --with-deps chromium
 
       - name: Run full deterministic verification
@@ -72,6 +75,9 @@ jobs:
       - name: Synchronize locked dependencies
         run: uv sync --locked --all-groups
 
+      - name: Install Playwright-managed Chromium
+        run: uv run playwright install chromium
+
       - name: Run focused cross-platform verification
         run: >-
           uv run python scripts/verify.py fast --pytest
@@ -88,3 +94,12 @@ jobs:
           tests/test_job_migrations.py
           tests/test_migration_lock.py
           tests/test_job_concurrency.py
+          tests/test_flow_domain.py
+          tests/test_flow_config.py
+          tests/test_flow_lock.py
+          tests/test_flow_locators.py
+          tests/test_flow_diagnostics.py
+          tests/test_flow_runtime.py
+          tests/test_flow_service.py
+          tests/test_flow_cli.py
+          tests/test_flow_security.py

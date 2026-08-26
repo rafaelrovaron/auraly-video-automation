@@ -14,6 +14,32 @@ import yaml  # type: ignore[import-untyped]
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 VERIFY_SCRIPT = REPOSITORY_ROOT / "scripts" / "verify.py"
 VERIFY_WORKFLOW = REPOSITORY_ROOT / ".github" / "workflows" / "verify.yml"
+WINDOWS_EXISTING_REQUIRED_TARGETS = (
+    "tests/test_verify_harness.py",
+    "tests/test_config_paths.py",
+    "tests/test_models.py",
+    "tests/test_image_generation.py",
+    "tests/test_image_domain.py",
+    "tests/test_image_migrations.py",
+    "tests/test_image_repository.py",
+    "tests/test_image_concurrency.py",
+    "tests/test_image_recovery.py",
+    "tests/test_image_cli.py",
+    "tests/test_job_migrations.py",
+    "tests/test_migration_lock.py",
+    "tests/test_job_concurrency.py",
+)
+FLOW_TEST_TARGETS = (
+    "tests/test_flow_domain.py",
+    "tests/test_flow_config.py",
+    "tests/test_flow_lock.py",
+    "tests/test_flow_locators.py",
+    "tests/test_flow_diagnostics.py",
+    "tests/test_flow_runtime.py",
+    "tests/test_flow_service.py",
+    "tests/test_flow_cli.py",
+    "tests/test_flow_security.py",
+)
 
 
 def load_verify_module() -> ModuleType:
@@ -31,6 +57,10 @@ def load_verify_workflow() -> dict[Any, Any]:
     loaded = yaml.safe_load(VERIFY_WORKFLOW.read_text(encoding="utf-8"))
     assert isinstance(loaded, dict)
     return loaded
+
+
+def workflow_commands(job: dict[Any, Any]) -> list[str]:
+    return [step["run"] for step in job["steps"] if "run" in step]
 
 
 def test_verification_step_uses_explicit_argv_and_repository_root() -> None:
@@ -464,7 +494,7 @@ raise SystemExit(run_steps((step,)))
     assert lines.index("[1/1] child") < lines.index("CHILD OUTPUT")
 
 
-def test_linux_ci_runs_full_harness_with_locked_toolchain() -> None:
+def test_linux_ci_installs_managed_chromium_and_runs_full_under_xvfb() -> None:
     workflow = load_verify_workflow()
     triggers = workflow.get("on", workflow.get(True))
     assert triggers == {"push": {"branches": ["main"]}, "pull_request": None}
@@ -484,15 +514,25 @@ def test_linux_ci_runs_full_harness_with_locked_toolchain() -> None:
     assert python_step["with"]["python-version"] == "3.11"
     assert node_step["with"]["node-version"] == "22"
 
-    commands = [step["run"] for step in job["steps"] if "run" in step]
+    commands = workflow_commands(job)
+    sync = "uv sync --locked --all-groups"
+    playwright = "uv run playwright install --with-deps chromium"
+    full = "xvfb-run -a uv run python scripts/verify.py full"
+    assert sync in commands
     assert any("install" in command and "ffmpeg" in command for command in commands)
     assert any("install" in command and "xvfb" in command for command in commands)
-    assert "uv run playwright install --with-deps chromium" in commands
-    assert "xvfb-run -a uv run python scripts/verify.py full" in commands
+    assert playwright in commands
+    assert full in commands
+    assert commands.index(sync) < commands.index(playwright) < commands.index(full)
+    assert next(
+        index
+        for index, command in enumerate(commands)
+        if "install" in command and "ffmpeg" in command and "xvfb" in command
+    ) < commands.index(full)
     assert "secrets" not in str(workflow).lower()
 
 
-def test_windows_ci_runs_meaningful_cross_platform_fast_verification() -> None:
+def test_windows_ci_installs_chromium_before_focused_verification() -> None:
     workflow = load_verify_workflow()
 
     job = workflow["jobs"]["windows-focused"]
@@ -502,31 +542,49 @@ def test_windows_ci_runs_meaningful_cross_platform_fast_verification() -> None:
     assert "actions/setup-python@v6" in uses
     assert any(str(action).startswith("astral-sh/setup-uv@") for action in uses)
 
-    commands = [step["run"] for step in job["steps"] if "run" in step]
-    assert "uv sync --locked --all-groups" in commands
+    python_step = next(
+        step for step in job["steps"] if step.get("uses") == "actions/setup-python@v6"
+    )
+    assert python_step["with"]["python-version"] == "3.11"
+
+    commands = workflow_commands(job)
+    sync = "uv sync --locked --all-groups"
+    playwright = "uv run playwright install chromium"
+    assert sync in commands
+    assert playwright in commands
     focused = next(command for command in commands if "scripts/verify.py fast" in command)
-    assert focused.split() == [
+    focused_tokens = focused.split()
+    assert focused_tokens[:6] == [
         "uv",
         "run",
         "python",
         "scripts/verify.py",
         "fast",
         "--pytest",
-        "tests/test_verify_harness.py",
-        "tests/test_config_paths.py",
-        "tests/test_models.py",
-        "tests/test_image_generation.py",
-        "tests/test_image_domain.py",
-        "tests/test_image_migrations.py",
-        "tests/test_image_repository.py",
-        "tests/test_image_concurrency.py",
-        "tests/test_image_recovery.py",
-        "tests/test_image_cli.py",
-        "tests/test_job_migrations.py",
-        "tests/test_migration_lock.py",
-        "tests/test_job_concurrency.py",
     ]
+
+    assert commands.index(sync) < commands.index(playwright) < commands.index(focused)
     assert "secrets" not in str(job).lower()
+
+
+def test_windows_ci_preserves_targets_and_includes_goal_4b_once() -> None:
+    workflow = load_verify_workflow()
+    job = workflow["jobs"]["windows-focused"]
+    commands = workflow_commands(job)
+    focused = next(command for command in commands if "scripts/verify.py fast" in command)
+    focused_tokens = focused.split()
+    parsed_targets = focused_tokens[6:]
+    expected_required = {
+        *WINDOWS_EXISTING_REQUIRED_TARGETS,
+        *FLOW_TEST_TARGETS,
+    }
+    assert expected_required <= set(parsed_targets)
+    for target in FLOW_TEST_TARGETS:
+        assert parsed_targets.count(target) == 1
+
+    joined_commands = "\n".join(commands).lower()
+    assert "labs.google" not in joined_commands
+    assert "auraly flow preflight" not in joined_commands
 
 
 def test_windows_ci_includes_goal_4a_cross_platform_image_targets() -> None:
@@ -541,3 +599,43 @@ def test_windows_ci_includes_goal_4a_cross_platform_image_targets() -> None:
         "tests/test_image_recovery.py",
     ):
         assert target in focused
+
+
+def test_ci_does_not_use_live_provider_secrets_profiles_or_system_browsers() -> None:
+    workflow_text = VERIFY_WORKFLOW.read_text(encoding="utf-8")
+    normalized = workflow_text.lower()
+
+    for forbidden in (
+        "labs.google",
+        "accounts.google",
+        "auraly flow preflight",
+        "google-flow-browser-profile",
+        "provider canary",
+        "upload",
+        "download",
+        "elevenlabs_api_key",
+        "oauth",
+        "credentials",
+        "cookies",
+        "storage_state",
+        "storage state",
+        "~/.auraly",
+        "browser profile",
+        "profile storage",
+        "browser-profiles",
+        "user-data-dir",
+        "auth sessions",
+        "trace artifacts",
+        "channel=\"chrome\"",
+        "channel=\"msedge\"",
+        "executable_path=",
+        "system chrome",
+        "system edge",
+        "google-chrome",
+        "googlechrome",
+        "microsoft-edge",
+    ):
+        assert forbidden not in normalized
+
+    assert "Generate" not in workflow_text
+    assert "secrets" not in normalized
