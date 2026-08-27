@@ -628,7 +628,7 @@ def test_normal_trace_stop_error_is_not_retried_during_failure_evidence_capture(
     error = caught.value
     assert context.tracing.stop_paths == [None]
     assert error.status == "human_intervention_required"
-    assert error.failed_step == "verify_flow_ui"
+    assert error.failed_step == "sanitize_diagnostics"
     assert error.trusted_page is True
     assert error.evidence == FlowFailureEvidence()
     assert page.screenshot_calls == []

@@ -169,7 +169,11 @@ class GoogleFlowRuntime:
                 if trusted_page:
                     failure = self._route_safe_failure(
                         FlowUnexpectedStateError(
-                            failed_step="verify_flow_ui",
+                            failed_step=(
+                                "sanitize_diagnostics"
+                                if raw_trace.stop_attempted
+                                else "verify_flow_ui"
+                            ),
                             authenticated=True,
                             trusted_page=True,
                         ),
