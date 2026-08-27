@@ -612,6 +612,32 @@ def test_trace_stop_error_fails_closed_as_sanitization_failure_without_orphan(
     assert str(error) == ""
 
 
+def test_normal_trace_stop_error_is_not_retried_during_failure_evidence_capture(
+    tmp_path: Path,
+) -> None:
+    """A failed normal trace finalization remains single-shot while its trusted failure is sanitized."""
+    target = local_target("ready.html")
+    page = _FakePage(url=target.flow_url, ready=True)
+    context = _FakeContext(page=page, trace_stop_error=RuntimeError("private trace failure"))
+
+    with pytest.raises(FlowUnexpectedStateError) as caught:
+        GoogleFlowRuntime(
+            config(tmp_path), _target=target, _playwright_factory=_playwright_factory(context)
+        ).run()
+
+    error = caught.value
+    assert context.tracing.stop_paths == [None]
+    assert error.status == "human_intervention_required"
+    assert error.failed_step == "verify_flow_ui"
+    assert error.trusted_page is True
+    assert error.evidence == FlowFailureEvidence()
+    assert page.screenshot_calls == []
+    assert not list(configured_trace_paths(tmp_path))
+    assert context.close_calls == 1
+    assert context.manager_exit_calls == 1
+    assert str(error) == ""
+
+
 def test_trace_stop_write_then_keyboard_interrupt_removes_raw_trace_and_reraises(
     tmp_path: Path,
 ) -> None:
@@ -888,7 +914,7 @@ class _FakeTracing:
             path.write_bytes(b"trace")
         if self._page._evidence_redirect_stage == "trace" and self._page._redirect_url is not None:
             self._page.url = self._page._redirect_url
-        if path is not None and self._stop_error is not None:
+        if self._stop_error is not None:
             raise self._stop_error
 
 

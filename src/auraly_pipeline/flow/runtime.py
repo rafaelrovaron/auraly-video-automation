@@ -158,6 +158,7 @@ class GoogleFlowRuntime:
                     self._require_current_flow_page(page)
                 self._require_current_flow_page(page)
 
+                raw_trace.stop_attempted = True
                 context.tracing.stop()
                 tracing_started = False
                 self._require_current_flow_page(page)
@@ -302,6 +303,8 @@ class GoogleFlowRuntime:
         tracing_started: bool,
         raw_trace: _RawTraceState,
     ) -> FlowFailureEvidence | None:
+        if raw_trace.stop_attempted:
+            return None
         screenshot_png: bytes | None = None
         try:
             for attempt in range(2):
