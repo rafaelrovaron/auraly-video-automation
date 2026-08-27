@@ -23,7 +23,11 @@ from auraly_pipeline.jobs.domain import (
     RetrySafety,
 )
 from auraly_pipeline.jobs.db_models import JobRow
-from auraly_pipeline.jobs.handlers import JobExecutionContext, SimulatedWorkerCrash
+from auraly_pipeline.jobs.handlers import (
+    JobExecutionContext,
+    SimulatedWorkerCrash,
+    SuccessHandler,
+)
 from auraly_pipeline.jobs.repository import DuplicateIdempotencyRace, JobRepository
 from auraly_pipeline.jobs.service import (
     JobClaimError,
@@ -92,6 +96,20 @@ class WaitForHeartbeatHandler:
 
     def execute(self, context: JobExecutionContext) -> JobExecutionResult:
         assert self._heartbeat_finished.wait(timeout=1)
+        return JobExecutionResult(outcome=JobExecutionOutcome.SUCCESS)
+
+
+class DualPolicyHandler:
+    retry_safety = RetrySafety.IDEMPOTENT
+
+    @staticmethod
+    def accepts_retry_safety(retry_safety: RetrySafety) -> bool:
+        return retry_safety in {
+            RetrySafety.IDEMPOTENT,
+            RetrySafety.RECONCILE_BEFORE_RETRY,
+        }
+
+    def execute(self, context: JobExecutionContext) -> JobExecutionResult:
         return JobExecutionResult(outcome=JobExecutionOutcome.SUCCESS)
 
 
@@ -847,6 +865,66 @@ def test_reconcile_before_retry_policy_cannot_use_generic_resume(tmp_path: Path)
     service.close()
 
 
+def test_submit_uses_optional_retry_policy_acceptance(tmp_path: Path) -> None:
+    service = JobService.for_database(
+        tmp_path / "auraly.db",
+        clock=lambda: NOW,
+        handlers={"image.generate": DualPolicyHandler()},
+    )
+
+    submitted = service.submit_job(
+        _local_job(
+            "image.generate",
+            "flow-policy",
+            retry_safety=RetrySafety.RECONCILE_BEFORE_RETRY,
+        )
+    )
+
+    assert submitted.retry_safety is RetrySafety.RECONCILE_BEFORE_RETRY
+    service.close()
+
+
+def test_submit_linked_job_uses_optional_retry_policy_acceptance(tmp_path: Path) -> None:
+    service = JobService.for_database(
+        tmp_path / "auraly.db",
+        clock=lambda: NOW,
+        handlers={"image.generate": DualPolicyHandler()},
+    )
+
+    submitted = service.submit_linked_job(
+        _local_job(
+            "image.generate",
+            "linked-flow-policy",
+            retry_safety=RetrySafety.RECONCILE_BEFORE_RETRY,
+        ),
+        lambda _session, _row: "linked-flow",
+        lambda _job: "existing-linked-flow",
+    )
+
+    assert submitted.job.retry_safety is RetrySafety.RECONCILE_BEFORE_RETRY
+    assert submitted.linked == "linked-flow"
+    service.close()
+
+
+def test_existing_fixed_policy_handler_still_rejects_mismatch(tmp_path: Path) -> None:
+    service = JobService.for_database(
+        tmp_path / "auraly.db",
+        clock=lambda: NOW,
+        handlers={"fixed": SuccessHandler()},
+    )
+
+    with pytest.raises(JobRetrySafetyError):
+        service.submit_job(
+            _local_job(
+                "fixed",
+                "fixed-mismatch",
+                retry_safety=RetrySafety.RECONCILE_BEFORE_RETRY,
+            )
+        )
+
+    service.close()
+
+
 def test_handler_retry_capability_must_match_persisted_job_policy(tmp_path: Path) -> None:
     class ManualHandler:
         retry_safety = RetrySafety.MANUAL_ONLY
@@ -898,6 +976,48 @@ def test_worker_rechecks_persisted_retry_safety_after_restart(tmp_path: Path) ->
     assert blocked.attempts[-1].status == "blocked"
     assert blocked.last_error_code == "handler_retry_safety_mismatch"
     assert blocked.events[-1].event_type == "job.blocked"
+    restarted.close()
+
+
+def test_worker_blocks_handler_retry_safety_mismatch_after_dual_policy_submission(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "auraly.db"
+    initial = JobService.for_database(
+        database_path,
+        clock=lambda: NOW,
+        handlers={"image.generate": DualPolicyHandler()},
+    )
+    submitted = initial.submit_job(
+        _local_job(
+            "image.generate",
+            "dual-policy-worker-mismatch",
+            retry_safety=RetrySafety.RECONCILE_BEFORE_RETRY,
+        )
+    )
+    initial.close()
+    executions = 0
+
+    class RejectingHandler:
+        retry_safety = RetrySafety.IDEMPOTENT
+
+        def execute(self, context: JobExecutionContext) -> JobExecutionResult:
+            nonlocal executions
+            executions += 1
+            return JobExecutionResult(outcome=JobExecutionOutcome.SUCCESS)
+
+    restarted = JobService.for_database(
+        database_path,
+        clock=lambda: NOW,
+        handlers={"image.generate": RejectingHandler()},
+    )
+
+    blocked = restarted.worker_once("worker-1")
+
+    assert blocked is not None and blocked.job_id == submitted.job_id
+    assert blocked.status == "blocked"
+    assert blocked.last_error_code == "handler_retry_safety_mismatch"
+    assert executions == 0
     restarted.close()
 
 

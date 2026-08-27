@@ -30,6 +30,7 @@ from auraly_pipeline.jobs.handlers import (
     JobHandler,
     SimulatedWorkerCrash,
     default_fake_handlers,
+    handler_accepts_retry_safety,
 )
 from auraly_pipeline.jobs.repository import (
     DuplicateIdempotencyRace,
@@ -167,7 +168,7 @@ class JobService:
         handler = self._handlers.get(request.job_type)
         if handler is None:
             raise JobHandlerNotFoundError
-        if getattr(handler, "retry_safety", None) != request.retry_safety:
+        if not handler_accepts_retry_safety(handler, request.retry_safety):
             raise JobRetrySafetyError
         self._validate_references(request)
         existing = self._repository.get_by_idempotency_key(request.idempotency_key)
@@ -204,7 +205,7 @@ class JobService:
         handler = self._handlers.get(request.job_type)
         if handler is None:
             raise JobHandlerNotFoundError
-        if getattr(handler, "retry_safety", None) != request.retry_safety:
+        if not handler_accepts_retry_safety(handler, request.retry_safety):
             raise JobRetrySafetyError
         self._validate_references(request)
         try:
@@ -306,7 +307,7 @@ class JobService:
                         "No deterministic local handler is registered for this persisted job."
                     ),
                 )
-            elif getattr(handler, "retry_safety", None) != claimed.retry_safety:
+            elif not handler_accepts_retry_safety(handler, claimed.retry_safety):
                 result = JobExecutionResult(
                     outcome=JobExecutionOutcome.BLOCKED,
                     error_code="handler_retry_safety_mismatch",

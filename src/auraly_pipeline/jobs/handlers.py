@@ -23,6 +23,16 @@ class JobHandler(Protocol):
     def execute(self, context: JobExecutionContext) -> JobExecutionResult: ...
 
 
+def handler_accepts_retry_safety(
+    handler: JobHandler,
+    retry_safety: RetrySafety,
+) -> bool:
+    accepts = getattr(handler, "accepts_retry_safety", None)
+    if callable(accepts):
+        return bool(accepts(retry_safety))
+    return getattr(handler, "retry_safety", None) == retry_safety
+
+
 class SuccessHandler:
     retry_safety = RetrySafety.IDEMPOTENT
 
