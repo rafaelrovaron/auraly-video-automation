@@ -549,10 +549,40 @@ def test_screenshot_error_fails_closed_as_sanitization_failure_without_orphan(
     assert error.trusted_page is True
     assert error.evidence == FlowFailureEvidence(trusted_page=True)
     assert not list(configured_trace_paths(tmp_path))
+    assert len(page.screenshot_calls) == 2
     assert context.tracing.stop_paths == [None]
     assert context.close_calls == 1
     assert context.manager_exit_calls == 1
     assert str(error) == ""
+
+
+def test_transient_screenshot_error_retries_once_and_preserves_trusted_evidence(
+    tmp_path: Path,
+) -> None:
+    """One transient trusted screenshot failure may recover without weakening evidence safeguards."""
+    target = local_target("ready.html")
+    page = _FakePage(
+        url=target.flow_url,
+        empty_roles={"main"},
+        screenshot_errors=[RuntimeError(r"private C:\\Users\\operator\\profile"), None],
+    )
+    context = _FakeContext(page=page)
+
+    with pytest.raises(FlowUiContractError) as caught:
+        GoogleFlowRuntime(
+            config(tmp_path), _target=target, _playwright_factory=_playwright_factory(context)
+        ).run()
+
+    evidence = caught.value.evidence
+    assert evidence.screenshot_png == b"masked-screenshot"
+    assert evidence.raw_trace_path is not None and evidence.raw_trace_path.is_file()
+    assert page.screenshot_calls == [
+        {"mask": [page.account_locator], "mask_color": "#000000"},
+        {"mask": [page.account_locator], "mask_color": "#000000"},
+    ]
+    assert context.tracing.stop_paths == [evidence.raw_trace_path]
+    assert context.close_calls == 1
+    assert context.manager_exit_calls == 1
 
 
 def test_trace_stop_error_fails_closed_as_sanitization_failure_without_orphan(
@@ -575,6 +605,8 @@ def test_trace_stop_error_fails_closed_as_sanitization_failure_without_orphan(
     assert error.trusted_page is True
     assert error.evidence == FlowFailureEvidence(trusted_page=True)
     assert not list(configured_trace_paths(tmp_path))
+    assert len(context.tracing.stop_paths) == 1
+    assert context.tracing.stop_paths[0] is not None
     assert context.close_calls == 1
     assert context.manager_exit_calls == 1
     assert str(error) == ""
@@ -769,6 +801,7 @@ class _FakePage:
         goto_error: BaseException | None = None,
         account_mask_count: int = 1,
         screenshot_error: BaseException | None = None,
+        screenshot_errors: list[BaseException | None] | None = None,
     ) -> None:
         self.url = url
         self._ready = ready
@@ -780,6 +813,7 @@ class _FakePage:
         self._goto_error = goto_error
         self._account_mask_count = account_mask_count
         self._screenshot_error = screenshot_error
+        self._screenshot_errors = screenshot_errors
         self.waits: list[int] = []
         self.account_locator = _FakeLocator()
         self.screenshot_calls: list[dict[str, object]] = []
@@ -818,6 +852,10 @@ class _FakePage:
 
     def screenshot(self, **kwargs: object) -> bytes:
         self.screenshot_calls.append(kwargs)
+        if self._screenshot_errors:
+            screenshot_error = self._screenshot_errors.pop(0)
+            if screenshot_error is not None:
+                raise screenshot_error
         if self._screenshot_error is not None:
             raise self._screenshot_error
         if self._evidence_redirect_stage == "screenshot" and self._redirect_url is not None:

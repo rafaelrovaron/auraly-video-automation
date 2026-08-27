@@ -46,6 +46,7 @@ class _RawTraceState:
     path: Path | None = None
     attached: bool = False
     cleanup_attempted: bool = False
+    stop_attempted: bool = False
 
 
 PRODUCTION_TARGET = _FlowRuntimeTarget(
@@ -200,7 +201,7 @@ class GoogleFlowRuntime:
             base_exception_escaping = True
             raise
         finally:
-            if tracing_started:
+            if tracing_started and not raw_trace.stop_attempted:
                 self._stop_trace_without_artifact(context)
             if raw_trace.path is not None and (
                 not raw_trace.attached or base_exception_escaping
@@ -302,30 +303,35 @@ class GoogleFlowRuntime:
         raw_trace: _RawTraceState,
     ) -> FlowFailureEvidence | None:
         screenshot_png: bytes | None = None
-        trace_stopped = False
         try:
-            if not self._current_page_is_flow(page):
-                return None
-            masks = _screenshot_masks(page)
-            if not self._current_page_is_flow(page):
-                return None
-            if not masks:
-                raise FlowUnexpectedStateError(
-                    failed_step="sanitize_diagnostics",
-                    authenticated=True,
-                    trusted_page=True,
-                    evidence=FlowFailureEvidence(trusted_page=True),
-                )
-            screenshot_png = page.screenshot(
-                mask=masks,
-                mask_color="#000000",
-            )
+            for attempt in range(2):
+                self._require_current_flow_page(page)
+                masks = _screenshot_masks(page)
+                self._require_current_flow_page(page)
+                if not masks:
+                    raise FlowUnexpectedStateError(
+                        failed_step="sanitize_diagnostics",
+                        authenticated=True,
+                        trusted_page=True,
+                        evidence=FlowFailureEvidence(trusted_page=True),
+                    )
+                try:
+                    screenshot_png = page.screenshot(
+                        mask=masks,
+                        mask_color="#000000",
+                    )
+                except Exception:
+                    if attempt == 1:
+                        raise
+                    self._require_current_flow_page(page)
+                else:
+                    break
             if not self._current_page_is_flow(page):
                 return None
             if tracing_started and context is not None:
                 raw_trace.path = self._config.staging_root / f"flow-trace-{uuid4().hex}.zip"
+                raw_trace.stop_attempted = True
                 context.tracing.stop(path=raw_trace.path)
-                trace_stopped = True
                 if not self._current_page_is_flow(page):
                     return None
         except FlowRuntimeError:
@@ -345,7 +351,8 @@ class GoogleFlowRuntime:
         finally:
             if not self._current_page_is_flow(page):
                 cleanup_failure = self._discard_raw_trace(raw_trace, trusted_page=False)
-                if tracing_started and not trace_stopped:
+                if tracing_started and not raw_trace.stop_attempted:
+                    raw_trace.stop_attempted = True
                     self._stop_trace_without_artifact(context)
                 if cleanup_failure is not None:
                     raise cleanup_failure
