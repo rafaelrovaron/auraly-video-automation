@@ -88,6 +88,7 @@ Wave 2 work, merge, or push was performed.
 - `5ddb2a59fa8d255199ab2062ddf6c7dfcb711fcf` — `docs: record Flow generation UI contract`
   (report plus a test-format whitespace cleanup; it was not documentation-only).
 - `9a0275bc4b7fba2257b8a382e6410a0dbb031233` — `fix: harden Flow generation locator trust`
+- `991620980980993b1b73983c3a57902413a76eff` — `test: type Flow locator browser helpers`
 
 ## Remaining concerns / handoff
 
@@ -160,3 +161,56 @@ Wave 2 work, merge, or push was performed.
 - `tests/fakes/flow-generation/loading-grid.html`
 - `tests/fakes/flow-generation/failed-grid.html`
 - `tests/fakes/flow-generation/production-safe-grid.html`
+
+## Integration correction round 2/5 — test typing
+
+### Scope
+
+This round changes test annotations and the test-only fake protocol signature only. It does not
+change locator behavior, target/trust policy, public APIs, image/Task 2 code, or Wave 2 scope.
+
+### RED / GREEN evidence
+
+1. **RED:** with the source tree included so mypy analyzes the local package rather than its
+   installed wheel, ran:
+
+   ```text
+   uv run python -m mypy src tests/test_flow_generation_locators.py tests/test_flow_locators.py
+   ```
+
+   Result: `25` errors. `resolve_on_local_page()` erased all resolver result types to `object`
+   (the 21 resulting locator/candidate errors), and `SemanticPageFake.get_by_role()` no longer
+   satisfied `PageProtocol` after its `include_hidden` addition (four `Never`/annotation errors).
+
+2. **GREEN:** replaced the erased wrapper with three narrow protocol-typed helpers: scalar
+   locator, candidate observation, and candidate 2K action. Added only the optional
+   `include_hidden` parameter to the test fake. The same command passed:
+
+   ```text
+   Success: no issues found in 58 source files
+   ```
+
+3. **Behavioral regressions:**
+
+   ```text
+   uv run pytest tests/test_flow_generation_locators.py tests/test_flow_locators.py -q
+   # 52 passed in 6.11s
+
+   uv run pytest tests/test_flow_generation_domain.py tests/test_flow_generation_locators.py tests/test_flow_domain.py tests/test_flow_config.py tests/test_flow_lock.py tests/test_flow_locators.py tests/test_flow_runtime.py -q
+   # 201 passed, 2 skipped in 20.59s
+
+   uv run pytest tests/test_flow_service.py tests/test_flow_cli.py tests/test_flow_security.py tests/test_flow_diagnostics.py -q
+   # 137 passed, 1 skipped in 20.43s
+
+   uv run ruff check tests/test_flow_generation_locators.py tests/test_flow_locators.py
+   uv run python scripts/verify.py fast
+   ```
+
+   Ruff passed; `verify.py fast` passed its Ruff and all-source mypy gates.
+
+### Review note
+
+`uv run python -m mypy src tests` also reports three unrelated preexisting package-reexport
+typing errors in `test_flow_generation_domain.py`, `test_flow_domain.py`, and
+`test_flow_security.py`. They are not introduced by this round, are outside the two requested
+files, and are left unchanged to avoid broadening this integration fix.
