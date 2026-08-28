@@ -1021,6 +1021,58 @@ def test_worker_blocks_handler_retry_safety_mismatch_after_dual_policy_submissio
     restarted.close()
 
 
+def test_worker_executes_persisted_job_when_dynamic_handler_accepts_retry_safety(
+    tmp_path: Path,
+) -> None:
+    class ReconcileHandler:
+        retry_safety = RetrySafety.RECONCILE_BEFORE_RETRY
+
+        def execute(self, context: JobExecutionContext) -> JobExecutionResult:
+            return JobExecutionResult(outcome=JobExecutionOutcome.SUCCESS)
+
+    database_path = tmp_path / "auraly.db"
+    initial = JobService.for_database(
+        database_path,
+        clock=lambda: NOW,
+        handlers={"image.generate": ReconcileHandler()},
+    )
+    submitted = initial.submit_job(
+        _local_job(
+            "image.generate",
+            "dynamic-policy-worker-execution",
+            retry_safety=RetrySafety.RECONCILE_BEFORE_RETRY,
+        )
+    )
+    initial.close()
+    executions = 0
+
+    class DynamicHandler:
+        retry_safety = RetrySafety.IDEMPOTENT
+
+        @staticmethod
+        def accepts_retry_safety(retry_safety: RetrySafety) -> bool:
+            return retry_safety is RetrySafety.RECONCILE_BEFORE_RETRY
+
+        def execute(self, context: JobExecutionContext) -> JobExecutionResult:
+            nonlocal executions
+            executions += 1
+            return JobExecutionResult(outcome=JobExecutionOutcome.SUCCESS)
+
+    restarted = JobService.for_database(
+        database_path,
+        clock=lambda: NOW,
+        handlers={"image.generate": DynamicHandler()},
+    )
+
+    completed = restarted.worker_once("worker-1")
+
+    assert completed is not None and completed.job_id == submitted.job_id
+    assert completed.status == "completed"
+    assert completed.attempts[-1].status == "completed"
+    assert executions == 1
+    restarted.close()
+
+
 def test_worker_blocks_persisted_job_when_handler_disappears_after_restart(
     tmp_path: Path,
 ) -> None:
