@@ -585,6 +585,60 @@ def test_transient_screenshot_error_retries_once_and_preserves_trusted_evidence(
     assert context.manager_exit_calls == 1
 
 
+def test_screenshot_retry_revalidates_route_and_refreshes_account_mask(
+    tmp_path: Path,
+) -> None:
+    """A retry may retain evidence only after fresh route trust and a current semantic mask."""
+    target = local_target("ready.html")
+    page = _FakePage(
+        url=target.flow_url,
+        empty_roles={"main"},
+        screenshot_errors=[RuntimeError("private transient screenshot failure"), None],
+        refresh_account_mask_after_first_screenshot_error=True,
+        require_revalidated_route_and_current_mask_on_retry=True,
+    )
+    original_account_locator = page.account_locator
+    context = _FakeContext(page=page)
+
+    with pytest.raises(FlowUiContractError) as caught:
+        GoogleFlowRuntime(
+            config(tmp_path), _target=target, _playwright_factory=_playwright_factory(context)
+        ).run()
+
+    evidence = caught.value.evidence
+    assert evidence.screenshot_png == b"masked-screenshot"
+    assert evidence.raw_trace_path is not None and evidence.raw_trace_path.is_file()
+    assert page.retry_route_trust_observed is True
+    assert page.account_mask_resolutions == [original_account_locator, page.account_locator]
+    assert original_account_locator is not page.account_locator
+    assert page.retry_screenshot_used_current_mask is True
+    assert context.tracing.stop_paths == [evidence.raw_trace_path]
+
+
+def test_screenshot_retry_stops_closed_when_route_changes_after_first_failure(
+    tmp_path: Path,
+) -> None:
+    """A retry cannot use evidence after its first capture attempt leaves the trusted route."""
+    target = local_target("ready.html")
+    page = _FakePage(
+        url=target.flow_url,
+        empty_roles={"main"},
+        screenshot_errors=[RuntimeError("private transient screenshot failure")],
+        redirect_after_first_screenshot_error=fake_flow_url("login-required.html"),
+    )
+    context = _FakeContext(page=page)
+
+    with pytest.raises(FlowAuthenticationTimeoutError) as caught:
+        GoogleFlowRuntime(
+            config(tmp_path), _target=target, _playwright_factory=_playwright_factory(context)
+        ).run()
+
+    assert caught.value.evidence == FlowFailureEvidence()
+    assert len(page.screenshot_calls) == 1
+    assert context.tracing.stop_paths == [None]
+    assert not list(configured_trace_paths(tmp_path))
+
+
 def test_trace_stop_error_fails_closed_as_sanitization_failure_without_orphan(
     tmp_path: Path,
 ) -> None:
@@ -828,8 +882,11 @@ class _FakePage:
         account_mask_count: int = 1,
         screenshot_error: BaseException | None = None,
         screenshot_errors: list[BaseException | None] | None = None,
+        refresh_account_mask_after_first_screenshot_error: bool = False,
+        require_revalidated_route_and_current_mask_on_retry: bool = False,
+        redirect_after_first_screenshot_error: str | None = None,
     ) -> None:
-        self.url = url
+        self._url = url
         self._ready = ready
         self._clock = clock
         self._redirect_on_role = redirect_on_role
@@ -840,9 +897,30 @@ class _FakePage:
         self._account_mask_count = account_mask_count
         self._screenshot_error = screenshot_error
         self._screenshot_errors = screenshot_errors
+        self._refresh_account_mask_after_first_screenshot_error = (
+            refresh_account_mask_after_first_screenshot_error
+        )
+        self._require_revalidated_route_and_current_mask_on_retry = (
+            require_revalidated_route_and_current_mask_on_retry
+        )
+        self._redirect_after_first_screenshot_error = redirect_after_first_screenshot_error
+        self._retry_needs_route_trust = False
+        self.retry_route_trust_observed = False
+        self.retry_screenshot_used_current_mask = False
         self.waits: list[int] = []
         self.account_locator = _FakeLocator()
+        self.account_mask_resolutions: list[_FakeLocator] = []
         self.screenshot_calls: list[dict[str, object]] = []
+
+    @property
+    def url(self) -> str:
+        if self._retry_needs_route_trust:
+            self.retry_route_trust_observed = True
+        return self._url
+
+    @url.setter
+    def url(self, value: str) -> None:
+        self._url = value
 
     def goto(self, url: str, *, wait_until: str, timeout: int) -> None:
         self.url = url
@@ -864,6 +942,7 @@ class _FakePage:
         if role == "button" and name == "Google Account":
             if self._evidence_redirect_stage == "mask" and self._redirect_url is not None:
                 self.url = self._redirect_url
+            self.account_mask_resolutions.append(self.account_locator)
             return _FakeLocator(candidates=[self.account_locator] * self._account_mask_count)
         return _FakeLocator()
 
@@ -881,9 +960,18 @@ class _FakePage:
         if self._screenshot_errors:
             screenshot_error = self._screenshot_errors.pop(0)
             if screenshot_error is not None:
+                self._retry_needs_route_trust = True
+                if self._refresh_account_mask_after_first_screenshot_error:
+                    self.account_locator = _FakeLocator()
+                if self._redirect_after_first_screenshot_error is not None:
+                    self.url = self._redirect_after_first_screenshot_error
                 raise screenshot_error
         if self._screenshot_error is not None:
             raise self._screenshot_error
+        if self._require_revalidated_route_and_current_mask_on_retry and len(self.screenshot_calls) == 2:
+            if not self.retry_route_trust_observed or kwargs.get("mask") != [self.account_locator]:
+                raise RuntimeError("retry used stale Flow evidence state")
+            self.retry_screenshot_used_current_mask = True
         if self._evidence_redirect_stage == "screenshot" and self._redirect_url is not None:
             self.url = self._redirect_url
         return b"masked-screenshot"
