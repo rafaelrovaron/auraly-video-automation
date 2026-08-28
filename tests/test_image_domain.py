@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta, timezone
 import re
-from typing import get_args
+from typing import cast, get_args
 
 import pytest
 from pydantic import TypeAdapter, ValidationError
@@ -302,7 +302,7 @@ def test_executor_authorization_contract_rejects_missing_or_fake_authorization()
     ],
 )
 def test_flow_run_transition_accepts_only_authorized_progressions(
-    current: str, target: str
+    current: FlowGenerationStage, target: FlowGenerationStage
 ) -> None:
     ensure_flow_run_transition(current, target)
 
@@ -317,7 +317,7 @@ def test_flow_run_transition_accepts_only_authorized_progressions(
     ],
 )
 def test_flow_run_transition_rejects_backwards_or_terminal_changes(
-    current: str, target: str
+    current: FlowGenerationStage, target: FlowGenerationStage
 ) -> None:
     with pytest.raises(ValueError):
         ensure_flow_run_transition(current, target)
@@ -336,11 +336,14 @@ def test_flow_run_transition_rejects_pre_dispatch_ambiguity_and_unknown_stages(
     current: str, target: str
 ) -> None:
     with pytest.raises(ValueError):
-        ensure_flow_run_transition(current, target)
+        ensure_flow_run_transition(
+            cast(FlowGenerationStage, current),
+            cast(FlowGenerationStage, target),
+        )
 
 
 def test_flow_run_transition_matrix_is_exact_and_closed() -> None:
-    expected_stages = {
+    expected_stages: set[FlowGenerationStage] = {
         "prepared",
         "inputs_verified",
         "dispatch_intent_recorded",
@@ -352,7 +355,7 @@ def test_flow_run_transition_matrix_is_exact_and_closed() -> None:
         "blocked",
         "failed",
     }
-    expected_targets = {
+    expected_targets: dict[FlowGenerationStage, set[FlowGenerationStage]] = {
         "prepared": {"inputs_verified", "blocked", "failed"},
         "inputs_verified": {"dispatch_intent_recorded", "blocked", "failed"},
         "dispatch_intent_recorded": {"dispatch_confirmed", "ambiguous", "blocked", "failed"},
@@ -392,7 +395,7 @@ def test_flow_run_transition_matrix_is_exact_and_closed() -> None:
     ],
 )
 def test_flow_slot_transition_accepts_only_download_progressions(
-    current: str, target: str
+    current: FlowCandidateSlotState, target: FlowCandidateSlotState
 ) -> None:
     ensure_flow_slot_transition(current, target)
 
@@ -410,11 +413,14 @@ def test_flow_slot_transition_rejects_backwards_terminal_and_unknown_states(
     current: str, target: str
 ) -> None:
     with pytest.raises(ValueError):
-        ensure_flow_slot_transition(current, target)
+        ensure_flow_slot_transition(
+            cast(FlowCandidateSlotState, current),
+            cast(FlowCandidateSlotState, target),
+        )
 
 
 def test_flow_slot_transition_matrix_is_exact_and_closed() -> None:
-    expected_states = {
+    expected_states: set[FlowCandidateSlotState] = {
         "pending",
         "observed",
         "download_intent_recorded",
@@ -422,7 +428,7 @@ def test_flow_slot_transition_matrix_is_exact_and_closed() -> None:
         "ingested",
         "blocked",
     }
-    expected_targets = {
+    expected_targets: dict[FlowCandidateSlotState, set[FlowCandidateSlotState]] = {
         "pending": {"observed", "blocked"},
         "observed": {"download_intent_recorded", "blocked"},
         "download_intent_recorded": {"downloaded", "blocked"},
@@ -835,7 +841,9 @@ def test_flow_slot_requires_utc_chronology() -> None:
 
 
 def test_flow_reconciliation_reason_rejects_unknown_value() -> None:
-    reason_adapter = TypeAdapter(FlowReconciliationReason)
+    reason_adapter: TypeAdapter[FlowReconciliationReason] = TypeAdapter(
+        FlowReconciliationReason
+    )
     for reason in (
         "no_dispatch_proven",
         "existing_dispatch_reconciled",
