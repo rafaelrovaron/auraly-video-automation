@@ -2,14 +2,19 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from datetime import UTC, datetime
+import re
 
 import pytest
 from pydantic import ValidationError
 
 from auraly_pipeline.images.domain import (
+    FlowCandidateSlot,
+    FlowGenerationRun,
     ImageCandidate,
     ImageGenerateRequest,
     ImageGeneration,
+    ensure_flow_run_transition,
+    ensure_flow_slot_transition,
     generation_request_fingerprint,
 )
 
@@ -28,6 +33,53 @@ def _request(*, idempotency_key: str) -> ImageGenerateRequest:
         reference_image_path="campaigns/campaign-1/references/hero.png",
         reference_image_sha256="a" * 64,
     )
+
+
+def _playwright_request(**changes: object) -> ImageGenerateRequest:
+    values: dict[str, object] = {
+        "campaign_id": "campaign-1",
+        "scene_variant_id": SCENE_ID,
+        "idempotency_key": "flow-1",
+        "prompt_snapshot": "A moonlit studio",
+        "reference_image_path": "campaigns/campaign-1/references/hero.png",
+        "reference_image_sha256": "a" * 64,
+        "executor": "playwright_python",
+        "generation_contract_version": "flow-generation-v1",
+        "provider_action_confirmed": True,
+        "provider_action_approved_by": "operator-1",
+    }
+    values.update(changes)
+    return ImageGenerateRequest.model_validate(values)
+
+
+def _flow_run(**changes: object) -> FlowGenerationRun:
+    values: dict[str, object] = {
+        "flow_generation_run_id": "55555555-5555-4555-8555-555555555555",
+        "image_generation_id": GENERATION_ID,
+        "stage": "prepared",
+        "required_candidate_count": 2,
+        "required_resolution": "2K",
+        "dispatch_attempt_number": 1,
+        "provider_action_approved_by": "operator-1",
+        "provider_action_approved_at": NOW,
+        "created_at": NOW,
+        "updated_at": NOW,
+    }
+    values.update(changes)
+    return FlowGenerationRun.model_validate(values)
+
+
+def _flow_slot(**changes: object) -> FlowCandidateSlot:
+    values: dict[str, object] = {
+        "flow_candidate_slot_id": "66666666-6666-4666-8666-666666666666",
+        "flow_generation_run_id": "55555555-5555-4555-8555-555555555555",
+        "slot_index": 0,
+        "state": "pending",
+        "created_at": NOW,
+        "updated_at": NOW,
+    }
+    values.update(changes)
+    return FlowCandidateSlot.model_validate(values)
 
 
 def _generation() -> ImageGeneration:
@@ -119,4 +171,132 @@ def test_image_request_requires_reference_path_and_hash_together(
             prompt_snapshot="A moonlit studio",
             reference_image_path=reference_image_path,
             reference_image_sha256=reference_image_sha256,
+        )
+
+
+def test_local_fake_request_keeps_v1_defaults_and_fingerprint() -> None:
+    request = ImageGenerateRequest(
+        campaign_id="campaign-1",
+        scene_variant_id=SCENE_ID,
+        idempotency_key="fake-1",
+        prompt_snapshot="safe prompt",
+    )
+
+    assert request.executor == "local_fake"
+    assert request.generation_contract_version == "image-generation-v1"
+    assert request.provider_action_confirmed is False
+    assert request.provider_action_approved_by is None
+    assert generation_request_fingerprint(request) == (
+        "cfcade191a4bb02881fe7ed626a0cc746967053b10d9e9cf637f9cd179db46f6"
+    )
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"reference_image_path": None, "reference_image_sha256": None},
+        {"provider_action_confirmed": False},
+        {"provider_action_approved_by": "PRIVATE-operator"},
+        {"generation_contract_version": "image-generation-v1"},
+        {"required_candidate_count": 1},
+        {"required_output_resolution": "1K"},
+    ],
+)
+def test_playwright_request_rejects_missing_or_unsafe_fixed_contract(
+    changes: dict[str, object],
+) -> None:
+    with pytest.raises(ValidationError):
+        _playwright_request(**changes)
+
+
+def test_playwright_request_accepts_exact_fixed_contract() -> None:
+    request = _playwright_request()
+
+    assert request.required_candidate_count == 2
+    assert request.required_output_resolution == "2K"
+    assert re.fullmatch(r"[0-9a-f]{64}", generation_request_fingerprint(request))
+
+
+@pytest.mark.parametrize(
+    ("current", "target"),
+    [
+        ("prepared", "inputs_verified"),
+        ("inputs_verified", "dispatch_intent_recorded"),
+        ("dispatch_intent_recorded", "dispatch_confirmed"),
+        ("dispatch_confirmed", "candidates_observed"),
+        ("candidates_observed", "downloading"),
+        ("downloading", "completed"),
+        ("ambiguous", "dispatch_confirmed"),
+        ("ambiguous", "candidates_observed"),
+        ("ambiguous", "downloading"),
+        ("ambiguous", "prepared"),
+    ],
+)
+def test_flow_run_transition_accepts_only_authorized_progressions(
+    current: str, target: str
+) -> None:
+    ensure_flow_run_transition(current, target)
+
+
+@pytest.mark.parametrize(
+    ("current", "target"),
+    [
+        ("inputs_verified", "prepared"),
+        ("completed", "downloading"),
+        ("blocked", "prepared"),
+        ("failed", "prepared"),
+    ],
+)
+def test_flow_run_transition_rejects_backwards_or_terminal_changes(
+    current: str, target: str
+) -> None:
+    with pytest.raises(ValueError):
+        ensure_flow_run_transition(current, target)
+
+
+@pytest.mark.parametrize(
+    ("current", "target"),
+    [
+        ("pending", "observed"),
+        ("observed", "download_intent_recorded"),
+        ("download_intent_recorded", "downloaded"),
+        ("downloaded", "ingested"),
+    ],
+)
+def test_flow_slot_transition_accepts_only_download_progressions(
+    current: str, target: str
+) -> None:
+    ensure_flow_slot_transition(current, target)
+
+
+def test_flow_slot_rejects_out_of_range_index_and_unpaired_artifact_facts() -> None:
+    with pytest.raises(ValidationError):
+        _flow_slot(slot_index=2)
+    with pytest.raises(ValidationError):
+        _flow_slot(staging_path="campaigns/campaign-1/staging.png")
+    with pytest.raises(ValidationError):
+        _flow_slot(staging_path="C:/private/staging.png", staged_sha256="c" * 64)
+
+
+def test_flow_slot_ingested_requires_candidate_and_prior_download() -> None:
+    with pytest.raises(ValidationError):
+        _flow_slot(state="ingested", image_candidate_id=None)
+    with pytest.raises(ValidationError):
+        _flow_slot(
+            state="ingested",
+            image_candidate_id="77777777-7777-4777-8777-777777777777",
+        )
+
+
+def test_flow_run_rejects_confirmation_without_intent_and_early_grid_evidence() -> None:
+    with pytest.raises(ValidationError):
+        _flow_run(
+            stage="dispatch_confirmed",
+            dispatch_confirmed_at=NOW,
+        )
+    with pytest.raises(ValidationError):
+        _flow_run(
+            stage="inputs_verified",
+            grid_evidence_path="campaigns/campaign-1/grid.png",
+            grid_evidence_sha256="d" * 64,
         )

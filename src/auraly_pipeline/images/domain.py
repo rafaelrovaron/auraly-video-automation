@@ -25,6 +25,32 @@ ImageGenerationState = Literal[
 ImageCandidateReviewStatus = Literal[
     "pending_review", "approved", "rejected", "superseded"
 ]
+FlowGenerationStage = Literal[
+    "prepared",
+    "inputs_verified",
+    "dispatch_intent_recorded",
+    "dispatch_confirmed",
+    "candidates_observed",
+    "downloading",
+    "completed",
+    "ambiguous",
+    "blocked",
+    "failed",
+]
+FlowCandidateSlotState = Literal[
+    "pending",
+    "observed",
+    "download_intent_recorded",
+    "downloaded",
+    "ingested",
+    "blocked",
+]
+FlowReconciliationReason = Literal[
+    "no_dispatch_proven",
+    "existing_dispatch_reconciled",
+    "staged_artifact_reconciled",
+    "completed_generation_reconciled",
+]
 
 _UUID_PATTERN = r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
 _SHA256_PATTERN = r"^[0-9a-f]{64}$"
@@ -62,8 +88,14 @@ class ImageGenerateRequest(ImageContract):
     reference_image_path: str | None = None
     reference_image_sha256: str | None = Field(default=None, pattern=_SHA256_PATTERN)
     provider: ImageProvider = "google_flow"
-    executor: Literal["local_fake"] = "local_fake"
-    generation_contract_version: Literal["image-generation-v1"] = "image-generation-v1"
+    executor: ImageExecutor = "local_fake"
+    generation_contract_version: Literal[
+        "image-generation-v1", "flow-generation-v1"
+    ] = "image-generation-v1"
+    required_candidate_count: Literal[2] = 2
+    required_output_resolution: Literal["2K"] = "2K"
+    provider_action_confirmed: bool = False
+    provider_action_approved_by: str | None = Field(default=None, max_length=120)
     fake_artifact_format_version: Literal["fake-png-v1"] = "fake-png-v1"
 
     @field_validator("idempotency_key")
@@ -82,15 +114,37 @@ class ImageGenerateRequest(ImageContract):
         return hashlib.sha256(self.prompt_snapshot.encode("utf-8")).hexdigest()
 
     @model_validator(mode="after")
-    def validate_reference_pair(self) -> Self:
+    def validate_executor_contract(self) -> Self:
         if (self.reference_image_path is None) != (self.reference_image_sha256 is None):
             raise ValueError("reference image path and SHA-256 must be supplied together")
+        if self.executor == "local_fake":
+            if self.generation_contract_version != "image-generation-v1":
+                raise ValueError("local_fake requires image-generation-v1")
+            if self.provider_action_confirmed:
+                raise ValueError("local_fake does not permit provider-action confirmation")
+            if self.provider_action_approved_by is not None:
+                raise ValueError("local_fake does not permit a provider-action approver")
+            return self
+        if self.generation_contract_version != "flow-generation-v1":
+            raise ValueError("playwright_python requires flow-generation-v1")
+        if self.reference_image_path is None:
+            raise ValueError("playwright_python requires a reference image")
+        if not self.provider_action_confirmed:
+            raise ValueError("playwright_python requires provider-action confirmation")
+        if self.provider_action_approved_by is None:
+            raise ValueError("playwright_python requires a provider-action approver")
+        validate_safe_identifier(
+            self.provider_action_approved_by,
+            "provider_action_approved_by",
+            max_length=120,
+        )
         return self
 
 
 def generation_request_fingerprint(request: ImageGenerateRequest) -> str:
-    canonical = json.dumps(
-        {
+    canonical_payload: dict[str, str | int | None]
+    if request.executor == "local_fake":
+        canonical_payload = {
             "executor": request.executor,
             "fakeArtifactFormatVersion": request.fake_artifact_format_version,
             "generationContractVersion": request.generation_contract_version,
@@ -98,7 +152,21 @@ def generation_request_fingerprint(request: ImageGenerateRequest) -> str:
             "provider": request.provider,
             "referenceImageSha256": request.reference_image_sha256,
             "sceneVariantId": request.scene_variant_id,
-        },
+        }
+    else:
+        canonical_payload = {
+            "executor": request.executor,
+            "generationContractVersion": request.generation_contract_version,
+            "promptSha256": request.prompt_sha256,
+            "provider": request.provider,
+            "referenceImagePath": request.reference_image_path,
+            "referenceImageSha256": request.reference_image_sha256,
+            "requiredCandidateCount": request.required_candidate_count,
+            "requiredOutputResolution": request.required_output_resolution,
+            "sceneVariantId": request.scene_variant_id,
+        }
+    canonical = json.dumps(
+        canonical_payload,
         ensure_ascii=False,
         separators=(",", ":"),
         sort_keys=True,
@@ -196,6 +264,180 @@ class ImageCandidate(ImageContract):
             validate_safe_identifier(self.rejected_by, "rejected_by", max_length=120)
         if self.rejection_reason is not None:
             validate_safe_error_message(self.rejection_reason, "rejection_reason")
+        return self
+
+
+_FLOW_RUN_STAGES = frozenset(
+    {
+        "prepared",
+        "inputs_verified",
+        "dispatch_intent_recorded",
+        "dispatch_confirmed",
+        "candidates_observed",
+        "downloading",
+        "completed",
+        "ambiguous",
+        "blocked",
+        "failed",
+    }
+)
+_FLOW_SLOT_STATES = frozenset(
+    {
+        "pending",
+        "observed",
+        "download_intent_recorded",
+        "downloaded",
+        "ingested",
+        "blocked",
+    }
+)
+_FLOW_RUN_TRANSITIONS: dict[str, frozenset[str]] = {
+    "prepared": frozenset({"inputs_verified", "ambiguous", "blocked", "failed"}),
+    "inputs_verified": frozenset(
+        {"dispatch_intent_recorded", "ambiguous", "blocked", "failed"}
+    ),
+    "dispatch_intent_recorded": frozenset(
+        {"dispatch_confirmed", "ambiguous", "blocked", "failed"}
+    ),
+    "dispatch_confirmed": frozenset({"candidates_observed", "blocked", "failed"}),
+    "candidates_observed": frozenset({"downloading", "blocked", "failed"}),
+    "downloading": frozenset({"completed", "blocked", "failed"}),
+    "ambiguous": frozenset(
+        {"prepared", "dispatch_confirmed", "candidates_observed", "downloading", "blocked", "failed"}
+    ),
+    "completed": frozenset(),
+    "blocked": frozenset(),
+    "failed": frozenset(),
+}
+_FLOW_SLOT_TRANSITIONS: dict[str, frozenset[str]] = {
+    "pending": frozenset({"observed", "blocked"}),
+    "observed": frozenset({"download_intent_recorded", "blocked"}),
+    "download_intent_recorded": frozenset({"downloaded", "blocked"}),
+    "downloaded": frozenset({"ingested", "blocked"}),
+    "ingested": frozenset(),
+    "blocked": frozenset(),
+}
+
+
+def ensure_flow_run_transition(
+    current: FlowGenerationStage, target: FlowGenerationStage
+) -> None:
+    if current not in _FLOW_RUN_STAGES or target not in _FLOW_RUN_STAGES:
+        raise ValueError("unknown Flow generation stage")
+    if target not in _FLOW_RUN_TRANSITIONS[current]:
+        raise ValueError(f"illegal Flow generation transition: {current} -> {target}")
+
+
+def ensure_flow_slot_transition(
+    current: FlowCandidateSlotState, target: FlowCandidateSlotState
+) -> None:
+    if current not in _FLOW_SLOT_STATES or target not in _FLOW_SLOT_STATES:
+        raise ValueError("unknown Flow candidate slot state")
+    if target not in _FLOW_SLOT_TRANSITIONS[current]:
+        raise ValueError(f"illegal Flow candidate slot transition: {current} -> {target}")
+
+
+class FlowGenerationRun(ImageContract):
+    flow_generation_run_id: str = Field(pattern=_UUID_PATTERN, max_length=36)
+    image_generation_id: str = Field(pattern=_UUID_PATTERN, max_length=36)
+    stage: FlowGenerationStage
+    required_candidate_count: Literal[2] = 2
+    required_resolution: Literal["2K"] = "2K"
+    provider_workspace_path: str | None = None
+    provider_workspace_fingerprint: str | None = Field(default=None, pattern=_SHA256_PATTERN)
+    dispatch_attempt_number: int = Field(default=1, ge=1)
+    dispatch_intent_at: datetime | None = None
+    dispatch_confirmed_at: datetime | None = None
+    grid_evidence_path: str | None = None
+    grid_evidence_sha256: str | None = Field(default=None, pattern=_SHA256_PATTERN)
+    last_failure_code: str | None = Field(default=None, max_length=120)
+    provider_action_approved_by: str = Field(min_length=1, max_length=120)
+    provider_action_approved_at: datetime
+    created_at: datetime
+    updated_at: datetime
+
+    _provider_workspace_path = field_validator("provider_workspace_path")(
+        lambda value: None if value is None else _validate_workspace_path(value)
+    )
+    _grid_evidence_path = field_validator("grid_evidence_path")(
+        lambda value: None if value is None else _validate_workspace_path(value)
+    )
+
+    @field_validator("provider_action_approved_by")
+    @classmethod
+    def validate_approval_actor(cls, value: str) -> str:
+        return validate_safe_identifier(value, "provider_action_approved_by", max_length=120)
+
+    @field_validator("last_failure_code")
+    @classmethod
+    def validate_failure_code(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return validate_safe_identifier(value, "last_failure_code", max_length=120)
+
+    @model_validator(mode="after")
+    def validate_flow_checkpoint(self) -> Self:
+        if (self.provider_workspace_path is None) != (
+            self.provider_workspace_fingerprint is None
+        ):
+            raise ValueError("workspace path and fingerprint must be supplied together")
+        if (self.grid_evidence_path is None) != (self.grid_evidence_sha256 is None):
+            raise ValueError("grid evidence path and SHA-256 must be supplied together")
+        if self.dispatch_confirmed_at is not None and self.dispatch_intent_at is None:
+            raise ValueError("dispatch confirmation requires a prior dispatch intent")
+        if self.grid_evidence_path is not None and self.stage not in {
+            "candidates_observed",
+            "downloading",
+            "completed",
+            "ambiguous",
+            "blocked",
+            "failed",
+        }:
+            raise ValueError("grid evidence requires candidate observation")
+        if self.stage == "dispatch_intent_recorded" and self.dispatch_intent_at is None:
+            raise ValueError("dispatch intent stage requires an intent timestamp")
+        if self.stage in {"dispatch_confirmed", "candidates_observed", "downloading", "completed"}:
+            if self.dispatch_confirmed_at is None:
+                raise ValueError("post-dispatch stage requires a confirmation timestamp")
+        return self
+
+
+class FlowCandidateSlot(ImageContract):
+    flow_candidate_slot_id: str = Field(pattern=_UUID_PATTERN, max_length=36)
+    flow_generation_run_id: str = Field(pattern=_UUID_PATTERN, max_length=36)
+    slot_index: int = Field(ge=0, le=1)
+    provider_slot_fingerprint: str | None = Field(default=None, pattern=_SHA256_PATTERN)
+    state: FlowCandidateSlotState
+    download_intent_at: datetime | None = None
+    staging_path: str | None = None
+    staged_sha256: str | None = Field(default=None, pattern=_SHA256_PATTERN)
+    image_candidate_id: str | None = Field(default=None, pattern=_UUID_PATTERN, max_length=36)
+    created_at: datetime
+    updated_at: datetime
+
+    _staging_path = field_validator("staging_path")(
+        lambda value: None if value is None else _validate_workspace_path(value)
+    )
+
+    @model_validator(mode="after")
+    def validate_slot_checkpoint(self) -> Self:
+        if (self.staging_path is None) != (self.staged_sha256 is None):
+            raise ValueError("staging path and SHA-256 must be supplied together")
+        if self.state == "ingested":
+            if self.image_candidate_id is None:
+                raise ValueError("ingested slot requires an image candidate")
+            if self.download_intent_at is None or self.staging_path is None:
+                raise ValueError("ingested slot requires a prior downloaded artifact")
+        elif self.image_candidate_id is not None:
+            raise ValueError("pre-ingestion slot must not link an image candidate")
+        if self.state in {"download_intent_recorded", "downloaded", "ingested"}:
+            if self.download_intent_at is None:
+                raise ValueError("download checkpoint requires a download intent timestamp")
+        if self.state in {"downloaded", "ingested"} and self.staging_path is None:
+            raise ValueError("downloaded slot requires a staged artifact")
+        if self.state in {"observed", "download_intent_recorded", "downloaded", "ingested"}:
+            if self.provider_slot_fingerprint is None:
+                raise ValueError("observed slot requires a provider fingerprint")
         return self
 
 
