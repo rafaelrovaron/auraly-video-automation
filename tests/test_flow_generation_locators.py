@@ -314,15 +314,7 @@ def test_local_generation_pages_and_click_paths_make_no_http_requests(flow_gener
     requested_urls: list[str] = []
     flow_generation_page.on("request", lambda request: requested_urls.append(request.url))
 
-    for fixture in (
-        "ready.html",
-        "upload-complete.html",
-        "generating.html",
-        "grid-two.html",
-        "grid-three.html",
-        "ambiguous-grid.html",
-        *FLOW_GENERATION_FIXTURES[7:],
-    ):
+    for fixture in FLOW_GENERATION_FIXTURES:
         flow_generation_page.goto(fake_generation_url(fixture))
     flow_generation_page.goto(fake_generation_url("grid-two.html"))
     candidate = observe_local_candidates(flow_generation_page)[0]
@@ -330,6 +322,33 @@ def test_local_generation_pages_and_click_paths_make_no_http_requests(flow_gener
 
     assert requested_urls
     assert {urlsplit(url).scheme for url in requested_urls} == {"file"}
+
+
+@pytest.mark.parametrize("aria_disabled", ("TRUE", "1", "False", "", " true"))
+def test_scalar_locator_rejects_noncanonical_aria_disabled_values(
+    flow_generation_page: Page,
+    aria_disabled: str,
+) -> None:
+    """Accepting a malformed disabled state could treat an unavailable provider action as enabled."""
+    flow_generation_page.goto(fake_generation_url("ready.html"))
+    flow_generation_page.get_by_role("button", name="Generate").evaluate(
+        "(element, value) => element.setAttribute('aria-disabled', value)", aria_disabled
+    )
+
+    with pytest.raises(FlowGenerationUiContractError):
+        resolve_local_locator(resolve_generate_control, flow_generation_page)
+
+
+def test_scalar_locator_accepts_only_canonical_false_aria_disabled_value(
+    flow_generation_page: Page,
+) -> None:
+    """Rejecting canonical false would make an explicitly enabled semantic control unusable."""
+    flow_generation_page.goto(fake_generation_url("ready.html"))
+    flow_generation_page.get_by_role("button", name="Generate").evaluate(
+        "element => element.setAttribute('aria-disabled', 'false')"
+    )
+
+    assert resolve_local_locator(resolve_generate_control, flow_generation_page).count() == 1
 
 
 @pytest.mark.parametrize(

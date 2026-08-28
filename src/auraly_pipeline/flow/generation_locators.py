@@ -288,9 +288,9 @@ def _require_unique(
 
 
 def _is_actionable(candidate: LocatorProtocol) -> bool:
-    """Reject native-disabled and explicit ARIA-disabled semantic controls alike."""
+    """Permit only absent or canonical-false ARIA disabled state on enabled semantic controls."""
     aria_disabled = getattr(candidate, "get_attribute", lambda _name: None)("aria-disabled")
-    return candidate.is_visible() and candidate.is_enabled() and aria_disabled != "true"
+    return candidate.is_visible() and candidate.is_enabled() and aria_disabled in {None, "false"}
 
 
 def _safe_candidate_key(value: str | None) -> bool:
