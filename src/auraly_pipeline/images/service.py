@@ -122,6 +122,8 @@ class ImageService:
         self._engine.dispose()
 
     def generate(self, request: ImageGenerateRequest) -> ImageGenerationSubmission:
+        if request.executor != "local_fake":
+            raise ImageError
         request_fingerprint = generation_request_fingerprint(request)
 
         def create_linked(session: Session, job: JobRow) -> ImageGeneration:

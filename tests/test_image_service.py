@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from auraly_pipeline.campaigns.domain import CampaignCreate
@@ -14,11 +15,13 @@ from auraly_pipeline.images.db_models import ImageGenerationRow
 from auraly_pipeline.images.repository import ImageRepository
 from auraly_pipeline.images.service import (
     ImageCandidateNotFoundError,
+    ImageError,
     ImageGenerationNotFoundError,
     ImageIdempotencyConflictError,
     ImageService,
 )
 from auraly_pipeline.jobs.domain import JobExecutionResult, RetrySafety
+from auraly_pipeline.jobs.db_models import JobRow
 from auraly_pipeline.jobs.handlers import JobExecutionContext
 from tests.test_campaign_domain import valid_campaign_data
 
@@ -60,6 +63,26 @@ def _request(
         scene_variant_id=scene_variant_id,
         idempotency_key=key,
         prompt_snapshot=prompt,
+    )
+
+
+def _playwright_request(
+    campaign_id: str,
+    scene_variant_id: str,
+    *,
+    key: str,
+) -> ImageGenerateRequest:
+    return ImageGenerateRequest(
+        campaign_id=campaign_id,
+        scene_variant_id=scene_variant_id,
+        idempotency_key=key,
+        prompt_snapshot="A moonlit studio",
+        reference_image_path="references/avatar.png",
+        reference_image_sha256="a" * 64,
+        executor="playwright_python",
+        generation_contract_version="flow-generation-v1",
+        provider_action_confirmed=True,
+        provider_action_approved_by="operator-1",
     )
 
 
@@ -125,6 +148,31 @@ def test_generate_same_key_and_changed_fingerprint_raises_image_idempotency_conf
         "The idempotency key is already used by a different image generation request."
     )
     assert len(service.list_generations(scene_variant_id)) == 1
+    service.close()
+
+
+def test_generate_rejects_playwright_before_persistence_until_flow_submission_is_atomic(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "playwright-rejected.db"
+    campaign_id, scene_variant_id = _campaign(database)
+    service = _service(database)
+    request = _playwright_request(campaign_id, scene_variant_id, key="flow-not-ready")
+
+    with pytest.raises(ImageError) as raised:
+        service.generate(request)
+
+    assert raised.value.code == "image_operation_failed"
+    assert raised.value.public_message == "The image operation failed safely."
+    engine = create_sqlite_engine(database)
+    sessions = sessionmaker(engine, expire_on_commit=False, class_=Session)
+    with sessions() as session:
+        assert session.scalar(select(func.count()).select_from(JobRow)) == 0
+        assert session.scalar(select(func.count()).select_from(ImageGenerationRow)) == 0
+    engine.dispose()
+
+    fake = service.generate(_request(campaign_id, scene_variant_id, key="flow-not-ready"))
+    assert fake.reused is False
     service.close()
 
 
