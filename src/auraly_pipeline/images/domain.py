@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import PurePosixPath, PureWindowsPath
 from typing import Literal, Self
 
@@ -71,6 +71,19 @@ def _validate_workspace_path(value: str) -> str:
         or _SAFE_WORKSPACE_PATH.fullmatch(value) is None
     ):
         raise ValueError("expected a safe workspace-relative path")
+    return value
+
+
+def _validate_flow_workspace_path(value: str) -> str:
+    safe_path = _validate_workspace_path(value)
+    if PurePosixPath(safe_path).parts[:3] != ("fx", "tools", "flow"):
+        raise ValueError("expected an allowlisted relative Flow workspace route")
+    return safe_path
+
+
+def _validate_utc_timestamp(value: datetime, field_name: str) -> datetime:
+    if value.tzinfo is None or value.utcoffset() != timedelta(0):
+        raise ValueError(f"{field_name} must be a UTC-aware timestamp")
     return value
 
 
@@ -292,10 +305,8 @@ _FLOW_SLOT_STATES = frozenset(
     }
 )
 _FLOW_RUN_TRANSITIONS: dict[str, frozenset[str]] = {
-    "prepared": frozenset({"inputs_verified", "ambiguous", "blocked", "failed"}),
-    "inputs_verified": frozenset(
-        {"dispatch_intent_recorded", "ambiguous", "blocked", "failed"}
-    ),
+    "prepared": frozenset({"inputs_verified", "blocked", "failed"}),
+    "inputs_verified": frozenset({"dispatch_intent_recorded", "blocked", "failed"}),
     "dispatch_intent_recorded": frozenset(
         {"dispatch_confirmed", "ambiguous", "blocked", "failed"}
     ),
@@ -317,6 +328,23 @@ _FLOW_SLOT_TRANSITIONS: dict[str, frozenset[str]] = {
     "ingested": frozenset(),
     "blocked": frozenset(),
 }
+_FLOW_FAILURE_CODES = frozenset(
+    {
+        "flow_runtime_busy",
+        "flow_authentication_required",
+        "flow_ui_contract_failed",
+        "flow_input_verification_failed",
+        "flow_dispatch_ambiguous",
+        "flow_candidate_grid_ambiguous",
+        "flow_download_failed",
+        "flow_artifact_invalid",
+        "flow_artifact_conflict",
+        "flow_recovery_blocked",
+        "flow_diagnostic_sanitization_failed",
+        "flow_browser_close_failed",
+        "image_job_integrity_failed",
+    }
+)
 
 
 def ensure_flow_run_transition(
@@ -357,7 +385,7 @@ class FlowGenerationRun(ImageContract):
     updated_at: datetime
 
     _provider_workspace_path = field_validator("provider_workspace_path")(
-        lambda value: None if value is None else _validate_workspace_path(value)
+        lambda value: None if value is None else _validate_flow_workspace_path(value)
     )
     _grid_evidence_path = field_validator("grid_evidence_path")(
         lambda value: None if value is None else _validate_workspace_path(value)
@@ -373,7 +401,24 @@ class FlowGenerationRun(ImageContract):
     def validate_failure_code(cls, value: str | None) -> str | None:
         if value is None:
             return None
-        return validate_safe_identifier(value, "last_failure_code", max_length=120)
+        safe_code = validate_safe_identifier(value, "last_failure_code", max_length=120)
+        if safe_code not in _FLOW_FAILURE_CODES:
+            raise ValueError("last_failure_code is not an allowlisted Flow failure code")
+        return safe_code
+
+    @field_validator(
+        "provider_action_approved_at",
+        "created_at",
+        "updated_at",
+        "dispatch_intent_at",
+        "dispatch_confirmed_at",
+    )
+    @classmethod
+    def validate_utc_timestamps(cls, value: datetime | None, info: object) -> datetime | None:
+        if value is None:
+            return None
+        field_name = getattr(info, "field_name", "timestamp")
+        return _validate_utc_timestamp(value, field_name)
 
     @model_validator(mode="after")
     def validate_flow_checkpoint(self) -> Self:
@@ -389,16 +434,43 @@ class FlowGenerationRun(ImageContract):
             "candidates_observed",
             "downloading",
             "completed",
-            "ambiguous",
             "blocked",
             "failed",
         }:
             raise ValueError("grid evidence requires candidate observation")
-        if self.stage == "dispatch_intent_recorded" and self.dispatch_intent_at is None:
-            raise ValueError("dispatch intent stage requires an intent timestamp")
-        if self.stage in {"dispatch_confirmed", "candidates_observed", "downloading", "completed"}:
-            if self.dispatch_confirmed_at is None:
-                raise ValueError("post-dispatch stage requires a confirmation timestamp")
+        if self.grid_evidence_path is not None and self.dispatch_confirmed_at is None:
+            raise ValueError("grid evidence requires confirmed dispatch")
+        if self.stage in {"prepared", "inputs_verified"}:
+            if self.dispatch_intent_at is not None or self.dispatch_confirmed_at is not None:
+                raise ValueError("pre-dispatch stage must not retain dispatch checkpoints")
+        elif self.stage == "dispatch_intent_recorded":
+            if self.dispatch_intent_at is None:
+                raise ValueError("dispatch intent stage requires an intent timestamp")
+            if self.dispatch_confirmed_at is not None:
+                raise ValueError("dispatch intent stage must not retain a confirmation timestamp")
+        elif self.stage == "ambiguous":
+            if self.dispatch_intent_at is None:
+                raise ValueError("ambiguous stage requires a durable dispatch intent")
+            if self.dispatch_confirmed_at is not None:
+                raise ValueError("ambiguous stage must not retain a confirmation timestamp")
+        elif self.stage in {"dispatch_confirmed", "candidates_observed", "downloading", "completed"}:
+            if self.dispatch_intent_at is None or self.dispatch_confirmed_at is None:
+                raise ValueError("post-dispatch stage requires intent and confirmation timestamps")
+        if self.provider_action_approved_at > self.created_at:
+            raise ValueError("provider-action approval must precede run creation")
+        if self.updated_at < self.created_at:
+            raise ValueError("run updated_at must not precede created_at")
+        if self.dispatch_intent_at is not None:
+            if self.dispatch_intent_at < self.created_at or self.dispatch_intent_at > self.updated_at:
+                raise ValueError("dispatch intent timestamp is outside run chronology")
+        if self.dispatch_confirmed_at is not None:
+            dispatch_intent_at = self.dispatch_intent_at
+            if dispatch_intent_at is None:
+                raise ValueError("dispatch confirmation requires a prior dispatch intent")
+            if self.dispatch_confirmed_at < dispatch_intent_at:
+                raise ValueError("dispatch confirmation must not precede intent")
+            if self.dispatch_confirmed_at > self.updated_at:
+                raise ValueError("dispatch confirmation timestamp is outside run chronology")
         return self
 
 
@@ -419,6 +491,14 @@ class FlowCandidateSlot(ImageContract):
         lambda value: None if value is None else _validate_workspace_path(value)
     )
 
+    @field_validator("created_at", "updated_at", "download_intent_at")
+    @classmethod
+    def validate_utc_timestamps(cls, value: datetime | None, info: object) -> datetime | None:
+        if value is None:
+            return None
+        field_name = getattr(info, "field_name", "timestamp")
+        return _validate_utc_timestamp(value, field_name)
+
     @model_validator(mode="after")
     def validate_slot_checkpoint(self) -> Self:
         if (self.staging_path is None) != (self.staged_sha256 is None):
@@ -438,6 +518,12 @@ class FlowCandidateSlot(ImageContract):
         if self.state in {"observed", "download_intent_recorded", "downloaded", "ingested"}:
             if self.provider_slot_fingerprint is None:
                 raise ValueError("observed slot requires a provider fingerprint")
+        if self.updated_at < self.created_at:
+            raise ValueError("slot updated_at must not precede created_at")
+        if self.download_intent_at is not None and (
+            self.download_intent_at < self.created_at or self.download_intent_at > self.updated_at
+        ):
+            raise ValueError("download intent timestamp is outside slot chronology")
         return self
 
 

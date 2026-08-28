@@ -1,15 +1,20 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta, timezone
 import re
 
 import pytest
-from pydantic import ValidationError
+from pydantic import TypeAdapter, ValidationError
+
+import auraly_pipeline.images as images
 
 from auraly_pipeline.images.domain import (
     FlowCandidateSlot,
+    FlowCandidateSlotState,
     FlowGenerationRun,
+    FlowGenerationStage,
+    FlowReconciliationReason,
     ImageCandidate,
     ImageGenerateRequest,
     ImageGeneration,
@@ -217,6 +222,29 @@ def test_playwright_request_accepts_exact_fixed_contract() -> None:
     assert re.fullmatch(r"[0-9a-f]{64}", generation_request_fingerprint(request))
 
 
+def test_playwright_fingerprint_tracks_generation_intent_not_approval_audit() -> None:
+    request = _playwright_request()
+    fingerprint = generation_request_fingerprint(request)
+
+    assert fingerprint != generation_request_fingerprint(
+        request.model_copy(
+            update={"reference_image_path": "campaigns/campaign-1/references/other.png"}
+        )
+    )
+    assert fingerprint != generation_request_fingerprint(
+        request.model_copy(update={"reference_image_sha256": "b" * 64})
+    )
+    assert fingerprint != generation_request_fingerprint(
+        request.model_copy(update={"required_candidate_count": 1})
+    )
+    assert fingerprint != generation_request_fingerprint(
+        request.model_copy(update={"required_output_resolution": "1K"})
+    )
+    assert fingerprint == generation_request_fingerprint(
+        request.model_copy(update={"provider_action_approved_by": "operator-2"})
+    )
+
+
 @pytest.mark.parametrize(
     ("current", "target"),
     [
@@ -257,6 +285,22 @@ def test_flow_run_transition_rejects_backwards_or_terminal_changes(
 @pytest.mark.parametrize(
     ("current", "target"),
     [
+        ("prepared", "ambiguous"),
+        ("inputs_verified", "ambiguous"),
+        ("prepared", "unknown"),
+        ("unknown", "prepared"),
+    ],
+)
+def test_flow_run_transition_rejects_pre_dispatch_ambiguity_and_unknown_stages(
+    current: str, target: str
+) -> None:
+    with pytest.raises(ValueError):
+        ensure_flow_run_transition(current, target)
+
+
+@pytest.mark.parametrize(
+    ("current", "target"),
+    [
         ("pending", "observed"),
         ("observed", "download_intent_recorded"),
         ("download_intent_recorded", "downloaded"),
@@ -269,11 +313,31 @@ def test_flow_slot_transition_accepts_only_download_progressions(
     ensure_flow_slot_transition(current, target)
 
 
+@pytest.mark.parametrize(
+    ("current", "target"),
+    [
+        ("observed", "pending"),
+        ("ingested", "blocked"),
+        ("blocked", "observed"),
+        ("pending", "unknown"),
+    ],
+)
+def test_flow_slot_transition_rejects_backwards_terminal_and_unknown_states(
+    current: str, target: str
+) -> None:
+    with pytest.raises(ValueError):
+        ensure_flow_slot_transition(current, target)
+
+
 def test_flow_slot_rejects_out_of_range_index_and_unpaired_artifact_facts() -> None:
+    with pytest.raises(ValidationError):
+        _flow_slot(slot_index=-1)
     with pytest.raises(ValidationError):
         _flow_slot(slot_index=2)
     with pytest.raises(ValidationError):
         _flow_slot(staging_path="campaigns/campaign-1/staging.png")
+    with pytest.raises(ValidationError):
+        _flow_slot(staged_sha256="c" * 64)
     with pytest.raises(ValidationError):
         _flow_slot(staging_path="C:/private/staging.png", staged_sha256="c" * 64)
 
@@ -300,3 +364,164 @@ def test_flow_run_rejects_confirmation_without_intent_and_early_grid_evidence() 
             grid_evidence_path="campaigns/campaign-1/grid.png",
             grid_evidence_sha256="d" * 64,
         )
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"stage": "prepared", "dispatch_intent_at": NOW},
+        {"stage": "inputs_verified", "dispatch_confirmed_at": NOW},
+        {
+            "stage": "dispatch_intent_recorded",
+            "dispatch_intent_at": NOW,
+            "dispatch_confirmed_at": NOW,
+        },
+        {"stage": "ambiguous"},
+        {
+            "stage": "ambiguous",
+            "dispatch_intent_at": NOW,
+            "dispatch_confirmed_at": NOW,
+        },
+    ],
+)
+def test_flow_run_rejects_checkpoint_timestamps_that_break_dispatch_boundary(
+    changes: dict[str, object],
+) -> None:
+    with pytest.raises(ValidationError):
+        _flow_run(**changes)
+
+
+def test_flow_run_rejects_grid_evidence_while_dispatch_is_ambiguous() -> None:
+    with pytest.raises(ValidationError):
+        _flow_run(
+            stage="ambiguous",
+            dispatch_intent_at=NOW,
+            grid_evidence_path="campaigns/campaign-1/inspection/grid.png",
+            grid_evidence_sha256="d" * 64,
+        )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("provider_action_approved_at", NOW.replace(tzinfo=None)),
+        ("created_at", NOW.replace(tzinfo=None)),
+        ("updated_at", NOW.replace(tzinfo=None)),
+        ("dispatch_intent_at", NOW.replace(tzinfo=None)),
+        ("dispatch_confirmed_at", NOW.replace(tzinfo=None)),
+        ("created_at", NOW.astimezone(timezone(timedelta(hours=-3)))),
+    ],
+)
+def test_flow_run_requires_utc_aware_timestamps(field: str, value: datetime) -> None:
+    changes: dict[str, object] = {field: value}
+    if field == "dispatch_intent_at":
+        changes["stage"] = "dispatch_intent_recorded"
+    if field == "dispatch_confirmed_at":
+        changes.update(
+            stage="dispatch_confirmed",
+            dispatch_intent_at=NOW,
+        )
+    with pytest.raises(ValidationError):
+        _flow_run(**changes)
+
+
+def test_flow_run_requires_utc_chronology() -> None:
+    with pytest.raises(ValidationError):
+        _flow_run(created_at=NOW, updated_at=NOW - timedelta(seconds=1))
+    with pytest.raises(ValidationError):
+        _flow_run(provider_action_approved_at=NOW + timedelta(seconds=1))
+    with pytest.raises(ValidationError):
+        _flow_run(
+            stage="dispatch_confirmed",
+            dispatch_intent_at=NOW + timedelta(seconds=1),
+            dispatch_confirmed_at=NOW,
+        )
+
+
+@pytest.mark.parametrize(
+    "workspace_path",
+    [
+        "workspace/abc",
+        "fx/tools/flow?workspace=abc",
+        "fx/tools/flow#workspace",
+        "https://labs.google/fx/tools/flow",
+    ],
+)
+def test_flow_run_rejects_workspace_paths_outside_safe_flow_family(
+    workspace_path: str,
+) -> None:
+    with pytest.raises(ValidationError):
+        _flow_run(
+            provider_workspace_path=workspace_path,
+            provider_workspace_fingerprint="e" * 64,
+        )
+
+
+def test_flow_run_requires_both_workspace_and_grid_evidence_pairs() -> None:
+    with pytest.raises(ValidationError):
+        _flow_run(provider_workspace_path="fx/tools/flow/workspace-1")
+    with pytest.raises(ValidationError):
+        _flow_run(provider_workspace_fingerprint="e" * 64)
+    checkpoint = {
+        "stage": "candidates_observed",
+        "dispatch_intent_at": NOW,
+        "dispatch_confirmed_at": NOW,
+    }
+    with pytest.raises(ValidationError):
+        _flow_run(**checkpoint, grid_evidence_path="campaigns/campaign-1/inspection/grid.png")
+    with pytest.raises(ValidationError):
+        _flow_run(**checkpoint, grid_evidence_sha256="d" * 64)
+    run = _flow_run(
+        **checkpoint,
+        provider_workspace_path="fx/tools/flow/workspace-1",
+        provider_workspace_fingerprint="e" * 64,
+        grid_evidence_path="campaigns/campaign-1/inspection/grid.png",
+        grid_evidence_sha256="d" * 64,
+    )
+    assert run.provider_workspace_path == "fx/tools/flow/workspace-1"
+
+
+def test_flow_run_accepts_only_allowlisted_failure_codes() -> None:
+    assert _flow_run(last_failure_code="flow_runtime_busy").last_failure_code == "flow_runtime_busy"
+    with pytest.raises(ValidationError):
+        _flow_run(last_failure_code="unrecognized_failure")
+
+
+def test_flow_slot_requires_utc_chronology() -> None:
+    with pytest.raises(ValidationError):
+        _flow_slot(created_at=NOW.replace(tzinfo=None))
+    with pytest.raises(ValidationError):
+        _flow_slot(created_at=NOW, updated_at=NOW - timedelta(seconds=1))
+    with pytest.raises(ValidationError):
+        _flow_slot(
+            state="download_intent_recorded",
+            provider_slot_fingerprint="f" * 64,
+            download_intent_at=NOW.replace(tzinfo=None),
+        )
+    with pytest.raises(ValidationError):
+        _flow_slot(
+            state="download_intent_recorded",
+            provider_slot_fingerprint="f" * 64,
+            created_at=NOW + timedelta(seconds=1),
+            updated_at=NOW + timedelta(seconds=1),
+            download_intent_at=NOW,
+        )
+
+
+def test_flow_reconciliation_reason_rejects_unknown_value() -> None:
+    reason_adapter = TypeAdapter(FlowReconciliationReason)
+    assert reason_adapter.validate_python("no_dispatch_proven") == "no_dispatch_proven"
+    with pytest.raises(ValidationError):
+        reason_adapter.validate_python("unknown_reconciliation")
+
+
+def test_images_package_exports_only_stable_flow_contracts() -> None:
+    assert images.FlowGenerationRun is FlowGenerationRun
+    assert images.FlowCandidateSlot is FlowCandidateSlot
+    assert images.FlowGenerationStage is FlowGenerationStage
+    assert images.FlowCandidateSlotState is FlowCandidateSlotState
+    assert images.FlowReconciliationReason is FlowReconciliationReason
+    assert callable(images.ensure_flow_run_transition)
+    assert callable(images.ensure_flow_slot_transition)
+    assert not hasattr(images, "_FLOW_RUN_TRANSITIONS")
+    assert not hasattr(images, "_FLOW_SLOT_TRANSITIONS")
