@@ -37,6 +37,7 @@ class PageProtocol(Protocol[_LocatorT_co]):
         *,
         name: str | None = None,
         exact: bool | None = None,
+        include_hidden: bool | None = None,
     ) -> _LocatorT_co: ...
 
     def get_by_label(
