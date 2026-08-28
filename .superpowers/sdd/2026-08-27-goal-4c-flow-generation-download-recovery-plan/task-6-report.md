@@ -61,9 +61,10 @@ Wave 2 work, merge, or push was performed.
 - Every resolver requires one visible, enabled, non-`aria-disabled` semantic match and rejects a
   visible dialog/alertdialog before it resolves anything. Candidate identity or 2K action
   ambiguity fails closed.
-- Route validation accepts the fixed `https://labs.google/fx/tools/flow...` family with no query
-  or fragment. `file:` is deliberately a private local-fixture seam only; no public target or
-  provider configuration was added.
+- Route validation accepts only `https://labs.google/fx/tools/flow` or an exact descendant under
+  `/fx/tools/flow/`, with no query or fragment. `file:` is deliberately a private local-fixture
+  seam only when a caller supplies an exact allowlisted file URL; no public target or provider
+  configuration was added.
 - The cross-module structural scan covers Goal 4B locator/runtime plus the Goal 4C locator module
   and rejects XPath, `nth`, coordinate APIs, generated-class selectors, and image matching.
 
@@ -84,7 +85,9 @@ Wave 2 work, merge, or push was performed.
 ## Commits
 
 - `a5bd53d4f8b2378791e1e3bbb0f380fc2159061d` — `feat: define Flow generation UI contract`
-- The following documentation-only commit records this required report and the whitespace cleanup.
+- `5ddb2a59fa8d255199ab2062ddf6c7dfcb711fcf` — `docs: record Flow generation UI contract`
+  (report plus a test-format whitespace cleanup; it was not documentation-only).
+- `9a0275bc4b7fba2257b8a382e6410a0dbb031233` — `fix: harden Flow generation locator trust`
 
 ## Remaining concerns / handoff
 
@@ -93,3 +96,67 @@ Wave 2 work, merge, or push was performed.
 - Task 6 deliberately does not upload, fill prompts, dispatch Generate, record checkpoints, take
   grid evidence, or download artifacts. Those behaviors remain for Tasks 8–10 under their own
   red/green cycles.
+
+## Review correction round 1/5
+
+### Accepted findings and minimum fix
+
+1. **Critical — route trust:** replaced the broad `startswith()` and arbitrary `file:` acceptance
+   with private `_GenerationLocatorTarget` policy injection. The production policy permits only
+   `https://labs.google/fx/tools/flow` and descendants under the slash boundary, with no query or
+   fragment. `_local_test_target()` requires caller-supplied exact `file:` URLs with no suffixes.
+2. **Important — grid revalidation:** `resolve_candidate_2k_action()` now calls the same complete
+   grid validator as observation. It rejects every hidden, disabled, loading, failed, malformed,
+   unknown, or duplicate slot before returning even the selected slot's action.
+3. **Important — fixture identity:** `data-flow-candidate-id` and
+   `data-flow-completion-role` now exist only in `_LOCAL_FIXTURE_IDENTITY_SOURCE`. The production
+   policy's explicitly allowlisted semantic source is `data-candidate-id` plus
+   `data-completion-role`; a provider page lacking either fails closed. This is a contract choice,
+   not a claim that a live Flow UI exposes the attributes.
+4. **Minor — fixtures/report truth:** added `loading-grid.html`, `failed-grid.html`, and a local
+   provider-semantic identity fixture. Corrected the description of `5ddb2a5` above.
+
+### RED / GREEN evidence
+
+1. **Policy/identity RED:** the new local-policy tests initially failed at collection because the
+   target-policy helpers did not exist. After the private target and identity-source policy were
+   added, the locator suite passed: `31 passed in 6.48s`.
+2. **Grid revalidation RED:** against the prior target-only action resolver, the focused
+   non-target invalid-slot suite failed for hidden, disabled, malformed, loading, and failed
+   slots (`5 failed, 1 passed`). The duplicate case was then corrected to duplicate two
+   *non-target* identities in a three-slot grid, so it protects global uniqueness rather than only
+   the selected fingerprint.
+3. **Hidden-slot RED:** after reusing the validator, the hidden non-target case still failed
+   because ordinary role enumeration omits hidden nodes. The minimal correction enumerates grid
+   slots with `include_hidden=True` and validates their visibility before accepting the grid.
+4. **Final GREEN:**
+
+   ```text
+   uv run pytest tests/test_flow_generation_locators.py -q
+   # 37 passed in 4.64s
+
+   uv run pytest tests/test_flow_generation_domain.py tests/test_flow_generation_locators.py tests/test_flow_domain.py tests/test_flow_config.py tests/test_flow_lock.py tests/test_flow_locators.py tests/test_flow_runtime.py -q
+   # 201 passed, 2 skipped in 24.47s
+
+   uv run pytest tests/test_flow_service.py tests/test_flow_cli.py tests/test_flow_security.py -q
+   # 75 passed, 1 skipped in 19.29s
+
+   uv run pytest tests/test_flow_diagnostics.py -q
+   # 62 passed in 1.33s
+
+   uv run ruff check src/auraly_pipeline/flow/generation_locators.py src/auraly_pipeline/flow/locators.py tests/test_flow_generation_locators.py
+   uv run mypy src/auraly_pipeline/flow/generation_domain.py src/auraly_pipeline/flow/generation_locators.py src/auraly_pipeline/flow/locators.py
+   uv run python scripts/verify.py fast
+   ```
+
+   Ruff passed; mypy passed for the focused modules and then all `56` source files through
+   `verify.py fast`.
+
+### Round-1 files
+
+- `src/auraly_pipeline/flow/generation_locators.py`
+- `src/auraly_pipeline/flow/locators.py`
+- `tests/test_flow_generation_locators.py`
+- `tests/fakes/flow-generation/loading-grid.html`
+- `tests/fakes/flow-generation/failed-grid.html`
+- `tests/fakes/flow-generation/production-safe-grid.html`
