@@ -89,6 +89,7 @@ Wave 2 work, merge, or push was performed.
   (report plus a test-format whitespace cleanup; it was not documentation-only).
 - `9a0275bc4b7fba2257b8a382e6410a0dbb031233` — `fix: harden Flow generation locator trust`
 - `991620980980993b1b73983c3a57902413a76eff` — `test: type Flow locator browser helpers`
+- `7904934729f0501597908c3ebd48d6badbb1951b` — `fix: fail closed on Flow aria-disabled`
 
 ## Remaining concerns / handoff
 
@@ -214,3 +215,41 @@ change locator behavior, target/trust policy, public APIs, image/Task 2 code, or
 typing errors in `test_flow_generation_domain.py`, `test_flow_domain.py`, and
 `test_flow_security.py`. They are not introduced by this round, are outside the two requested
 files, and are left unchanged to avoid broadening this integration fix.
+
+## Review-minor correction round 3/5
+
+### Findings and fix
+
+1. The local no-network test now navigates the exact `FLOW_GENERATION_FIXTURES` tuple rather than
+   stitching a literal prefix to a numeric slice. It therefore covers `missing-2k.html`,
+   `loading-grid.html`, `failed-grid.html`, and `production-safe-grid.html` along with every other
+   Task 6 fixture, then exercises the applicable exact 2K click path from `grid-two.html`.
+2. `_is_actionable()` now permits only an absent `aria-disabled` attribute or exact canonical
+   `aria-disabled="false"`. Native-disabled controls, `true`, and every noncanonical present
+   value fail closed. Route and identity policy were not changed.
+
+### RED / GREEN evidence
+
+1. **RED:** added real-browser scalar mutations for `TRUE`, `1`, `False`, empty, and whitespace
+   prefixed `aria-disabled` values. The focused run produced `4 failed, 2 passed`: `1`, `False`,
+   empty, and whitespace were incorrectly accepted (the browser already treated `TRUE` as
+   disabled).
+2. **GREEN:** the minimal set-membership check (`None` or exact `false`) made the focused suite
+   pass:
+
+   ```text
+   uv run pytest tests/test_flow_generation_locators.py -q
+   # 43 passed in 4.71s
+
+   uv run python -m mypy src tests/test_flow_generation_locators.py tests/test_flow_locators.py
+   # Success: no issues found in 58 source files
+
+   uv run pytest tests/test_flow_generation_domain.py tests/test_flow_generation_locators.py tests/test_flow_domain.py tests/test_flow_config.py tests/test_flow_lock.py tests/test_flow_locators.py tests/test_flow_runtime.py -q
+   # 209 passed, 2 skipped in 21.11s
+
+   uv run pytest tests/test_flow_service.py tests/test_flow_cli.py tests/test_flow_security.py tests/test_flow_diagnostics.py -q
+   # 137 passed, 1 skipped in 20.84s
+
+   uv run python scripts/verify.py fast
+   # 2/2 steps passed
+   ```
