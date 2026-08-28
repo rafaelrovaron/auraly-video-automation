@@ -67,6 +67,7 @@ class SemanticPageFake:
         *,
         name: str | None = None,
         exact: bool | None = None,
+        include_hidden: bool | None = None,
     ) -> LocatorFake:
         key = ("role", role, name, exact)
         self.calls.append(key)

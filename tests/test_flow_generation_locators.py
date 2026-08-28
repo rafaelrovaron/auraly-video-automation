@@ -1,15 +1,20 @@
 from __future__ import annotations
 
 import ast
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
+from typing import Protocol
 from urllib.parse import urlsplit
 
-from playwright.sync_api import Page, sync_playwright
+from playwright.sync_api import Locator, Page, sync_playwright
 import pytest
 
-from auraly_pipeline.flow.generation_domain import FlowGenerationUiContractError
+from auraly_pipeline.flow.generation_domain import (
+    FlowCandidateObservation,
+    FlowGenerationUiContractError,
+)
 from auraly_pipeline.flow.generation_locators import (
+    _GenerationLocatorTarget,
     _PRODUCTION_GENERATION_TARGET,
     _local_test_target,
     observe_completed_candidate_slots,
@@ -47,10 +52,50 @@ LOCAL_FLOW_TARGET = _local_test_target(
 )
 
 
-def resolve_on_local_page(resolver: object, page: Page, *args: object) -> object:
-    """Invoke a real resolver through the explicit local-only route and identity policy."""
-    assert callable(resolver)
-    return resolver(page, *args, _target=LOCAL_FLOW_TARGET)  # type: ignore[operator]
+class _ScalarResolver(Protocol):
+    """One semantic control resolver with the private deterministic-target seam."""
+
+    def __call__(self, page: Page, *, _target: _GenerationLocatorTarget) -> Locator: ...
+
+
+class _CandidateObserver(Protocol):
+    """The candidate observation resolver with the private deterministic-target seam."""
+
+    def __call__(
+        self,
+        page: Page,
+        *,
+        _target: _GenerationLocatorTarget,
+    ) -> tuple[FlowCandidateObservation, ...]: ...
+
+
+class _CandidateActionResolver(Protocol):
+    """The exact candidate-action resolver with the private deterministic-target seam."""
+
+    def __call__(
+        self,
+        page: Page,
+        fingerprint: str,
+        *,
+        _target: _GenerationLocatorTarget,
+    ) -> Locator: ...
+
+
+def resolve_local_locator(resolver: _ScalarResolver, page: Page) -> Locator:
+    """Resolve one scalar control through the exact local-only target policy."""
+    return resolver(page, _target=LOCAL_FLOW_TARGET)
+
+
+def observe_local_candidates(page: Page) -> tuple[FlowCandidateObservation, ...]:
+    """Observe local fixture candidates through the exact local-only target policy."""
+    observer: _CandidateObserver = observe_completed_candidate_slots
+    return observer(page, _target=LOCAL_FLOW_TARGET)
+
+
+def resolve_local_candidate_2k(page: Page, fingerprint: str) -> Locator:
+    """Resolve the exact local fixture 2K action for one observed candidate."""
+    resolver: _CandidateActionResolver = resolve_candidate_2k_action
+    return resolver(page, fingerprint, _target=LOCAL_FLOW_TARGET)
 
 
 @pytest.fixture(scope="module", name="flow_generation_page")
@@ -68,9 +113,9 @@ def test_ready_page_resolves_exact_generation_controls(flow_generation_page: Pag
     """A missing or duplicate input/control would make provider mutation ambiguous."""
     flow_generation_page.goto(fake_generation_url("ready.html"))
 
-    assert resolve_on_local_page(resolve_reference_input, flow_generation_page).count() == 1
-    assert resolve_on_local_page(resolve_generation_prompt, flow_generation_page).count() == 1
-    assert resolve_on_local_page(resolve_generate_control, flow_generation_page).count() == 1
+    assert resolve_local_locator(resolve_reference_input, flow_generation_page).count() == 1
+    assert resolve_local_locator(resolve_generation_prompt, flow_generation_page).count() == 1
+    assert resolve_local_locator(resolve_generate_control, flow_generation_page).count() == 1
 
 
 def test_upload_complete_and_generating_pages_resolve_exact_state_indicators(
@@ -78,10 +123,10 @@ def test_upload_complete_and_generating_pages_resolve_exact_state_indicators(
 ) -> None:
     """Treating generic page readiness as positive provider state would permit unsafe progress."""
     flow_generation_page.goto(fake_generation_url("upload-complete.html"))
-    assert resolve_on_local_page(resolve_upload_complete, flow_generation_page).count() == 1
+    assert resolve_local_locator(resolve_upload_complete, flow_generation_page).count() == 1
 
     flow_generation_page.goto(fake_generation_url("generating.html"))
-    assert resolve_on_local_page(resolve_generating_indicator, flow_generation_page).count() == 1
+    assert resolve_local_locator(resolve_generating_indicator, flow_generation_page).count() == 1
 
 
 def test_grid_three_returns_unique_semantic_identities_in_validated_order(
@@ -90,7 +135,7 @@ def test_grid_three_returns_unique_semantic_identities_in_validated_order(
     """Position-only candidate selection would bind downloads to the wrong provider result."""
     flow_generation_page.goto(fake_generation_url("grid-three.html"))
 
-    observations = resolve_on_local_page(observe_completed_candidate_slots, flow_generation_page)
+    observations = observe_local_candidates(flow_generation_page)
 
     assert [item.semantic_order for item in observations] == [0, 1, 2]
     assert len({item.fingerprint for item in observations}) == 3
@@ -102,11 +147,9 @@ def test_exact_candidate_2k_action_is_bound_by_observed_fingerprint(
 ) -> None:
     """Changing the fingerprint match must prevent a 2K action on another candidate."""
     flow_generation_page.goto(fake_generation_url("grid-two.html"))
-    (first, second) = resolve_on_local_page(observe_completed_candidate_slots, flow_generation_page)
+    (first, second) = observe_local_candidates(flow_generation_page)
 
-    action = resolve_on_local_page(
-        resolve_candidate_2k_action, flow_generation_page, second.fingerprint
-    )
+    action = resolve_local_candidate_2k(flow_generation_page, second.fingerprint)
 
     assert action.count() == 1
     assert action.is_visible()
@@ -129,7 +172,7 @@ def test_every_scalar_locator_rejects_zero_multiple_hidden_disabled_and_blocking
     fixture: str,
     target_id: str,
     duplicate_html: str,
-    resolver: object,
+    resolver: _ScalarResolver,
 ) -> None:
     """Allowing a non-unique or unusable UI element would make a browser action non-deterministic."""
     assert callable(resolver)
@@ -143,7 +186,7 @@ def test_every_scalar_locator_rejects_zero_multiple_hidden_disabled_and_blocking
         flow_generation_page.goto(fake_generation_url(fixture))
         flow_generation_page.evaluate(mutation)
         with pytest.raises(FlowGenerationUiContractError):
-            resolve_on_local_page(resolver, flow_generation_page)
+            resolve_local_locator(resolver, flow_generation_page)
 
 
 def test_duplicate_or_missing_candidate_identity_and_2k_action_fail_closed(
@@ -152,12 +195,12 @@ def test_duplicate_or_missing_candidate_identity_and_2k_action_fail_closed(
     """Duplicate provider identities or absent 2K actions must block rather than guess."""
     flow_generation_page.goto(fake_generation_url("ambiguous-grid.html"))
     with pytest.raises(FlowGenerationUiContractError):
-        resolve_on_local_page(observe_completed_candidate_slots, flow_generation_page)
+        observe_local_candidates(flow_generation_page)
 
     flow_generation_page.goto(fake_generation_url("missing-2k.html"))
-    (candidate,) = resolve_on_local_page(observe_completed_candidate_slots, flow_generation_page)
+    (candidate,) = observe_local_candidates(flow_generation_page)
     with pytest.raises(FlowGenerationUiContractError):
-        resolve_on_local_page(resolve_candidate_2k_action, flow_generation_page, candidate.fingerprint)
+        resolve_local_candidate_2k(flow_generation_page, candidate.fingerprint)
 
 
 def test_candidate_grid_rejects_zero_multiple_hidden_disabled_and_blocking_slots(
@@ -174,7 +217,7 @@ def test_candidate_grid_rejects_zero_multiple_hidden_disabled_and_blocking_slots
         flow_generation_page.goto(fake_generation_url("grid-two.html"))
         flow_generation_page.evaluate(mutation)
         with pytest.raises(FlowGenerationUiContractError):
-            resolve_on_local_page(observe_completed_candidate_slots, flow_generation_page)
+            observe_local_candidates(flow_generation_page)
 
 
 def test_candidate_2k_action_rejects_zero_multiple_hidden_disabled_and_blocking_matches(
@@ -189,12 +232,10 @@ def test_candidate_2k_action_rejects_zero_multiple_hidden_disabled_and_blocking_
         "document.body.insertAdjacentHTML('beforeend', '<dialog open aria-label=\"Blocking\"></dialog>')",
     ):
         flow_generation_page.goto(fake_generation_url("grid-two.html"))
-        fingerprint = resolve_on_local_page(
-            observe_completed_candidate_slots, flow_generation_page
-        )[0].fingerprint
+        fingerprint = observe_local_candidates(flow_generation_page)[0].fingerprint
         flow_generation_page.evaluate(mutation)
         with pytest.raises(FlowGenerationUiContractError):
-            resolve_on_local_page(resolve_candidate_2k_action, flow_generation_page, fingerprint)
+            resolve_local_candidate_2k(flow_generation_page, fingerprint)
 
 
 @pytest.mark.parametrize(
@@ -224,15 +265,13 @@ def test_candidate_2k_action_revalidates_every_non_target_grid_slot(
 ) -> None:
     """Ignoring one invalid non-target slot could make the selected candidate's grid evidence stale."""
     flow_generation_page.goto(fake_generation_url("grid-two.html"))
-    target_fingerprint = resolve_on_local_page(
-        observe_completed_candidate_slots, flow_generation_page
-    )[0].fingerprint
+    target_fingerprint = observe_local_candidates(flow_generation_page)[0].fingerprint
     flow_generation_page.goto(fake_generation_url(fixture))
     if mutation is not None:
         flow_generation_page.evaluate(mutation)
 
     with pytest.raises(FlowGenerationUiContractError):
-        resolve_on_local_page(resolve_candidate_2k_action, flow_generation_page, target_fingerprint)
+        resolve_local_candidate_2k(flow_generation_page, target_fingerprint)
 
 
 def test_generation_locators_reject_an_untrusted_route(flow_generation_page: Page) -> None:
@@ -259,14 +298,13 @@ def test_generation_locators_reject_an_untrusted_route(flow_generation_page: Pag
 )
 def test_every_generation_resolver_rejects_an_untrusted_route(
     flow_generation_page: Page,
-    resolver: object,
+    resolver: Callable[[Page], object],
 ) -> None:
     """A redirect must prevent every observation or action resolver before DOM inspection."""
-    assert callable(resolver)
     flow_generation_page.goto("data:text/html,<main></main>")
 
     with pytest.raises(FlowGenerationUiContractError) as caught:
-        resolver(flow_generation_page)  # type: ignore[operator]
+        resolver(flow_generation_page)
 
     assert caught.value.failed_step == "open_workspace"
 
@@ -287,8 +325,8 @@ def test_local_generation_pages_and_click_paths_make_no_http_requests(flow_gener
     ):
         flow_generation_page.goto(fake_generation_url(fixture))
     flow_generation_page.goto(fake_generation_url("grid-two.html"))
-    candidate = resolve_on_local_page(observe_completed_candidate_slots, flow_generation_page)[0]
-    resolve_on_local_page(resolve_candidate_2k_action, flow_generation_page, candidate.fingerprint).click()
+    candidate = observe_local_candidates(flow_generation_page)[0]
+    resolve_local_candidate_2k(flow_generation_page, candidate.fingerprint).click()
 
     assert requested_urls
     assert {urlsplit(url).scheme for url in requested_urls} == {"file"}
