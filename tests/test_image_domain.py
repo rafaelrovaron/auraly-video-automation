@@ -464,6 +464,43 @@ def test_flow_slot_ingested_requires_candidate_and_prior_download() -> None:
         )
 
 
+def _complete_ingested_slot_values() -> dict[str, object]:
+    return {
+        "state": "ingested",
+        "provider_slot_fingerprint": "f" * 64,
+        "download_intent_at": NOW,
+        "staging_path": "campaigns/campaign-1/staging.png",
+        "staged_sha256": "c" * 64,
+        "image_candidate_id": "77777777-7777-4777-8777-777777777777",
+    }
+
+
+def test_flow_slot_accepts_complete_ingested_checkpoint() -> None:
+    slot = _flow_slot(**_complete_ingested_slot_values())
+
+    assert slot.state == "ingested"
+
+
+@pytest.mark.parametrize(
+    "removed_fields",
+    [
+        pytest.param(("provider_slot_fingerprint",), id="fingerprint"),
+        pytest.param(("download_intent_at",), id="download-intent"),
+        pytest.param(("staging_path", "staged_sha256"), id="staging-pair"),
+        pytest.param(("image_candidate_id",), id="candidate-link"),
+    ],
+)
+def test_flow_slot_ingested_requires_each_independent_checkpoint_fact(
+    removed_fields: tuple[str, ...],
+) -> None:
+    values = _complete_ingested_slot_values()
+    for field in removed_fields:
+        values.pop(field)
+
+    with pytest.raises(ValidationError):
+        _flow_slot(**values)
+
+
 @pytest.mark.parametrize(
     "changes",
     [
