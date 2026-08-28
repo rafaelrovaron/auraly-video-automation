@@ -117,4 +117,3 @@ def test_flow_package_exports_generation_contracts() -> None:
     """Dropping exports would force callers to reach into browser implementation modules."""
     assert flow.FlowCandidateObservation is FlowCandidateObservation
     assert flow.FlowGenerationFailedStep is FlowGenerationFailedStep
-
