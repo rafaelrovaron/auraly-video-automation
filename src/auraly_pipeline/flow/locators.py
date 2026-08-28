@@ -9,7 +9,7 @@ from .domain import FlowLocatorName, FlowUiContractError
 
 
 LocatorStrategyKind = Literal["role", "label", "placeholder", "text", "attribute"]
-SemanticRole = Literal["main", "button", "dialog", "alertdialog"]
+SemanticRole = Literal["main", "button", "dialog", "alertdialog", "status", "list", "listitem"]
 
 
 class LocatorProtocol(Protocol):

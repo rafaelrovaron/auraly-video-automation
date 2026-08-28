@@ -5,6 +5,17 @@ from .diagnostics import FlowDiagnosticWriter, sanitize_trace_archive
 from .lock import BrowserRuntimeLock
 from .runtime import GoogleFlowRuntime
 from .service import FlowPreflightService
+from .generation_domain import (
+    FlowCandidateObservation,
+    FlowDispatchAmbiguousError,
+    FlowDownloadCorrelationError,
+    FlowGenerationFailedStep,
+    FlowGenerationLocatorName,
+    FlowGenerationObservation,
+    FlowGenerationRuntimeError,
+    FlowGenerationUiContractError,
+    FlowWorkspaceIdentity,
+)
 from .domain import (
     FLOW_URL,
     FlowAuthenticationTimeoutError,
@@ -30,6 +41,14 @@ __all__ = [
     "FlowBrowserLaunchError",
     "FlowDiagnosticSanitizationError",
     "FlowDiagnosticWriter",
+    "FlowCandidateObservation",
+    "FlowDispatchAmbiguousError",
+    "FlowDownloadCorrelationError",
+    "FlowGenerationFailedStep",
+    "FlowGenerationLocatorName",
+    "FlowGenerationObservation",
+    "FlowGenerationRuntimeError",
+    "FlowGenerationUiContractError",
     "FlowFailureEvidence",
     "FlowFailedStep",
     "FlowLocatorName",
@@ -41,6 +60,7 @@ __all__ = [
     "FlowRuntimeObservation",
     "FlowUiContractError",
     "FlowUnexpectedStateError",
+    "FlowWorkspaceIdentity",
     "GoogleFlowRuntime",
     "resolve_flow_runtime_config",
     "sanitize_trace_archive",
