@@ -503,21 +503,60 @@ class FlowCandidateSlot(ImageContract):
     def validate_slot_checkpoint(self) -> Self:
         if (self.staging_path is None) != (self.staged_sha256 is None):
             raise ValueError("staging path and SHA-256 must be supplied together")
-        if self.state == "ingested":
-            if self.image_candidate_id is None:
-                raise ValueError("ingested slot requires an image candidate")
-            if self.download_intent_at is None or self.staging_path is None:
-                raise ValueError("ingested slot requires a prior downloaded artifact")
-        elif self.image_candidate_id is not None:
-            raise ValueError("pre-ingestion slot must not link an image candidate")
-        if self.state in {"download_intent_recorded", "downloaded", "ingested"}:
-            if self.download_intent_at is None:
-                raise ValueError("download checkpoint requires a download intent timestamp")
-        if self.state in {"downloaded", "ingested"} and self.staging_path is None:
-            raise ValueError("downloaded slot requires a staged artifact")
-        if self.state in {"observed", "download_intent_recorded", "downloaded", "ingested"}:
+        if self.state == "pending":
+            if any(
+                value is not None
+                for value in (
+                    self.provider_slot_fingerprint,
+                    self.download_intent_at,
+                    self.staging_path,
+                    self.image_candidate_id,
+                )
+            ):
+                raise ValueError("pending slot must not retain later checkpoint facts")
+        elif self.state == "observed":
             if self.provider_slot_fingerprint is None:
                 raise ValueError("observed slot requires a provider fingerprint")
+            if any(
+                value is not None
+                for value in (
+                    self.download_intent_at,
+                    self.staging_path,
+                    self.image_candidate_id,
+                )
+            ):
+                raise ValueError("observed slot must not retain download checkpoint facts")
+        elif self.state == "download_intent_recorded":
+            if self.provider_slot_fingerprint is None or self.download_intent_at is None:
+                raise ValueError("download intent checkpoint requires slot identity and intent")
+            if self.staging_path is not None or self.image_candidate_id is not None:
+                raise ValueError("download intent checkpoint must not retain downloaded facts")
+        elif self.state == "downloaded":
+            if (
+                self.provider_slot_fingerprint is None
+                or self.download_intent_at is None
+                or self.staging_path is None
+            ):
+                raise ValueError("downloaded slot requires identity, intent, and staged artifact")
+            if self.image_candidate_id is not None:
+                raise ValueError("downloaded slot must not link an image candidate")
+        elif self.state == "ingested":
+            if (
+                self.provider_slot_fingerprint is None
+                or self.download_intent_at is None
+                or self.staging_path is None
+                or self.image_candidate_id is None
+            ):
+                raise ValueError("ingested slot requires all prior download checkpoint facts")
+        elif self.state == "blocked":
+            if self.image_candidate_id is not None:
+                raise ValueError("blocked slot must not link an image candidate")
+            if self.download_intent_at is not None and self.provider_slot_fingerprint is None:
+                raise ValueError("blocked download intent requires a provider fingerprint")
+            if self.staging_path is not None and (
+                self.provider_slot_fingerprint is None or self.download_intent_at is None
+            ):
+                raise ValueError("blocked staged artifact requires prior identity and intent")
         if self.updated_at < self.created_at:
             raise ValueError("slot updated_at must not precede created_at")
         if self.download_intent_at is not None and (

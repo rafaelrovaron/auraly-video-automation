@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta, timezone
 import re
+from typing import get_args
 
 import pytest
 from pydantic import TypeAdapter, ValidationError
@@ -240,9 +241,41 @@ def test_playwright_fingerprint_tracks_generation_intent_not_approval_audit() ->
     assert fingerprint != generation_request_fingerprint(
         request.model_copy(update={"required_output_resolution": "1K"})
     )
+    assert fingerprint != generation_request_fingerprint(
+        request.model_copy(update={"prompt_snapshot": "A different moonlit studio"})
+    )
+    assert fingerprint != generation_request_fingerprint(
+        request.model_copy(update={"executor": "local_fake"})
+    )
+    assert fingerprint != generation_request_fingerprint(
+        request.model_copy(update={"provider": "different_provider"})
+    )
+    assert fingerprint != generation_request_fingerprint(
+        request.model_copy(update={"scene_variant_id": "99999999-9999-4999-8999-999999999999"})
+    )
+    assert fingerprint != generation_request_fingerprint(
+        request.model_copy(update={"generation_contract_version": "image-generation-v1"})
+    )
     assert fingerprint == generation_request_fingerprint(
         request.model_copy(update={"provider_action_approved_by": "operator-2"})
     )
+
+
+def test_executor_authorization_contract_rejects_missing_or_fake_authorization() -> None:
+    with pytest.raises(ValidationError):
+        _playwright_request(provider_action_approved_by=None)
+    for changes in (
+        {"provider_action_confirmed": True},
+        {"provider_action_approved_by": "operator-1"},
+    ):
+        with pytest.raises(ValidationError):
+            ImageGenerateRequest(
+                campaign_id="campaign-1",
+                scene_variant_id=SCENE_ID,
+                idempotency_key="fake-authorization",
+                prompt_snapshot="safe prompt",
+                **changes,
+            )
 
 
 @pytest.mark.parametrize(
@@ -298,6 +331,49 @@ def test_flow_run_transition_rejects_pre_dispatch_ambiguity_and_unknown_stages(
         ensure_flow_run_transition(current, target)
 
 
+def test_flow_run_transition_matrix_is_exact_and_closed() -> None:
+    expected_stages = {
+        "prepared",
+        "inputs_verified",
+        "dispatch_intent_recorded",
+        "dispatch_confirmed",
+        "candidates_observed",
+        "downloading",
+        "completed",
+        "ambiguous",
+        "blocked",
+        "failed",
+    }
+    expected_targets = {
+        "prepared": {"inputs_verified", "blocked", "failed"},
+        "inputs_verified": {"dispatch_intent_recorded", "blocked", "failed"},
+        "dispatch_intent_recorded": {"dispatch_confirmed", "ambiguous", "blocked", "failed"},
+        "dispatch_confirmed": {"candidates_observed", "blocked", "failed"},
+        "candidates_observed": {"downloading", "blocked", "failed"},
+        "downloading": {"completed", "blocked", "failed"},
+        "completed": set(),
+        "ambiguous": {
+            "prepared",
+            "dispatch_confirmed",
+            "candidates_observed",
+            "downloading",
+            "blocked",
+            "failed",
+        },
+        "blocked": set(),
+        "failed": set(),
+    }
+
+    assert set(get_args(FlowGenerationStage)) == expected_stages
+    for current in expected_stages:
+        for target in expected_stages:
+            if target in expected_targets[current]:
+                ensure_flow_run_transition(current, target)
+            else:
+                with pytest.raises(ValueError):
+                    ensure_flow_run_transition(current, target)
+
+
 @pytest.mark.parametrize(
     ("current", "target"),
     [
@@ -329,6 +405,34 @@ def test_flow_slot_transition_rejects_backwards_terminal_and_unknown_states(
         ensure_flow_slot_transition(current, target)
 
 
+def test_flow_slot_transition_matrix_is_exact_and_closed() -> None:
+    expected_states = {
+        "pending",
+        "observed",
+        "download_intent_recorded",
+        "downloaded",
+        "ingested",
+        "blocked",
+    }
+    expected_targets = {
+        "pending": {"observed", "blocked"},
+        "observed": {"download_intent_recorded", "blocked"},
+        "download_intent_recorded": {"downloaded", "blocked"},
+        "downloaded": {"ingested", "blocked"},
+        "ingested": set(),
+        "blocked": set(),
+    }
+
+    assert set(get_args(FlowCandidateSlotState)) == expected_states
+    for current in expected_states:
+        for target in expected_states:
+            if target in expected_targets[current]:
+                ensure_flow_slot_transition(current, target)
+            else:
+                with pytest.raises(ValueError):
+                    ensure_flow_slot_transition(current, target)
+
+
 def test_flow_slot_rejects_out_of_range_index_and_unpaired_artifact_facts() -> None:
     with pytest.raises(ValidationError):
         _flow_slot(slot_index=-1)
@@ -350,6 +454,103 @@ def test_flow_slot_ingested_requires_candidate_and_prior_download() -> None:
             state="ingested",
             image_candidate_id="77777777-7777-4777-8777-777777777777",
         )
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"state": "pending", "provider_slot_fingerprint": "f" * 64},
+        {"state": "pending", "download_intent_at": NOW},
+        {
+            "state": "pending",
+            "staging_path": "campaigns/campaign-1/staging.png",
+            "staged_sha256": "c" * 64,
+        },
+        {"state": "observed", "provider_slot_fingerprint": "f" * 64, "download_intent_at": NOW},
+        {
+            "state": "observed",
+            "provider_slot_fingerprint": "f" * 64,
+            "staging_path": "campaigns/campaign-1/staging.png",
+            "staged_sha256": "c" * 64,
+        },
+        {
+            "state": "download_intent_recorded",
+            "provider_slot_fingerprint": "f" * 64,
+            "download_intent_at": NOW,
+            "staging_path": "campaigns/campaign-1/staging.png",
+            "staged_sha256": "c" * 64,
+        },
+        {"state": "blocked", "download_intent_at": NOW},
+        {
+            "state": "blocked",
+            "provider_slot_fingerprint": "f" * 64,
+            "staging_path": "campaigns/campaign-1/staging.png",
+            "staged_sha256": "c" * 64,
+        },
+    ],
+)
+def test_flow_slot_rejects_facts_from_later_download_states(
+    changes: dict[str, object],
+) -> None:
+    with pytest.raises(ValidationError):
+        _flow_slot(**changes)
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {},
+        {"provider_slot_fingerprint": "f" * 64},
+        {"provider_slot_fingerprint": "f" * 64, "download_intent_at": NOW},
+        {
+            "provider_slot_fingerprint": "f" * 64,
+            "download_intent_at": NOW,
+            "staging_path": "campaigns/campaign-1/staging.png",
+            "staged_sha256": "c" * 64,
+        },
+    ],
+)
+def test_blocked_flow_slot_preserves_only_consistent_recovery_facts(
+    changes: dict[str, object],
+) -> None:
+    assert _flow_slot(state="blocked", **changes).state == "blocked"
+
+
+@pytest.mark.parametrize(
+    ("state", "changes"),
+    [
+        ("pending", {}),
+        ("observed", {"provider_slot_fingerprint": "f" * 64}),
+        (
+            "download_intent_recorded",
+            {"provider_slot_fingerprint": "f" * 64, "download_intent_at": NOW},
+        ),
+        (
+            "downloaded",
+            {
+                "provider_slot_fingerprint": "f" * 64,
+                "download_intent_at": NOW,
+                "staging_path": "campaigns/campaign-1/staging.png",
+                "staged_sha256": "c" * 64,
+            },
+        ),
+        (
+            "ingested",
+            {
+                "provider_slot_fingerprint": "f" * 64,
+                "download_intent_at": NOW,
+                "staging_path": "campaigns/campaign-1/staging.png",
+                "staged_sha256": "c" * 64,
+                "image_candidate_id": "77777777-7777-4777-8777-777777777777",
+            },
+        ),
+    ],
+)
+def test_flow_slot_accepts_only_its_exact_checkpoint_facts(
+    state: str,
+    changes: dict[str, object],
+) -> None:
+    assert _flow_slot(state=state, **changes).state == state
 
 
 def test_flow_run_rejects_confirmation_without_intent_and_early_grid_evidence() -> None:
@@ -482,7 +683,22 @@ def test_flow_run_requires_both_workspace_and_grid_evidence_pairs() -> None:
 
 
 def test_flow_run_accepts_only_allowlisted_failure_codes() -> None:
-    assert _flow_run(last_failure_code="flow_runtime_busy").last_failure_code == "flow_runtime_busy"
+    for code in (
+        "flow_runtime_busy",
+        "flow_authentication_required",
+        "flow_ui_contract_failed",
+        "flow_input_verification_failed",
+        "flow_dispatch_ambiguous",
+        "flow_candidate_grid_ambiguous",
+        "flow_download_failed",
+        "flow_artifact_invalid",
+        "flow_artifact_conflict",
+        "flow_recovery_blocked",
+        "flow_diagnostic_sanitization_failed",
+        "flow_browser_close_failed",
+        "image_job_integrity_failed",
+    ):
+        assert _flow_run(last_failure_code=code).last_failure_code == code
     with pytest.raises(ValidationError):
         _flow_run(last_failure_code="unrecognized_failure")
 
@@ -510,12 +726,29 @@ def test_flow_slot_requires_utc_chronology() -> None:
 
 def test_flow_reconciliation_reason_rejects_unknown_value() -> None:
     reason_adapter = TypeAdapter(FlowReconciliationReason)
-    assert reason_adapter.validate_python("no_dispatch_proven") == "no_dispatch_proven"
+    for reason in (
+        "no_dispatch_proven",
+        "existing_dispatch_reconciled",
+        "staged_artifact_reconciled",
+        "completed_generation_reconciled",
+    ):
+        assert reason_adapter.validate_python(reason) == reason
     with pytest.raises(ValidationError):
         reason_adapter.validate_python("unknown_reconciliation")
 
 
 def test_images_package_exports_only_stable_flow_contracts() -> None:
+    expected_exports = {
+        "FlowCandidateSlot",
+        "FlowCandidateSlotState",
+        "FlowGenerationRun",
+        "FlowGenerationStage",
+        "FlowReconciliationReason",
+        "ensure_flow_run_transition",
+        "ensure_flow_slot_transition",
+    }
+
+    assert set(images.__all__) == expected_exports
     assert images.FlowGenerationRun is FlowGenerationRun
     assert images.FlowCandidateSlot is FlowCandidateSlot
     assert images.FlowGenerationStage is FlowGenerationStage
@@ -523,5 +756,12 @@ def test_images_package_exports_only_stable_flow_contracts() -> None:
     assert images.FlowReconciliationReason is FlowReconciliationReason
     assert callable(images.ensure_flow_run_transition)
     assert callable(images.ensure_flow_slot_transition)
-    assert not hasattr(images, "_FLOW_RUN_TRANSITIONS")
-    assert not hasattr(images, "_FLOW_SLOT_TRANSITIONS")
+    for private_or_unsupported_name in (
+        "_FLOW_RUN_TRANSITIONS",
+        "_FLOW_SLOT_TRANSITIONS",
+        "FlowGenerationRunRow",
+        "FlowCandidateSlotRow",
+        "ImageRepository",
+        "Page",
+    ):
+        assert not hasattr(images, private_or_unsupported_name)
