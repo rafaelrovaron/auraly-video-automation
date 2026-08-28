@@ -261,6 +261,14 @@ def test_playwright_fingerprint_tracks_generation_intent_not_approval_audit() ->
     )
 
 
+def test_playwright_fingerprint_matches_approved_canonical_payload_golden() -> None:
+    request = _playwright_request()
+
+    assert generation_request_fingerprint(request) == (
+        "7e3b448e73592d91c255c5bafab9e53e88474cc6a1cf48e6044023ed7881583b"
+    )
+
+
 def test_executor_authorization_contract_rejects_missing_or_fake_authorization() -> None:
     with pytest.raises(ValidationError):
         _playwright_request(provider_action_approved_by=None)
@@ -453,6 +461,71 @@ def test_flow_slot_ingested_requires_candidate_and_prior_download() -> None:
         _flow_slot(
             state="ingested",
             image_candidate_id="77777777-7777-4777-8777-777777777777",
+        )
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"state": "observed"},
+        {"state": "download_intent_recorded", "download_intent_at": NOW},
+        {"state": "download_intent_recorded", "provider_slot_fingerprint": "f" * 64},
+        {
+            "state": "downloaded",
+            "download_intent_at": NOW,
+            "staging_path": "campaigns/campaign-1/staging.png",
+            "staged_sha256": "c" * 64,
+        },
+        {
+            "state": "downloaded",
+            "provider_slot_fingerprint": "f" * 64,
+            "staging_path": "campaigns/campaign-1/staging.png",
+            "staged_sha256": "c" * 64,
+        },
+        {
+            "state": "downloaded",
+            "provider_slot_fingerprint": "f" * 64,
+            "download_intent_at": NOW,
+        },
+    ],
+)
+def test_flow_slot_rejects_each_missing_required_checkpoint_predecessor(
+    changes: dict[str, object],
+) -> None:
+    with pytest.raises(ValidationError):
+        _flow_slot(**changes)
+
+
+@pytest.mark.parametrize(
+    ("state", "changes"),
+    [
+        ("pending", {}),
+        ("observed", {"provider_slot_fingerprint": "f" * 64}),
+        (
+            "download_intent_recorded",
+            {"provider_slot_fingerprint": "f" * 64, "download_intent_at": NOW},
+        ),
+        (
+            "downloaded",
+            {
+                "provider_slot_fingerprint": "f" * 64,
+                "download_intent_at": NOW,
+                "staging_path": "campaigns/campaign-1/staging.png",
+                "staged_sha256": "c" * 64,
+            },
+        ),
+        ("blocked", {"provider_slot_fingerprint": "f" * 64}),
+    ],
+)
+def test_flow_slot_rejects_candidate_link_before_ingested(
+    state: str,
+    changes: dict[str, object],
+) -> None:
+    with pytest.raises(ValidationError):
+        _flow_slot(
+            state=state,
+            image_candidate_id="77777777-7777-4777-8777-777777777777",
+            **changes,
         )
 
 
