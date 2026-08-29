@@ -128,6 +128,8 @@ def _run_values(generation_id: str = "generation-1", **overrides: object) -> dic
 
 
 def _insert_run(connection, **overrides: object) -> None:
+    values = _run_values()
+    values.update(overrides)
     connection.execute(
         text(
             "INSERT INTO flow_generation_runs (id,image_generation_id,stage,required_candidate_count,"
@@ -141,7 +143,7 @@ def _insert_run(connection, **overrides: object) -> None:
             ":last_failure_code,:provider_action_approved_by,:provider_action_approved_at,"
             ":created_at,:updated_at)"
         ),
-        _run_values(**overrides),
+        values,
     )
 
 
@@ -164,6 +166,11 @@ def _slot_values(run_id: str = "run-1", **overrides: object) -> dict[str, object
 
 
 def _insert_slot(connection, **overrides: object) -> None:
+    run_id = overrides.pop("run_id", "run-1")
+    if not isinstance(run_id, str):
+        raise TypeError("run_id must be a string")
+    values = _slot_values(run_id)
+    values.update(overrides)
     connection.execute(
         text(
             "INSERT INTO flow_candidate_slots (id,flow_generation_run_id,slot_index,"
@@ -172,7 +179,7 @@ def _insert_slot(connection, **overrides: object) -> None:
             "(:id,:flow_generation_run_id,:slot_index,:provider_slot_fingerprint,:state,"
             ":download_intent_at,:staging_path,:staged_sha256,:image_candidate_id,:created_at,:updated_at)"
         ),
-        _slot_values(**overrides),
+        values,
     )
 
 

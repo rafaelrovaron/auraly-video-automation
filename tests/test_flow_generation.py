@@ -8,6 +8,7 @@ import hashlib
 import inspect
 import json
 from pathlib import Path
+from typing import Literal
 
 from playwright.sync_api import Locator, Page, sync_playwright
 import pytest
@@ -786,7 +787,7 @@ def test_preintent_session_open_and_route_errors_are_sanitized(
                 raise RuntimeError(private)
             return FailingSession()
 
-        def __exit__(self, *_args: object) -> bool:
+        def __exit__(self, *_args: object) -> Literal[False]:
             return False
 
     runtime = FlowGenerationRuntime(
@@ -851,7 +852,7 @@ def test_production_session_holds_goal_4b_lock_through_session_close(
             assert workspace == _workspace()
             events.append("workspace_opened")
 
-        def __exit__(self, *_args: object) -> bool:
+        def __exit__(self, *_args: object) -> Literal[False]:
             events.append("session_closed")
             return False
 
