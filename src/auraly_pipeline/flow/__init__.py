@@ -1,6 +1,15 @@
 """Google Flow preflight contracts and runtime components."""
 
 from .config import FlowRuntimeConfig, resolve_flow_runtime_config
+from .artifacts import (
+    FlowArtifactConflictError,
+    FlowArtifactFacts,
+    FlowArtifactInvalidError,
+    allocate_flow_staging_path,
+    inspect_flow_artifact,
+    publish_flow_artifact_exclusive,
+    resolve_flow_final_path,
+)
 from .diagnostics import FlowDiagnosticWriter, sanitize_trace_archive
 from .lock import BrowserRuntimeLock
 from .runtime import GoogleFlowRuntime
@@ -36,6 +45,9 @@ from .domain import (
 __all__ = [
     "FLOW_URL",
     "BrowserRuntimeLock",
+    "FlowArtifactConflictError",
+    "FlowArtifactFacts",
+    "FlowArtifactInvalidError",
     "FlowRuntimeConfig",
     "FlowAuthenticationTimeoutError",
     "FlowBrowserLaunchError",
@@ -62,6 +74,10 @@ __all__ = [
     "FlowUnexpectedStateError",
     "FlowWorkspaceIdentity",
     "GoogleFlowRuntime",
+    "allocate_flow_staging_path",
+    "inspect_flow_artifact",
+    "publish_flow_artifact_exclusive",
     "resolve_flow_runtime_config",
+    "resolve_flow_final_path",
     "sanitize_trace_archive",
 ]

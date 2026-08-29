@@ -19,6 +19,7 @@ dependencies = [
   "playwright>=1.62,<2",
   "sqlalchemy>=2.0,<3",
   "alembic>=1.16,<2",
+  "Pillow>=11,<12",
 ]
 
 [project.scripts]
