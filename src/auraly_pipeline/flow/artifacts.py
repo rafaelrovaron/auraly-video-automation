@@ -66,6 +66,7 @@ class _ArtifactSnapshot:
 class _StagingCleanupBinding:
     staging_name: str
     parent_identity: _FileIdentity
+    artifact_identity: _FileIdentity
     descriptor: int
     parent_descriptor: int
     windows_delete_handle: bool
@@ -375,6 +376,7 @@ def _bind_staging_cleanup(
         return _StagingCleanupBinding(
             staging_name=staging.name,
             parent_identity=parent_identity,
+            artifact_identity=expected,
             descriptor=descriptor,
             parent_descriptor=parent_descriptor,
             windows_delete_handle=True,
@@ -398,6 +400,7 @@ def _bind_staging_cleanup(
     return _StagingCleanupBinding(
         staging_name=staging.name,
         parent_identity=parent_identity,
+        artifact_identity=expected,
         descriptor=descriptor,
         parent_descriptor=descriptor,
         windows_delete_handle=False,
@@ -411,11 +414,59 @@ def _delete_bound_staging(binding: _StagingCleanupBinding) -> None:
         else:
             if _identity_from_stat(os.fstat(binding.descriptor)) != binding.parent_identity:
                 raise FlowArtifactInvalidError("staging directory changed before cleanup")
-            os.unlink(binding.staging_name, dir_fd=binding.descriptor)
+            quarantine_name = _move_posix_staging_to_quarantine(binding)
+            os.unlink(quarantine_name, dir_fd=binding.descriptor)
     except OSError as exc:
         raise FlowArtifactInvalidError("unable to remove bound staging artifact") from exc
     finally:
         _close_cleanup_binding(binding)
+
+
+def _move_posix_staging_to_quarantine(binding: _StagingCleanupBinding) -> str:
+    """Atomically move the expected entry before any POSIX unlink by name."""
+    for _ in range(16):
+        quarantine_name = f".cleanup-{uuid4().hex}.part"
+        try:
+            _rename_posix_noreplace(
+                binding.descriptor,
+                binding.staging_name,
+                binding.descriptor,
+                quarantine_name,
+            )
+        except FileExistsError:
+            continue
+        metadata = os.stat(quarantine_name, dir_fd=binding.descriptor, follow_symlinks=False)
+        if not stat.S_ISREG(metadata.st_mode) or _identity_from_stat(metadata) != binding.artifact_identity:
+            raise FlowArtifactInvalidError("staging artifact changed during cleanup")
+        return quarantine_name
+    raise FlowArtifactInvalidError("unable to reserve staging cleanup quarantine")
+
+
+def _rename_posix_noreplace(source_dir_fd: int, source_name: str, target_dir_fd: int, target_name: str) -> None:
+    """Use POSIX's platform-specific no-replace rename or fail closed."""
+    import ctypes
+
+    libc = ctypes.CDLL(None, use_errno=True)
+    try:
+        renameat2 = libc.renameat2
+    except AttributeError as exc:
+        raise FlowArtifactInvalidError("platform cannot atomically quarantine staging cleanup") from exc
+    renameat2.argtypes = (ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint)
+    renameat2.restype = ctypes.c_int
+    ctypes.set_errno(0)
+    result = renameat2(
+        source_dir_fd,
+        os.fsencode(source_name),
+        target_dir_fd,
+        os.fsencode(target_name),
+        1,  # RENAME_NOREPLACE
+    )
+    if result == 0:
+        return
+    error = ctypes.get_errno()
+    if error == errno.EEXIST:
+        raise FileExistsError(error, "cleanup quarantine already exists", target_name)
+    raise OSError(error, "unable to atomically quarantine staging cleanup", source_name)
 
 
 def _assert_cleanup_parent_current(parent: Path, expected: _FileIdentity) -> None:

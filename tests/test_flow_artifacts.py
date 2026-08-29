@@ -260,8 +260,9 @@ def test_matching_residue_syncs_final_before_unlinking_staging(
     assert not staging.exists()
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX directory-descriptor semantics")
 @pytest.mark.parametrize("recovery", [False, True])
-def test_cleanup_parent_substitution_never_deletes_external_staging_alias(
+def test_posix_cleanup_parent_substitution_fails_closed_and_preserves_staging_residue(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, recovery: bool
 ) -> None:
     staging, final = _valid_staging_and_final(tmp_path)
@@ -273,10 +274,7 @@ def test_cleanup_parent_substitution_never_deletes_external_staging_alias(
     outside = tmp_path / "outside"
     outside.mkdir()
     import auraly_pipeline.flow.artifacts as artifacts
-    hook_completed = False
-
     def replace_parent_after_cleanup_revalidation() -> None:
-        nonlocal hook_completed
         original_parent.rename(preserved_parent)
         outside_staging = outside / ".staging" / staging.name
         outside_staging.parent.mkdir(parents=True)
@@ -288,7 +286,6 @@ def test_cleanup_parent_substitution_never_deletes_external_staging_alias(
         )
         assert (preserved_parent / ".staging" / staging.name).exists()
         assert outside_staging.exists()
-        hook_completed = True
 
     monkeypatch.setattr(
         artifacts,
@@ -300,13 +297,36 @@ def test_cleanup_parent_substitution_never_deletes_external_staging_alias(
     with pytest.raises(FlowArtifactConflictError):
         publish_flow_artifact_exclusive(staging, final, trusted_root=tmp_path)
 
-    if hook_completed:
-        assert not (preserved_parent / ".staging" / staging.name).exists()
-        assert (outside / ".staging" / staging.name).exists()
-    else:
-        assert (original_parent / ".staging" / staging.name).exists()
-        assert not (outside / ".staging" / staging.name).exists()
+    assert (preserved_parent / ".staging" / staging.name).exists()
+    assert (outside / ".staging" / staging.name).exists()
     assert not (outside / final.name).exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX directory-descriptor semantics")
+def test_posix_cleanup_child_swap_preserves_replacement_after_revalidation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    staging, final = _valid_staging_and_final(tmp_path)
+    replacement = staging.with_name("replacement.part")
+    replacement_bytes = b"attacker-controlled replacement"
+    replacement.write_bytes(replacement_bytes)
+    import auraly_pipeline.flow.artifacts as artifacts
+
+    def replace_child_after_cleanup_revalidation() -> None:
+        os.replace(replacement, staging)
+
+    monkeypatch.setattr(
+        artifacts,
+        "_after_flow_artifact_cleanup_revalidation",
+        replace_child_after_cleanup_revalidation,
+        raising=False,
+    )
+
+    with pytest.raises(FlowArtifactConflictError):
+        publish_flow_artifact_exclusive(staging, final, trusted_root=tmp_path)
+
+    assert final.exists()
+    assert any(path.read_bytes() == replacement_bytes for path in staging.parent.iterdir())
 
 
 def test_crash_after_staging_before_link_preserves_residue(
