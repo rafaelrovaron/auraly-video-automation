@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable, Iterator
 from contextlib import AbstractContextManager, contextmanager
 import hashlib
+import inspect
 import json
 from pathlib import Path
 
@@ -28,7 +29,6 @@ from auraly_pipeline.flow.generation_domain import (
 from auraly_pipeline.flow.generation_locators import (
     _GenerationLocatorTarget,
     _local_test_target,
-    observe_completed_candidate_slots,
 )
 
 
@@ -500,7 +500,7 @@ def test_dispatch_rejects_workspace_identity_mismatch_before_click(
 
     assert raised.value.failed_step == "open_workspace"
     assert flow_generation_page.evaluate("window.generateClicks || 0") == 0
-    assert checkpoint_sink.events == ["inputs_verified"]
+    assert checkpoint_sink.events == []
 
 
 def test_dispatch_revalidates_current_route_before_workspace_bound_click(
@@ -523,7 +523,25 @@ def test_dispatch_revalidates_current_route_before_workspace_bound_click(
     assert flow_generation_page.evaluate("window.generateClicks || 0") == 0
 
 
-def test_reconcile_requires_persisted_baseline_and_new_result_fingerprint(
+def test_route_change_after_intent_is_ambiguous_without_click(
+    flow_generation_page: Page,
+    reference_png: Path,
+) -> None:
+    class IntentRedirectingSink(_CheckpointSink):
+        def record_dispatch_intent(self, workspace: FlowWorkspaceIdentity) -> None:
+            super().record_dispatch_intent(workspace)
+            flow_generation_page.goto("data:text/html,redirected")
+
+    runtime = _runtime_for_fixture("ready.html", flow_generation_page)
+    _make_generate_show_generating(flow_generation_page)
+
+    with pytest.raises(FlowDispatchAmbiguousError):
+        runtime.prepare_and_dispatch(_prepared_request(reference_png), IntentRedirectingSink(flow_generation_page))
+
+    assert flow_generation_page.evaluate("window.generateClicks || 0") == 0
+
+
+def test_reconcile_never_confirms_caller_supplied_or_new_result_evidence(
     flow_generation_page: Page,
 ) -> None:
     runtime = _runtime_for_fixture(
@@ -533,18 +551,9 @@ def test_reconcile_requires_persisted_baseline_and_new_result_fingerprint(
         generation_timeout_seconds=0,
     )
     checkpoint_sink = _CheckpointSink(flow_generation_page)
-    baseline = frozenset(
-        candidate.fingerprint
-        for candidate in observe_completed_candidate_slots(
-            flow_generation_page, _target=LOCAL_TARGET
-        )
-    )
-
     assert runtime.reconcile(_workspace(), checkpoint_sink) is False
     flow_generation_page.evaluate("document.querySelector('li').remove()")
-    assert runtime.reconcile(
-        _workspace(), checkpoint_sink, prior_result_fingerprints=baseline
-    ) is False
+    assert runtime.reconcile(_workspace(), checkpoint_sink) is False
     flow_generation_page.evaluate(
         """document.querySelector('ul').insertAdjacentHTML(
             'beforeend',
@@ -552,9 +561,13 @@ def test_reconcile_requires_persisted_baseline_and_new_result_fingerprint(
         )"""
     )
 
-    assert runtime.reconcile(
-        _workspace(), checkpoint_sink, prior_result_fingerprints=baseline
-    ) is True
+    assert runtime.reconcile(_workspace(), checkpoint_sink) is False
+    assert "prior_result_fingerprints" not in inspect.signature(runtime.reconcile).parameters
+    with pytest.raises(TypeError):
+        runtime.reconcile(  # type: ignore[call-arg]
+            _workspace(), checkpoint_sink, prior_result_fingerprints=frozenset({"0" * 64})
+        )
+    assert checkpoint_sink.events == []
 
 
 def test_reconcile_rejects_preexisting_generating_state_without_attempt_evidence(
@@ -568,9 +581,7 @@ def test_reconcile_rejects_preexisting_generating_state_without_attempt_evidence
     )
     checkpoint_sink = _CheckpointSink(flow_generation_page)
 
-    assert runtime.reconcile(
-        _workspace(), checkpoint_sink, prior_result_fingerprints=frozenset()
-    ) is False
+    assert runtime.reconcile(_workspace(), checkpoint_sink) is False
     assert checkpoint_sink.events == []
 
 
@@ -709,6 +720,10 @@ def test_generation_error_facts_are_read_only_and_context_transportable() -> Non
         error.failed_step = "upload_reference"  # type: ignore[misc]
     with pytest.raises(AttributeError):
         error._failed_step = "upload_reference"  # type: ignore[misc]
+    error.__dict__["_failed_step"] = "upload_reference"
+    error.__dict__["_failed_locator"] = "REFERENCE_INPUT"
+    assert error.failed_step == "verify_prompt"
+    assert error.failed_locator is None
 
     @contextmanager
     def transport() -> Iterator[None]:
@@ -742,6 +757,10 @@ def test_production_session_holds_goal_4b_lock_through_session_close(
             events.append("session_opened")
             return self
 
+        def open_workspace(self, workspace: FlowWorkspaceIdentity) -> None:
+            assert workspace == _workspace()
+            events.append("workspace_opened")
+
         def __exit__(self, *_args: object) -> bool:
             events.append("session_closed")
             return False
@@ -761,7 +780,13 @@ def test_production_session_holds_goal_4b_lock_through_session_close(
         runtime_config=runtime_config,
     )
 
-    with runtime._open_authenticated_session():
-        assert events == ["lock_acquired", "session_opened"]
+    with runtime._open_authenticated_session(workspace=_workspace()):
+        assert events == ["lock_acquired", "session_opened", "workspace_opened"]
 
-    assert events == ["lock_acquired", "session_opened", "session_closed", "lock_released"]
+    assert events == [
+        "lock_acquired",
+        "session_opened",
+        "workspace_opened",
+        "session_closed",
+        "lock_released",
+    ]

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from typing import Literal
+from weakref import WeakKeyDictionary
 
 from pydantic import Field, field_validator
 
@@ -67,6 +68,9 @@ _LOCATOR_NAMES: frozenset[str] = frozenset(
         "CANDIDATE_2K_ACTION",
     }
 )
+_ERROR_FACTS: WeakKeyDictionary[
+    BaseException, tuple[FlowGenerationFailedStep, FlowGenerationLocatorName | None]
+] = WeakKeyDictionary()
 
 
 class FlowWorkspaceIdentity(ContractModel):
@@ -126,19 +130,18 @@ class FlowGenerationRuntimeError(RuntimeError):
         if failed_locator is not None and failed_locator not in _LOCATOR_NAMES:
             raise ValueError("generation error requires an allowlisted locator")
         RuntimeError.__init__(self)
-        self._failed_step = failed_step
-        self._failed_locator = failed_locator
+        _ERROR_FACTS[self] = (failed_step, failed_locator)
 
     @property
     def failed_step(self) -> FlowGenerationFailedStep:
-        return self._failed_step
+        return _ERROR_FACTS[self][0]
 
     @property
     def failed_locator(self) -> FlowGenerationLocatorName | None:
-        return self._failed_locator
+        return _ERROR_FACTS[self][1]
 
     def __setattr__(self, name: str, value: object) -> None:
-        if name in {"_failed_step", "_failed_locator"} and hasattr(self, name):
+        if name in {"_failed_step", "_failed_locator"}:
             raise AttributeError("generation error facts are read-only")
         super().__setattr__(name, value)
 

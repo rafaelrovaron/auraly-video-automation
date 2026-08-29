@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
 import hashlib
@@ -40,6 +40,7 @@ class _FlowRuntimeTarget:
     flow_path: str
     authentication_origin: str
     authentication_paths: frozenset[str] | None
+    workspace_urls: frozenset[tuple[str, str]] | None = None
 
 
 @dataclass
@@ -173,7 +174,25 @@ class FlowBrowserSession:
 
     def workspace_identity(self) -> FlowWorkspaceIdentity:
         """Derive the only persistable workspace identity from the trusted current provider route."""
+        if self._target.workspace_urls is not None:
+            for workspace_path, workspace_url in self._target.workspace_urls:
+                if self.page.url == workspace_url:
+                    return _workspace_identity_for_path(workspace_path)
+            raise FlowUnexpectedStateError(failed_step="navigate_flow")
         return _workspace_identity_for_url(self.page.url)
+
+    def open_workspace(self, workspace: FlowWorkspaceIdentity) -> None:
+        """Navigate only to a validated workspace route under the authenticated fixed origin."""
+        self.require_current_flow_page()
+        workspace_url = _workspace_url_for_target(workspace, self._target)
+        self._navigation_started = True
+        self.page.goto(
+            workspace_url,
+            wait_until="domcontentloaded",
+            timeout=self._config.navigation_timeout_seconds * 1000,
+        )
+        if self.workspace_identity() != workspace:
+            raise FlowUnexpectedStateError(failed_step="navigate_flow")
 
     def _await_authenticated_flow_page(self) -> None:
         deadline = self._monotonic() + self._config.login_timeout_seconds
@@ -293,10 +312,19 @@ def _local_test_target(
     navigation_url: str,
     flow_url: str,
     login_urls: tuple[str, ...],
+    workspace_urls: Mapping[str, str] | None = None,
 ) -> _FlowRuntimeTarget:
     """Build a local-file routing policy for deterministic tests inside this module's package."""
     flow = urlsplit(flow_url)
-    if flow.scheme != "file" or any(urlsplit(url).scheme != "file" for url in login_urls):
+    local_workspace_urls = () if workspace_urls is None else tuple(workspace_urls.items())
+    if (
+        flow.scheme != "file"
+        or any(urlsplit(url).scheme != "file" for url in login_urls)
+        or any(
+            urlsplit(url).scheme != "file" or urlsplit(url).query or urlsplit(url).fragment
+            for _workspace_path, url in local_workspace_urls
+        )
+    ):
         raise ValueError("local Flow targets require file URLs")
     return _FlowRuntimeTarget(
         navigation_url=navigation_url,
@@ -305,6 +333,7 @@ def _local_test_target(
         flow_path=flow.path,
         authentication_origin="file://",
         authentication_paths=frozenset(urlsplit(url).path for url in login_urls),
+        workspace_urls=frozenset(local_workspace_urls) if workspace_urls is not None else None,
     )
 
 
@@ -513,10 +542,31 @@ def _workspace_identity_for_url(url: str) -> FlowWorkspaceIdentity:
         or _SAFE_WORKSPACE_PATH.fullmatch(workspace_path) is None
     ):
         raise FlowUnexpectedStateError(failed_step="navigate_flow")
+    return _workspace_identity_for_path(workspace_path)
+
+
+def _workspace_identity_for_path(workspace_path: str) -> FlowWorkspaceIdentity:
+    """Build a safe immutable identity after the origin/query/fragment policy has been checked."""
+    if _SAFE_WORKSPACE_PATH.fullmatch(workspace_path) is None:
+        raise FlowUnexpectedStateError(failed_step="navigate_flow")
     return FlowWorkspaceIdentity(
         workspace_path=workspace_path,
         fingerprint=hashlib.sha256(workspace_path.encode("utf-8")).hexdigest(),
     )
+
+
+def _workspace_url_for_target(workspace: FlowWorkspaceIdentity, target: _FlowRuntimeTarget) -> str:
+    """Resolve a workspace solely from its validated safe identity and immutable target policy."""
+    if _workspace_identity_for_path(workspace.workspace_path) != workspace:
+        raise FlowUnexpectedStateError(failed_step="navigate_flow")
+    if target.workspace_urls is not None:
+        local_workspace_url = dict(target.workspace_urls).get(workspace.workspace_path)
+        if local_workspace_url is None:
+            raise FlowUnexpectedStateError(failed_step="navigate_flow")
+        return local_workspace_url
+    if target.flow_origin != "https://labs.google" or target.flow_path != "/fx/tools/flow":
+        raise FlowUnexpectedStateError(failed_step="navigate_flow")
+    return f"{target.flow_origin}/{workspace.workspace_path}"
 
 
 def _origin(url: str) -> str:

@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast
 from collections.abc import Callable
 from contextlib import AbstractContextManager, contextmanager
+import hashlib
 from pathlib import Path
 from typing import Iterator, cast
 
@@ -29,6 +30,7 @@ from auraly_pipeline.flow.runtime import (
     _workspace_identity_for_url,
 )
 from auraly_pipeline.flow import runtime as runtime_module
+from auraly_pipeline.flow.generation_domain import FlowWorkspaceIdentity
 from tests.flow_browser_support import fake_flow_url
 
 
@@ -95,6 +97,65 @@ def test_workspace_identity_accepts_only_safe_production_flow_subpaths() -> None
     ):
         with pytest.raises(FlowUnexpectedStateError):
             _workspace_identity_for_url(unsafe)
+
+
+def test_authenticated_session_opens_only_the_bound_local_workspace(tmp_path: Path) -> None:
+    """The generation seam navigates a fixed local workspace and verifies its identity."""
+    workspace_path = "fx/tools/flow/local-workspace"
+    workspace = FlowWorkspaceIdentity(
+        workspace_path=workspace_path,
+        fingerprint=hashlib.sha256(workspace_path.encode("utf-8")).hexdigest(),
+    )
+    target = _local_test_target(
+        navigation_url=fake_flow_url("ready.html"),
+        flow_url=fake_flow_url("ready.html"),
+        login_urls=(fake_flow_url("login-required.html"),),
+        workspace_urls={workspace_path: fake_flow_url("ready.html")},
+    )
+
+    with FlowBrowserSession(config(tmp_path), _target=target) as session:
+        session.open_workspace(workspace)
+        assert session.page.url == fake_flow_url("ready.html")
+        assert session.workspace_identity() == workspace
+
+
+def test_local_workspace_target_rejects_untrusted_suffixes_and_wrong_bindings(tmp_path: Path) -> None:
+    """The private workspace seam cannot be redirected to a query, fragment, or other route."""
+    workspace_path = "fx/tools/flow/local-workspace"
+    workspace = FlowWorkspaceIdentity(
+        workspace_path=workspace_path,
+        fingerprint=hashlib.sha256(workspace_path.encode("utf-8")).hexdigest(),
+    )
+    for unsafe_url in (
+        f"{fake_flow_url('ready.html')}?private=token",
+        f"{fake_flow_url('ready.html')}#private",
+    ):
+        with pytest.raises(ValueError):
+            _local_test_target(
+                navigation_url=fake_flow_url("ready.html"),
+                flow_url=fake_flow_url("ready.html"),
+                login_urls=(fake_flow_url("login-required.html"),),
+                workspace_urls={workspace_path: unsafe_url},
+            )
+
+    target = _local_test_target(
+        navigation_url=fake_flow_url("ready.html"),
+        flow_url=fake_flow_url("ready.html"),
+        login_urls=(fake_flow_url("login-required.html"),),
+        workspace_urls={workspace_path: fake_flow_url("ready.html")},
+    )
+    wrong_workspace = FlowWorkspaceIdentity(
+        workspace_path="fx/tools/flow/other-workspace",
+        fingerprint=hashlib.sha256(b"fx/tools/flow/other-workspace").hexdigest(),
+    )
+
+    with FlowBrowserSession(config(tmp_path), _target=target) as session:
+        with pytest.raises(FlowUnexpectedStateError):
+            session.open_workspace(wrong_workspace)
+        with pytest.raises(FlowUnexpectedStateError):
+            session.open_workspace(
+                workspace.model_copy(update={"fingerprint": "0" * 64})
+            )
 
 
 def test_login_timeout_has_no_screenshot_or_trace(tmp_path: Path) -> None:
