@@ -12,7 +12,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
 )
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from auraly_pipeline.campaigns.db_models import Base
 
@@ -124,6 +124,100 @@ class ImageCandidateRow(Base):
     rejection_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     superseded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     superseded_by_candidate_id: Mapped[str | None] = mapped_column(
+        ForeignKey("image_candidates.id", ondelete="RESTRICT"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class FlowGenerationRunRow(Base):
+    __tablename__ = "flow_generation_runs"
+    __table_args__ = (
+        CheckConstraint("required_candidate_count = 2", name="flow_run_candidate_count"),
+        CheckConstraint("required_resolution = '2K'", name="flow_run_resolution"),
+        CheckConstraint(
+            "stage IN ('prepared','inputs_verified','dispatch_intent_recorded',"
+            "'dispatch_confirmed','candidates_observed','downloading','completed',"
+            "'ambiguous','blocked','failed')",
+            name="flow_run_stage",
+        ),
+        CheckConstraint("dispatch_attempt_number > 0", name="flow_run_dispatch_attempt_number"),
+        CheckConstraint(
+            "(provider_workspace_path IS NULL) = (provider_workspace_fingerprint IS NULL)",
+            name="flow_run_workspace_pair",
+        ),
+        CheckConstraint(
+            "(grid_evidence_path IS NULL) = (grid_evidence_sha256 IS NULL)",
+            name="flow_run_grid_evidence_pair",
+        ),
+        CheckConstraint(
+            "dispatch_confirmed_at IS NULL OR dispatch_intent_at IS NOT NULL",
+            name="flow_run_dispatch_confirmation_requires_intent",
+        ),
+        UniqueConstraint("image_generation_id", name="uq_flow_generation_runs_image_generation_id"),
+        Index("ix_flow_generation_runs_stage", "stage"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    image_generation_id: Mapped[str] = mapped_column(
+        ForeignKey("image_generations.id", ondelete="RESTRICT")
+    )
+    stage: Mapped[str] = mapped_column(String(32))
+    required_candidate_count: Mapped[int] = mapped_column(Integer)
+    required_resolution: Mapped[str] = mapped_column(String(8))
+    provider_workspace_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    provider_workspace_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    dispatch_attempt_number: Mapped[int] = mapped_column(Integer)
+    dispatch_intent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    dispatch_confirmed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    grid_evidence_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    grid_evidence_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    last_failure_code: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    provider_action_approved_by: Mapped[str] = mapped_column(String(120))
+    provider_action_approved_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    slots: Mapped[list[FlowCandidateSlotRow]] = relationship(
+        foreign_keys="FlowCandidateSlotRow.flow_generation_run_id", cascade=""
+    )
+
+
+class FlowCandidateSlotRow(Base):
+    __tablename__ = "flow_candidate_slots"
+    __table_args__ = (
+        CheckConstraint("slot_index >= 0 AND slot_index < 2", name="flow_slot_index"),
+        CheckConstraint(
+            "state IN ('pending','observed','download_intent_recorded','downloaded','ingested','blocked')",
+            name="flow_slot_state",
+        ),
+        CheckConstraint(
+            "(staging_path IS NULL) = (staged_sha256 IS NULL)", name="flow_slot_staging_pair"
+        ),
+        CheckConstraint(
+            "(state = 'ingested') = (image_candidate_id IS NOT NULL)",
+            name="flow_slot_ingested_candidate",
+        ),
+        UniqueConstraint(
+            "flow_generation_run_id", "slot_index", name="uq_flow_candidate_slots_run_index"
+        ),
+        UniqueConstraint("image_candidate_id", name="uq_flow_candidate_slots_image_candidate_id"),
+        Index("ix_flow_candidate_slots_run_id", "flow_generation_run_id"),
+        Index("ix_flow_candidate_slots_state", "state"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    flow_generation_run_id: Mapped[str] = mapped_column(
+        ForeignKey("flow_generation_runs.id", ondelete="RESTRICT")
+    )
+    slot_index: Mapped[int] = mapped_column(Integer)
+    provider_slot_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    state: Mapped[str] = mapped_column(String(32))
+    download_intent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    staging_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    staged_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    image_candidate_id: Mapped[str | None] = mapped_column(
         ForeignKey("image_candidates.id", ondelete="RESTRICT"), nullable=True
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

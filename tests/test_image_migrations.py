@@ -178,10 +178,15 @@ def test_image_migration_upgrades_0003_database_and_creates_image_tables(
 
     engine = create_engine(sqlite_url(database))
     inspector = inspect(engine)
-    assert {"image_generations", "image_candidates"}.issubset(inspector.get_table_names())
+    assert {
+        "image_generations",
+        "image_candidates",
+        "flow_generation_runs",
+        "flow_candidate_slots",
+    }.issubset(inspector.get_table_names())
     with engine.connect() as connection:
         assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == (
-            "0004_image_domain"
+            "0005_flow_generation_recovery"
         )
         triggers = {
             row[0]
@@ -206,13 +211,64 @@ def test_fresh_database_reaches_image_domain_head(tmp_path: Path) -> None:
     migrate_database(database)
 
     engine = create_engine(sqlite_url(database))
-    assert {"image_generations", "image_candidates"}.issubset(
+    assert {
+        "image_generations",
+        "image_candidates",
+        "flow_generation_runs",
+        "flow_candidate_slots",
+    }.issubset(
         inspect(engine).get_table_names()
     )
     with engine.connect() as connection:
         assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == (
-            "0004_image_domain"
+            "0005_flow_generation_recovery"
         )
+    engine.dispose()
+
+
+def test_flow_generation_recovery_preserves_legacy_local_fake_rows(tmp_path: Path) -> None:
+    database = tmp_path / "legacy-upgrade.db"
+    config = _config(database)
+    command.upgrade(config, "0004_image_domain")
+
+    engine = create_engine(sqlite_url(database))
+    with engine.begin() as connection:
+        connection.execute(text("PRAGMA foreign_keys=ON"))
+        _insert_campaign_scene_job(connection)
+        _insert_generation(
+            connection,
+            generation_id="generation-1",
+            job_id="job-1",
+            generation_number=1,
+        )
+        _insert_candidate(
+            connection,
+            candidate_id="candidate-1",
+            generation_id="generation-1",
+            candidate_index=0,
+        )
+    engine.dispose()
+
+    command.upgrade(config, "head")
+
+    engine = create_engine(sqlite_url(database))
+    with engine.connect() as connection:
+        generation = connection.execute(
+            text(
+                "SELECT executor, provider_state FROM image_generations "
+                "WHERE id='generation-1'"
+            )
+        ).one()
+        candidate = connection.execute(
+            text(
+                "SELECT image_generation_id, candidate_index FROM image_candidates "
+                "WHERE id='candidate-1'"
+            )
+        ).one()
+        flow_runs = connection.execute(text("SELECT COUNT(*) FROM flow_generation_runs")).scalar_one()
+    assert generation == ("local_fake", "queued")
+    assert candidate == ("generation-1", 0)
+    assert flow_runs == 0
     engine.dispose()
 
 
