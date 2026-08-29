@@ -24,12 +24,12 @@ _SAFE_IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
 _FORMAT_SUFFIXES = {"png": ".png", "jpeg": ".jpeg", "webp": ".webp"}
 _PILLOW_FORMATS = {"PNG": "png", "JPEG": "jpeg", "WEBP": "webp"}
 _EXTENSION_FORMATS = {".png": "png", ".jpg": "jpeg", ".jpeg": "jpeg", ".webp": "webp"}
+_LEGACY_CLEANUP_NAME = re.compile(r"^\.cleanup-[0-9a-f]{32}\.part$")
 
 # Private deterministic race seam. Production leaves it unset.
 _before_flow_artifact_link: Callable[[], None] | None = None
 _after_flow_artifact_revalidation_before_link: Callable[[], None] | None = None
 _after_flow_artifact_cleanup_revalidation: Callable[[], None] | None = None
-_after_flow_artifact_cleanup_quarantine_identity_check: Callable[[int, str], None] | None = None
 
 
 class FlowArtifactInvalidError(RuntimeError):
@@ -90,7 +90,7 @@ def allocate_flow_staging_path(
         candidate_index=candidate_index,
     )
     staging_dir = candidate_dir / ".staging"
-    _make_directory(staging_dir, _canonical_root(work_root))
+    _make_private_staging_directory(staging_dir, _canonical_root(work_root))
     while True:
         staging = staging_dir / f"{uuid4().hex}.part"
         try:
@@ -146,9 +146,11 @@ def publish_flow_artifact_exclusive(
     expected_staging = final.parent / ".staging"
     if staging.parent != expected_staging or staging.suffix != ".part":
         raise FlowArtifactInvalidError("staging path is outside the candidate staging directory")
+    _make_private_staging_directory(staging.parent, root)
     _make_directory(final.parent, root)
     _contained_path(staging, root)
     _contained_path(final, root)
+    staging = _resolve_staging_for_publication(staging, final, root)
     staged = _inspect_artifact(staging, root=root, root_identity=root_identity)
     if final.suffix.lower() != _FORMAT_SUFFIXES[staged.facts.format]:
         raise FlowArtifactInvalidError("final artifact suffix does not match staged bytes")
@@ -233,6 +235,43 @@ def _recover_matching_final(
     except OSError as exc:
         raise FlowArtifactConflictError("matching artifact residue could not be finalized") from exc
     return final_snapshot.facts
+
+
+def _resolve_staging_for_publication(staging: Path, final: Path, root: Path) -> Path:
+    try:
+        metadata = os.stat(staging, follow_symlinks=False)
+    except FileNotFoundError:
+        return _resolve_exact_legacy_cleanup(staging, final, root)
+    except OSError as exc:
+        raise FlowArtifactInvalidError("unable to inspect staging artifact") from exc
+    if not stat.S_ISREG(metadata.st_mode):
+        raise FlowArtifactInvalidError("staging artifact is not a regular file")
+    return staging
+
+
+def _resolve_exact_legacy_cleanup(staging: Path, final: Path, root: Path) -> Path:
+    try:
+        final_identity = _identity_from_stat(_regular_file_stat(final))
+        matches: list[Path] = []
+        with os.scandir(staging.parent) as entries:
+            for entry in entries:
+                if _LEGACY_CLEANUP_NAME.fullmatch(entry.name) is None:
+                    continue
+                metadata = os.stat(entry.path, follow_symlinks=False)
+                if (
+                    stat.S_ISREG(metadata.st_mode)
+                    and _identity_from_stat(metadata) == final_identity
+                ):
+                    matches.append(_contained_path(Path(entry.path), root))
+    except (FlowArtifactInvalidError, OSError) as exc:
+        raise FlowArtifactConflictError(
+            "missing staging artifact cannot be reconciled with cleanup evidence"
+        ) from exc
+    if len(matches) != 1:
+        raise FlowArtifactConflictError(
+            "missing staging artifact has conflicting cleanup evidence"
+        )
+    return matches[0]
 
 
 def _inspect_artifact(
@@ -382,16 +421,22 @@ def _bind_staging_cleanup(
             parent_descriptor=parent_descriptor,
             windows_delete_handle=True,
         )
-    if os.stat not in os.supports_dir_fd:
+    if os.stat not in os.supports_dir_fd or os.unlink not in os.supports_dir_fd:
         raise FlowArtifactInvalidError("platform cannot bind staging cleanup to a directory handle")
-    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+    flags = (
+        os.O_RDONLY
+        | getattr(os, "O_DIRECTORY", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+    )
     try:
         descriptor = os.open(parent, flags)
     except OSError as exc:
         raise FlowArtifactInvalidError("unable to bind staging directory for cleanup") from exc
     try:
-        if _identity_from_stat(os.fstat(descriptor)) != parent_identity:
+        parent_metadata = os.fstat(descriptor)
+        if _identity_from_stat(parent_metadata) != parent_identity:
             raise FlowArtifactInvalidError("staging directory changed during cleanup binding")
+        _assert_private_posix_directory_metadata(parent_metadata)
         metadata = os.stat(staging.name, dir_fd=descriptor, follow_symlinks=False)
         if not stat.S_ISREG(metadata.st_mode) or _identity_from_stat(metadata) != expected:
             raise FlowArtifactInvalidError("staging artifact changed during cleanup binding")
@@ -413,71 +458,31 @@ def _delete_bound_staging(binding: _StagingCleanupBinding) -> None:
         if binding.windows_delete_handle:
             _delete_windows_handle(binding.descriptor)
         else:
-            if _identity_from_stat(os.fstat(binding.descriptor)) != binding.parent_identity:
+            parent_metadata = os.fstat(binding.descriptor)
+            if _identity_from_stat(parent_metadata) != binding.parent_identity:
                 raise FlowArtifactInvalidError("staging directory changed before cleanup")
-            quarantine_name = _move_posix_staging_to_quarantine(binding)
-            if _after_flow_artifact_cleanup_quarantine_identity_check is not None:
-                _after_flow_artifact_cleanup_quarantine_identity_check(
-                    binding.descriptor, quarantine_name
-                )
-            # POSIX has no unlink-by-handle primitive.  unlinkat(dir_fd, name)
-            # would resolve the quarantine entry again and could delete a
-            # replacement installed after the identity check above.  Preserve
-            # the residue and fail closed instead of claiming finalized cleanup.
-            raise FlowArtifactInvalidError(
-                "platform cannot safely remove quarantined staging artifact by identity"
-            )
+            _assert_private_posix_directory_metadata(parent_metadata)
+            _assert_posix_staging_entry_current(binding)
+            # POSIX trust boundary: only the effective UID can mutate this 0700
+            # directory, and that UID is trusted after the adjacent identity check.
+            os.unlink(binding.staging_name, dir_fd=binding.descriptor)
     except OSError as exc:
         raise FlowArtifactInvalidError("unable to remove bound staging artifact") from exc
     finally:
         _close_cleanup_binding(binding)
 
 
-def _move_posix_staging_to_quarantine(binding: _StagingCleanupBinding) -> str:
-    """Atomically isolate the current entry for identity validation and preservation."""
-    for _ in range(16):
-        quarantine_name = f".cleanup-{uuid4().hex}.part"
-        try:
-            _rename_posix_noreplace(
-                binding.descriptor,
-                binding.staging_name,
-                binding.descriptor,
-                quarantine_name,
-            )
-        except FileExistsError:
-            continue
-        metadata = os.stat(quarantine_name, dir_fd=binding.descriptor, follow_symlinks=False)
-        if not stat.S_ISREG(metadata.st_mode) or _identity_from_stat(metadata) != binding.artifact_identity:
-            raise FlowArtifactInvalidError("staging artifact changed during cleanup")
-        return quarantine_name
-    raise FlowArtifactInvalidError("unable to reserve staging cleanup quarantine")
-
-
-def _rename_posix_noreplace(source_dir_fd: int, source_name: str, target_dir_fd: int, target_name: str) -> None:
-    """Use POSIX's platform-specific no-replace rename or fail closed."""
-    import ctypes
-
-    libc = ctypes.CDLL(None, use_errno=True)
-    try:
-        renameat2 = libc.renameat2
-    except AttributeError as exc:
-        raise FlowArtifactInvalidError("platform cannot atomically quarantine staging cleanup") from exc
-    renameat2.argtypes = (ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint)
-    renameat2.restype = ctypes.c_int
-    ctypes.set_errno(0)
-    result = renameat2(
-        source_dir_fd,
-        os.fsencode(source_name),
-        target_dir_fd,
-        os.fsencode(target_name),
-        1,  # RENAME_NOREPLACE
+def _assert_posix_staging_entry_current(binding: _StagingCleanupBinding) -> None:
+    metadata = os.stat(
+        binding.staging_name,
+        dir_fd=binding.descriptor,
+        follow_symlinks=False,
     )
-    if result == 0:
-        return
-    error = ctypes.get_errno()
-    if error == errno.EEXIST:
-        raise FileExistsError(error, "cleanup quarantine already exists", target_name)
-    raise OSError(error, "unable to atomically quarantine staging cleanup", source_name)
+    if (
+        not stat.S_ISREG(metadata.st_mode)
+        or _identity_from_stat(metadata) != binding.artifact_identity
+    ):
+        raise FlowArtifactInvalidError("staging artifact changed before cleanup")
 
 
 def _assert_cleanup_parent_current(parent: Path, expected: _FileIdentity) -> None:
@@ -669,6 +674,67 @@ def _make_directory(path: Path, root: Path) -> None:
     except OSError as exc:
         raise FlowArtifactInvalidError("unable to create Flow artifact directory") from exc
     _contained_path(path, root)
+
+
+def _make_private_staging_directory(path: Path, root: Path) -> None:
+    _contained_path(path, root)
+    try:
+        path.mkdir(mode=0o700, exist_ok=True)
+    except OSError as exc:
+        raise FlowArtifactInvalidError("unable to create Flow staging directory") from exc
+    _contained_path(path, root)
+    if os.name == "nt":
+        return
+    flags = (
+        os.O_RDONLY
+        | getattr(os, "O_DIRECTORY", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+    )
+    try:
+        descriptor = os.open(path, flags)
+    except OSError as exc:
+        raise FlowArtifactInvalidError("unable to bind Flow staging directory") from exc
+    try:
+        chmod = getattr(os, "fchmod", None)
+        if chmod is None:
+            raise FlowArtifactInvalidError("platform cannot make Flow staging private")
+        _assert_repairable_posix_directory_metadata(os.fstat(descriptor))
+        chmod(descriptor, 0o700)
+        _assert_private_posix_directory_metadata(os.fstat(descriptor))
+    except OSError as exc:
+        raise FlowArtifactInvalidError("unable to make Flow staging directory private") from exc
+    finally:
+        os.close(descriptor)
+    _contained_path(path, root)
+
+
+def _assert_private_posix_directory_metadata(metadata: os.stat_result) -> None:
+    if (
+        not stat.S_ISDIR(metadata.st_mode)
+        or metadata.st_uid != _effective_user_id()
+        or stat.S_IMODE(metadata.st_mode) != 0o700
+    ):
+        raise FlowArtifactInvalidError(
+            "Flow staging directory must be private and owned by the current user"
+        )
+
+
+def _assert_repairable_posix_directory_metadata(metadata: os.stat_result) -> None:
+    if (
+        not stat.S_ISDIR(metadata.st_mode)
+        or metadata.st_uid != _effective_user_id()
+        or stat.S_IMODE(metadata.st_mode) & 0o022
+    ):
+        raise FlowArtifactInvalidError(
+            "Flow staging directory must not be writable by another user"
+        )
+
+
+def _effective_user_id() -> int:
+    get_effective_uid = getattr(os, "geteuid", None)
+    if get_effective_uid is None:
+        raise FlowArtifactInvalidError("platform cannot identify the Flow staging owner")
+    return int(get_effective_uid())
 
 
 def _contained_path(path: Path, root: Path) -> Path:

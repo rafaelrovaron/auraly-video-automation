@@ -6,6 +6,7 @@ import hashlib
 import os
 from pathlib import Path
 import shutil
+import stat
 import subprocess
 from types import SimpleNamespace
 from typing import Any
@@ -183,7 +184,6 @@ def test_exclusive_publish_never_overwrites_existing_final(tmp_path: Path) -> No
     assert staging.exists()
 
 
-@pytest.mark.skipif(os.name != "nt", reason="Windows has identity-bound delete-by-handle")
 def test_exclusive_publish_hard_links_then_removes_staging(tmp_path: Path) -> None:
     staging, final = _valid_staging_and_final(tmp_path)
     staged_bytes = staging.read_bytes()
@@ -195,33 +195,52 @@ def test_exclusive_publish_hard_links_then_removes_staging(tmp_path: Path) -> No
     assert not staging.exists()
 
 
-@pytest.mark.skipif(os.name == "nt", reason="POSIX lacks identity-bound deletion")
-def test_posix_publish_fails_closed_with_a_flushed_final_and_quarantined_staging(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.skipif(os.name == "nt", reason="POSIX permission boundary")
+def test_posix_staging_directory_is_repaired_to_private_owner_access(tmp_path: Path) -> None:
+    staging, _ = _paths(tmp_path)
+    staging.parent.chmod(0o755)
+
+    second_staging, _ = _paths(tmp_path)
+
+    metadata = second_staging.parent.stat()
+    get_effective_uid = getattr(os, "geteuid", None)
+    assert get_effective_uid is not None
+    assert metadata.st_uid == get_effective_uid()
+    assert stat.S_IMODE(metadata.st_mode) == 0o700
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX permission boundary")
+@pytest.mark.parametrize("recovery", [False, True])
+def test_posix_publish_repairs_existing_staging_permissions_before_cleanup(
+    tmp_path: Path, recovery: bool
 ) -> None:
     staging, final = _valid_staging_and_final(tmp_path)
-    staged_bytes = staging.read_bytes()
-    import auraly_pipeline.flow.artifacts as artifacts
+    if recovery:
+        final.parent.mkdir(parents=True, exist_ok=True)
+        os.link(staging, final)
+    before = staging.read_bytes()
+    staging.parent.chmod(0o755)
 
-    events: list[str] = []
-    original_sync = artifacts._sync_file_and_directory
+    facts = publish_flow_artifact_exclusive(staging, final, trusted_root=tmp_path)
 
-    def observe_sync(path: Path) -> None:
-        assert path == final
-        events.append("sync-final")
-        original_sync(path)
+    assert facts.sha256 == hashlib.sha256(before).hexdigest()
+    assert final.read_bytes() == before
+    assert not staging.exists()
+    assert stat.S_IMODE(final.parent.joinpath(".staging").stat().st_mode) == 0o700
 
-    monkeypatch.setattr(artifacts, "_sync_file_and_directory", observe_sync)
 
-    with pytest.raises(FlowArtifactConflictError):
+@pytest.mark.skipif(os.name == "nt", reason="POSIX permission boundary")
+def test_posix_publish_rejects_group_writable_staging_before_linking_final(
+    tmp_path: Path,
+) -> None:
+    staging, final = _valid_staging_and_final(tmp_path)
+    staging.parent.chmod(0o770)
+
+    with pytest.raises(FlowArtifactInvalidError):
         publish_flow_artifact_exclusive(staging, final, trusted_root=tmp_path)
 
-    quarantines = list(staging.parent.glob(".cleanup-*.part"))
-    assert events == ["sync-final"]
-    assert final.read_bytes() == staged_bytes
-    assert not staging.exists()
-    assert len(quarantines) == 1
-    assert quarantines[0].samefile(final)
+    assert staging.exists()
+    assert not final.exists()
 
 
 def test_publish_rejects_a_final_suffix_that_does_not_match_validated_bytes(tmp_path: Path) -> None:
@@ -235,7 +254,6 @@ def test_publish_rejects_a_final_suffix_that_does_not_match_validated_bytes(tmp_
     assert staging.exists()
 
 
-@pytest.mark.skipif(os.name != "nt", reason="Windows has identity-bound delete-by-handle")
 def test_matching_crash_residue_recovers_without_changing_final_bytes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -261,7 +279,62 @@ def test_matching_crash_residue_recovers_without_changing_final_bytes(
     assert facts.sha256 == hashlib.sha256(before).hexdigest()
 
 
-@pytest.mark.skipif(os.name != "nt", reason="Windows has identity-bound delete-by-handle")
+def test_retry_recovers_one_exact_legacy_cleanup_residue_without_changing_final(
+    tmp_path: Path,
+) -> None:
+    staging, final = _valid_staging_and_final(tmp_path)
+    final.parent.mkdir(parents=True, exist_ok=True)
+    os.link(staging, final)
+    cleanup = staging.with_name(f".cleanup-{'a' * 32}.part")
+    staging.rename(cleanup)
+    before = final.read_bytes()
+
+    facts = publish_flow_artifact_exclusive(staging, final, trusted_root=tmp_path)
+
+    assert final.read_bytes() == before
+    assert facts.sha256 == hashlib.sha256(before).hexdigest()
+    assert not staging.exists()
+    assert not cleanup.exists()
+
+
+def test_retry_preserves_mismatched_legacy_cleanup_residue(tmp_path: Path) -> None:
+    staging, final = _valid_staging_and_final(tmp_path)
+    final.parent.mkdir(parents=True, exist_ok=True)
+    os.link(staging, final)
+    staging.unlink()
+    cleanup = staging.with_name(f".cleanup-{'b' * 32}.part")
+    _write_image(cleanup, "PNG", axis=2049)
+    before = final.read_bytes()
+    cleanup_before = cleanup.read_bytes()
+
+    with pytest.raises(FlowArtifactConflictError):
+        publish_flow_artifact_exclusive(staging, final, trusted_root=tmp_path)
+
+    assert final.read_bytes() == before
+    assert cleanup.read_bytes() == cleanup_before
+    assert not staging.exists()
+
+
+def test_retry_preserves_ambiguous_exact_legacy_cleanup_residues(tmp_path: Path) -> None:
+    staging, final = _valid_staging_and_final(tmp_path)
+    final.parent.mkdir(parents=True, exist_ok=True)
+    os.link(staging, final)
+    staging.unlink()
+    cleanup_a = staging.with_name(f".cleanup-{'a' * 32}.part")
+    cleanup_b = staging.with_name(f".cleanup-{'b' * 32}.part")
+    os.link(final, cleanup_a)
+    os.link(final, cleanup_b)
+    before = final.read_bytes()
+
+    with pytest.raises(FlowArtifactConflictError):
+        publish_flow_artifact_exclusive(staging, final, trusted_root=tmp_path)
+
+    assert final.read_bytes() == before
+    assert cleanup_a.samefile(final)
+    assert cleanup_b.samefile(final)
+    assert not staging.exists()
+
+
 def test_matching_residue_syncs_final_before_unlinking_staging(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -293,35 +366,74 @@ def test_matching_residue_syncs_final_before_unlinking_staging(
     assert not staging.exists()
 
 
-@pytest.mark.skipif(os.name == "nt", reason="POSIX lacks identity-bound deletion")
-def test_posix_matching_residue_syncs_final_before_failing_closed(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_posix_cleanup_model_removes_the_identity_validated_private_entry(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    staging, final = _valid_staging_and_final(tmp_path)
-    final.parent.mkdir(parents=True, exist_ok=True)
-    os.link(staging, final)
-    before = final.read_bytes()
     import auraly_pipeline.flow.artifacts as artifacts
 
     events: list[str] = []
-    original_sync = artifacts._sync_file_and_directory
+    parent_identity = artifacts._FileIdentity(device=101, inode=202)
+    artifact_identity = artifacts._FileIdentity(device=303, inode=404)
+    binding = artifacts._StagingCleanupBinding(
+        staging_name="staging.part",
+        parent_identity=parent_identity,
+        artifact_identity=artifact_identity,
+        descriptor=11,
+        parent_descriptor=11,
+        windows_delete_handle=False,
+    )
 
-    def observe_sync(path: Path) -> None:
-        assert path == final
-        events.append("sync-final")
-        original_sync(path)
+    def validate_entry(actual_binding: object) -> None:
+        assert actual_binding == binding
+        events.append("identity-validated")
 
-    monkeypatch.setattr(artifacts, "_sync_file_and_directory", observe_sync)
+    def reject_quarantine(_binding: object) -> str:
+        raise AssertionError("private staging cleanup must retain its recoverable name until unlink")
 
-    with pytest.raises(FlowArtifactConflictError):
-        publish_flow_artifact_exclusive(staging, final, trusted_root=tmp_path)
+    monkeypatch.setattr(
+        artifacts.os,
+        "fstat",
+        lambda _descriptor: SimpleNamespace(
+            st_dev=parent_identity.device,
+            st_ino=parent_identity.inode,
+        ),
+    )
+    monkeypatch.setattr(
+        artifacts,
+        "_assert_posix_staging_entry_current",
+        validate_entry,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        artifacts,
+        "_assert_private_posix_directory_metadata",
+        lambda _metadata: events.append("private-parent"),
+    )
+    monkeypatch.setattr(
+        artifacts,
+        "_move_posix_staging_to_quarantine",
+        reject_quarantine,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        artifacts.os,
+        "unlink",
+        lambda name, *, dir_fd: events.append(f"unlink:{dir_fd}:{name}"),
+    )
+    monkeypatch.setattr(
+        artifacts,
+        "_close_cleanup_binding",
+        lambda _binding: events.append("close"),
+    )
 
-    quarantines = list(staging.parent.glob(".cleanup-*.part"))
-    assert events == ["sync-final"]
-    assert final.read_bytes() == before
-    assert not staging.exists()
-    assert len(quarantines) == 1
-    assert quarantines[0].samefile(final)
+    artifacts._delete_bound_staging(binding)
+
+    assert events == [
+        "private-parent",
+        "identity-validated",
+        "unlink:11:staging.part",
+        "close",
+    ]
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX directory-descriptor semantics")
@@ -335,9 +447,10 @@ def test_posix_cleanup_parent_substitution_fails_closed_and_preserves_staging_re
         os.link(staging, final)
     original_parent = final.parent
     preserved_parent = tmp_path / "preserved-generation"
-    outside = tmp_path / "outside"
+    outside = tmp_path.parent / f"{tmp_path.name}-outside-parent"
     outside.mkdir()
     import auraly_pipeline.flow.artifacts as artifacts
+
     def replace_parent_after_cleanup_revalidation() -> None:
         original_parent.rename(preserved_parent)
         outside_staging = outside / ".staging" / staging.name
@@ -345,7 +458,9 @@ def test_posix_cleanup_parent_substitution_fails_closed_and_preserves_staging_re
         shutil.copyfile(preserved_parent / ".staging" / staging.name, outside_staging)
         _replace_directory_with_link(original_parent, outside)
         assert artifacts._path_is_link_or_junction(original_parent)
-        assert artifacts._directory_identity(preserved_parent / ".staging") != artifacts._directory_identity(
+        assert artifacts._directory_identity(
+            preserved_parent / ".staging"
+        ) != artifacts._directory_identity(
             outside / ".staging"
         )
         assert (preserved_parent / ".staging" / staging.name).exists()
@@ -366,14 +481,44 @@ def test_posix_cleanup_parent_substitution_fails_closed_and_preserves_staging_re
     assert not (outside / final.name).exists()
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX directory permission semantics")
+@pytest.mark.parametrize("recovery", [False, True])
+def test_posix_cleanup_permission_loss_after_binding_preserves_staging_residue(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, recovery: bool
+) -> None:
+    staging, final = _valid_staging_and_final(tmp_path)
+    if recovery:
+        final.parent.mkdir(parents=True, exist_ok=True)
+        os.link(staging, final)
+    import auraly_pipeline.flow.artifacts as artifacts
+
+    def remove_private_boundary() -> None:
+        staging.parent.chmod(0o777)
+
+    monkeypatch.setattr(
+        artifacts,
+        "_after_flow_artifact_cleanup_revalidation",
+        remove_private_boundary,
+        raising=False,
+    )
+
+    with pytest.raises(FlowArtifactConflictError):
+        publish_flow_artifact_exclusive(staging, final, trusted_root=tmp_path)
+
+    assert staging.exists()
+    assert final.exists()
+
+
 @pytest.mark.skipif(os.name == "nt", reason="POSIX directory-descriptor semantics")
 def test_posix_cleanup_child_swap_preserves_replacement_after_revalidation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     staging, final = _valid_staging_and_final(tmp_path)
     replacement = staging.with_name("replacement.part")
+    outside = tmp_path.parent / f"{tmp_path.name}-outside-child.part"
     replacement_bytes = b"attacker-controlled replacement"
-    replacement.write_bytes(replacement_bytes)
+    outside.write_bytes(replacement_bytes)
+    os.link(outside, replacement)
     import auraly_pipeline.flow.artifacts as artifacts
 
     def replace_child_after_cleanup_revalidation() -> None:
@@ -390,99 +535,8 @@ def test_posix_cleanup_child_swap_preserves_replacement_after_revalidation(
         publish_flow_artifact_exclusive(staging, final, trusted_root=tmp_path)
 
     assert final.exists()
-    assert any(path.read_bytes() == replacement_bytes for path in staging.parent.iterdir())
-
-
-@pytest.mark.skipif(os.name == "nt", reason="POSIX directory-descriptor semantics")
-def test_posix_cleanup_quarantine_swap_after_identity_check_never_deletes_replacement(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    staging, final = _valid_staging_and_final(tmp_path)
-    replacement = staging.with_name("replacement.part")
-    replacement_bytes = b"attacker-controlled quarantine replacement"
-    replacement.write_bytes(replacement_bytes)
-    preserved_validated = staging.with_name("validated-staging-residue.part")
-    quarantine_names: list[str] = []
-    import auraly_pipeline.flow.artifacts as artifacts
-
-    def swap_quarantine_after_identity_check(descriptor: int, quarantine_name: str) -> None:
-        os.rename(
-            quarantine_name,
-            preserved_validated.name,
-            src_dir_fd=descriptor,
-            dst_dir_fd=descriptor,
-        )
-        os.rename(
-            replacement.name,
-            quarantine_name,
-            src_dir_fd=descriptor,
-            dst_dir_fd=descriptor,
-        )
-        quarantine_names.append(quarantine_name)
-
-    monkeypatch.setattr(
-        artifacts,
-        "_after_flow_artifact_cleanup_quarantine_identity_check",
-        swap_quarantine_after_identity_check,
-        raising=False,
-    )
-
-    with pytest.raises(FlowArtifactConflictError):
-        publish_flow_artifact_exclusive(staging, final, trusted_root=tmp_path)
-
-    assert quarantine_names
-    quarantine = staging.parent / quarantine_names[0]
-    assert quarantine.read_bytes() == replacement_bytes
-    assert preserved_validated.samefile(final)
-    assert final.exists()
-
-
-def test_posix_cleanup_model_never_name_unlinks_a_post_check_quarantine_replacement(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    import auraly_pipeline.flow.artifacts as artifacts
-
-    validated = object()
-    replacement = object()
-    namespace: dict[str, object] = {}
-    quarantine_name = ".cleanup-model.part"
-    parent_identity = artifacts._FileIdentity(device=101, inode=202)
-    binding = artifacts._StagingCleanupBinding(
-        staging_name="staging.part",
-        parent_identity=parent_identity,
-        artifact_identity=artifacts._FileIdentity(device=303, inode=404),
-        descriptor=11,
-        parent_descriptor=11,
-        windows_delete_handle=False,
-    )
-
-    def move_then_swap_after_identity_check(_binding: object) -> str:
-        namespace[quarantine_name] = validated
-        namespace[quarantine_name] = replacement
-        return quarantine_name
-
-    def unlink_by_name(name: str, *, dir_fd: int) -> None:
-        assert dir_fd == binding.descriptor
-        del namespace[name]
-
-    monkeypatch.setattr(
-        artifacts.os,
-        "fstat",
-        lambda _descriptor: SimpleNamespace(
-            st_dev=parent_identity.device,
-            st_ino=parent_identity.inode,
-        ),
-    )
-    monkeypatch.setattr(
-        artifacts, "_move_posix_staging_to_quarantine", move_then_swap_after_identity_check
-    )
-    monkeypatch.setattr(artifacts.os, "unlink", unlink_by_name)
-    monkeypatch.setattr(artifacts, "_close_cleanup_binding", lambda _binding: None)
-
-    with pytest.raises(FlowArtifactInvalidError):
-        artifacts._delete_bound_staging(binding)
-
-    assert namespace[quarantine_name] is replacement
+    assert outside.read_bytes() == replacement_bytes
+    assert any(path.samefile(outside) for path in staging.parent.iterdir())
 
 
 def test_crash_after_staging_before_link_preserves_residue(
