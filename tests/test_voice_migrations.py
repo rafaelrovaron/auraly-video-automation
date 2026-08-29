@@ -32,7 +32,7 @@ def test_goal_2_database_migrates_to_voice_master_schema(tmp_path: Path) -> None
     assert all(item["options"].get("ondelete") == "RESTRICT" for item in foreign_keys)
     with engine.connect() as connection:
         assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == (
-            "0004_image_domain"
+            "0005_flow_generation_recovery"
         )
         triggers = {
             row[0]
@@ -62,7 +62,7 @@ def test_fresh_database_reaches_voice_master_head(tmp_path: Path) -> None:
     engine = create_engine(sqlite_url(database))
     with engine.connect() as connection:
         assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == (
-            "0004_image_domain"
+            "0005_flow_generation_recovery"
         )
     assert "voice_masters" in inspect(engine).get_table_names()
     engine.dispose()
