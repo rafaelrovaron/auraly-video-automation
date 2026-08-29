@@ -5,7 +5,9 @@ from __future__ import annotations
 from collections.abc import Callable
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
+import hashlib
 from pathlib import Path
+import re
 import time
 from typing import Literal, cast
 from urllib.parse import urlsplit
@@ -14,6 +16,7 @@ from uuid import uuid4
 from playwright.sync_api import BrowserContext, Locator, Page, Playwright, sync_playwright
 
 from .config import FlowRuntimeConfig
+from .generation_domain import FlowWorkspaceIdentity
 from .domain import (
     FLOW_URL,
     FlowAuthenticationTimeoutError,
@@ -70,6 +73,8 @@ PRODUCTION_TARGET = _FlowRuntimeTarget(
     ),
 )
 
+_SAFE_WORKSPACE_PATH = re.compile(r"^fx/tools/flow(?:/[a-z0-9][a-z0-9_-]*)+$")
+
 
 class FlowBrowserSession:
     """Package-internal headed authenticated-page lifecycle shared by Flow workers."""
@@ -100,7 +105,7 @@ class FlowBrowserSession:
         return self._page
 
     @property
-    def context(self) -> BrowserContext | None:
+    def _context_for_runtime(self) -> BrowserContext | None:
         return self._context
 
     @property
@@ -116,7 +121,8 @@ class FlowBrowserSession:
         return self
 
     def __exit__(self, _type: object, _value: object, _traceback: object) -> Literal[False]:
-        self.close()
+        if self.close():
+            raise FlowUnexpectedStateError(failed_step="close_browser")
         return False
 
     def open(self) -> Page:
@@ -164,6 +170,10 @@ class FlowBrowserSession:
         if classification == "login":
             raise FlowAuthenticationTimeoutError()
         raise FlowUnexpectedStateError(failed_step="navigate_flow")
+
+    def workspace_identity(self) -> FlowWorkspaceIdentity:
+        """Derive the only persistable workspace identity from the trusted current provider route."""
+        return _workspace_identity_for_url(self.page.url)
 
     def _await_authenticated_flow_page(self) -> None:
         deadline = self._monotonic() + self._config.login_timeout_seconds
@@ -337,7 +347,7 @@ class GoogleFlowRuntime:
         try:
             try:
                 page = session.open()
-                context = session.context
+                context = session._context_for_runtime
                 if context is None:
                     raise FlowBrowserLaunchError()
                 phase = "navigate_flow"
@@ -489,6 +499,24 @@ def _classify_url(url: str, target: _FlowRuntimeTarget) -> Literal["flow", "logi
     if target.authentication_paths is None or parsed.path in target.authentication_paths:
         return "login"
     return "unexpected"
+
+
+def _workspace_identity_for_url(url: str) -> FlowWorkspaceIdentity:
+    """Convert only a fixed-origin Flow workspace subpath into safe durable facts."""
+    parsed = urlsplit(url)
+    workspace_path = parsed.path.removeprefix("/")
+    if (
+        parsed.scheme != "https"
+        or parsed.netloc != "labs.google"
+        or parsed.query
+        or parsed.fragment
+        or _SAFE_WORKSPACE_PATH.fullmatch(workspace_path) is None
+    ):
+        raise FlowUnexpectedStateError(failed_step="navigate_flow")
+    return FlowWorkspaceIdentity(
+        workspace_path=workspace_path,
+        fingerprint=hashlib.sha256(workspace_path.encode("utf-8")).hexdigest(),
+    )
 
 
 def _origin(url: str) -> str:

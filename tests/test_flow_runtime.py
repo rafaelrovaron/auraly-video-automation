@@ -26,6 +26,7 @@ from auraly_pipeline.flow.runtime import (
     _FlowRuntimeTarget,
     _classify_url,
     _local_test_target,
+    _workspace_identity_for_url,
 )
 from auraly_pipeline.flow import runtime as runtime_module
 from tests.flow_browser_support import fake_flow_url
@@ -78,6 +79,22 @@ def test_authenticated_session_reuses_goal_4b_launch_and_route_trust(tmp_path: P
     with FlowBrowserSession(config(tmp_path), _target=local_target("ready.html")) as session:
         session.require_current_flow_page()
         assert session.page.url == fake_flow_url("ready.html")
+
+
+def test_workspace_identity_accepts_only_safe_production_flow_subpaths() -> None:
+    safe = _workspace_identity_for_url("https://labs.google/fx/tools/flow/workspace-1")
+
+    assert safe.workspace_path == "fx/tools/flow/workspace-1"
+    assert len(safe.fingerprint) == 64
+    for unsafe in (
+        "https://labs.google/fx/tools/flow",
+        "https://labs.google/fx/tools/flow/workspace-1?token=PRIVATE",
+        "https://labs.google/fx/tools/flow/workspace-1#PRIVATE",
+        "https://attacker.invalid/fx/tools/flow/workspace-1",
+        "https://labs.google/fx/tools/flow/Workspace",
+    ):
+        with pytest.raises(FlowUnexpectedStateError):
+            _workspace_identity_for_url(unsafe)
 
 
 def test_login_timeout_has_no_screenshot_or_trace(tmp_path: Path) -> None:

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import re
 from typing import Literal
 
@@ -113,19 +112,35 @@ class FlowGenerationObservation(ContractModel):
     prompt_verified: bool
 
 
-@dataclass
 class FlowGenerationRuntimeError(RuntimeError):
     """Typed internal generation failure with allowlisted scalar fields only."""
 
-    failed_step: FlowGenerationFailedStep
-    failed_locator: FlowGenerationLocatorName | None = None
-
-    def __post_init__(self) -> None:
-        if self.failed_step not in _FAILED_STEPS:
+    def __init__(
+        self,
+        *,
+        failed_step: FlowGenerationFailedStep,
+        failed_locator: FlowGenerationLocatorName | None = None,
+    ) -> None:
+        if failed_step not in _FAILED_STEPS:
             raise ValueError("generation error requires an allowlisted failed step")
-        if self.failed_locator is not None and self.failed_locator not in _LOCATOR_NAMES:
+        if failed_locator is not None and failed_locator not in _LOCATOR_NAMES:
             raise ValueError("generation error requires an allowlisted locator")
         RuntimeError.__init__(self)
+        self._failed_step = failed_step
+        self._failed_locator = failed_locator
+
+    @property
+    def failed_step(self) -> FlowGenerationFailedStep:
+        return self._failed_step
+
+    @property
+    def failed_locator(self) -> FlowGenerationLocatorName | None:
+        return self._failed_locator
+
+    def __setattr__(self, name: str, value: object) -> None:
+        if name in {"_failed_step", "_failed_locator"} and hasattr(self, name):
+            raise AttributeError("generation error facts are read-only")
+        super().__setattr__(name, value)
 
 
 class FlowGenerationUiContractError(FlowGenerationRuntimeError):

@@ -22,6 +22,7 @@ from auraly_pipeline import cli as cli_module
 from auraly_pipeline.flow import (
     BrowserRuntimeLock,
     FlowDiagnosticWriter,
+    FlowGenerationRuntime,
     FlowFailureEvidence,
     FlowPreflightResult,
     FlowPreflightService,
@@ -616,6 +617,8 @@ def test_flow_package_limits_provider_mutations_to_checkpointed_generation_runti
     assert launch_keywords["headless"].value is False
     assert "user_data_dir" in launch_keywords
     assert {"channel", "executable_path", "storage_state"}.isdisjoint(launch_keywords)
+    assert "session_factory" not in inspect.signature(FlowGenerationRuntime).parameters
+    assert "_session_factory" in inspect.signature(FlowGenerationRuntime).parameters
 
 
 def test_flow_cli_and_service_expose_no_job_database_or_arbitrary_target_boundary() -> None:

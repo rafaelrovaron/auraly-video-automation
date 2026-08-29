@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from contextlib import AbstractContextManager
+from collections.abc import Callable, Iterator
+from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass
 import hashlib
 from pathlib import Path
@@ -14,6 +14,7 @@ from typing import Protocol
 from playwright.sync_api import Locator, Page
 
 from .config import FlowGenerationConfig
+from .config import FlowRuntimeConfig
 from .generation_domain import (
     FlowDispatchAmbiguousError,
     FlowGenerationObservation,
@@ -31,6 +32,8 @@ from .generation_locators import (
     resolve_reference_input,
     resolve_upload_complete,
 )
+from .lock import BrowserRuntimeLock
+from .runtime import FlowBrowserSession
 
 
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
@@ -48,12 +51,15 @@ class FlowGenerationCheckpointSink(Protocol):
 
 
 class _AuthenticatedFlowSession(Protocol):
-    page: Page
+    @property
+    def page(self) -> Page: ...
 
     def require_current_flow_page(self) -> None: ...
 
+    def workspace_identity(self) -> FlowWorkspaceIdentity: ...
 
-AuthenticatedSessionFactory = Callable[[], AbstractContextManager[_AuthenticatedFlowSession]]
+
+_AuthenticatedSessionFactory = Callable[[], AbstractContextManager[_AuthenticatedFlowSession]]
 InputFileSetter = Callable[[Locator, Path], None]
 
 
@@ -75,13 +81,17 @@ class FlowGenerationRuntime:
         self,
         config: FlowGenerationConfig,
         *,
-        session_factory: AuthenticatedSessionFactory,
+        runtime_config: FlowRuntimeConfig | None = None,
+        _session_factory: _AuthenticatedSessionFactory | None = None,
         _locator_target: _GenerationLocatorTarget = _PRODUCTION_GENERATION_TARGET,
         _set_input_files: InputFileSetter | None = None,
         _monotonic: Callable[[], float] = time.monotonic,
     ) -> None:
+        if (runtime_config is None) == (_session_factory is None):
+            raise ValueError("generation runtime requires exactly one session source")
         self._config = config
-        self._session_factory = session_factory
+        self._runtime_config = runtime_config
+        self._session_factory = _session_factory
         self._locator_target = _locator_target
         self._set_input_files = _set_input_files or _playwright_set_input_files
         self._monotonic = _monotonic
@@ -104,13 +114,18 @@ class FlowGenerationRuntime:
         """Upload and read back private inputs without retaining their raw values."""
         self._verify_reference_hash(reference_path, reference_sha256)
         self._verify_prompt_hash(prompt_snapshot, prompt_sha256)
-        with self._session_factory() as session:
-            return self._prepare_inputs_in_session(
-                session,
-                reference_path=reference_path,
-                prompt_snapshot=prompt_snapshot,
-                prompt_sha256=prompt_sha256,
-            )
+        try:
+            with self._open_authenticated_session() as session:
+                return self._prepare_inputs_in_session(
+                    session,
+                    reference_path=reference_path,
+                    prompt_snapshot=prompt_snapshot,
+                    prompt_sha256=prompt_sha256,
+                )
+        except FlowGenerationRuntimeError:
+            raise
+        except BaseException:
+            raise FlowGenerationRuntimeError(failed_step="open_workspace") from None
 
     def prepare_and_dispatch(
         self,
@@ -122,7 +137,7 @@ class FlowGenerationRuntime:
         self._verify_prompt_hash(request.prompt_snapshot, request.prompt_sha256)
         intent_started = False
         try:
-            with self._session_factory() as session:
+            with self._open_authenticated_session() as session:
                 observation = self._prepare_inputs_in_session(
                     session,
                     reference_path=request.reference_path,
@@ -131,7 +146,7 @@ class FlowGenerationRuntime:
                 )
                 checkpoint_sink.record_inputs_verified(observation)
 
-                self._require_current_flow_page(session)
+                self._require_workspace_identity(session, request.workspace)
                 generate = resolve_generate_control(session.page, _target=self._locator_target)
                 initial_results = self._completed_result_fingerprints(session.page)
 
@@ -141,31 +156,75 @@ class FlowGenerationRuntime:
                 generate.click()
                 self._raise_if_injected("during_click")
                 self._raise_if_injected("before_confirmation")
-                self._await_positive_confirmation(session, initial_results)
+                self._await_positive_confirmation(session, initial_results, request.workspace)
                 checkpoint_sink.record_dispatch_confirmed(observation)
                 return observation
         except FlowDispatchAmbiguousError:
             raise
-        except BaseException:
+        except FlowGenerationRuntimeError:
             if intent_started:
                 raise FlowDispatchAmbiguousError() from None
             raise
+        except BaseException:
+            if intent_started:
+                raise FlowDispatchAmbiguousError() from None
+            raise FlowGenerationRuntimeError(failed_step="open_workspace") from None
 
     def reconcile(
         self,
-        _workspace: FlowWorkspaceIdentity,
+        workspace: FlowWorkspaceIdentity,
         checkpoint_sink: FlowGenerationCheckpointSink,
+        *,
+        prior_result_fingerprints: frozenset[str] | None = None,
     ) -> bool:
-        """Observe an intent-recorded run without resolving or clicking Generate."""
+        """Observe a persisted attempt without a Generate resolver or click path."""
         try:
-            with self._session_factory() as session:
-                observation = self._await_positive_confirmation(session, frozenset())
+            with self._open_authenticated_session() as session:
+                self._require_workspace_identity(session, workspace)
+                if prior_result_fingerprints is None:
+                    return False
+                observation = self._await_reconciled_result_confirmation(
+                    session, workspace, prior_result_fingerprints
+                )
                 checkpoint_sink.record_dispatch_confirmed(observation)
                 return True
         except FlowDispatchAmbiguousError:
             return False
         except BaseException:
             raise FlowDispatchAmbiguousError() from None
+
+    @contextmanager
+    def _open_authenticated_session(self) -> Iterator[_AuthenticatedFlowSession]:
+        """Keep the Goal 4B lock across authenticated browser open, work, and close."""
+        if self._session_factory is not None:
+            try:
+                with self._session_factory() as session:
+                    yield session
+            except FlowGenerationRuntimeError:
+                raise
+            except BaseException:
+                raise FlowGenerationRuntimeError(failed_step="open_workspace") from None
+            return
+
+        if self._runtime_config is None:
+            raise FlowGenerationRuntimeError(failed_step="open_workspace")
+        lock = BrowserRuntimeLock(self._runtime_config.lock_path)
+        lock_acquired = False
+        try:
+            lock.acquire()
+            lock_acquired = True
+            with FlowBrowserSession(self._runtime_config) as session:
+                yield session
+        except FlowGenerationRuntimeError:
+            raise
+        except BaseException:
+            raise FlowGenerationRuntimeError(failed_step="open_workspace") from None
+        finally:
+            if lock_acquired:
+                try:
+                    lock.release()
+                except BaseException:
+                    raise FlowGenerationRuntimeError(failed_step="close_browser") from None
 
     def _prepare_inputs_in_session(
         self,
@@ -181,9 +240,8 @@ class FlowGenerationRuntime:
                 session.page,
                 _target=self._locator_target,
             )
+            upload_was_complete = self._upload_complete_present(session.page)
             self._set_input_files(reference_input, reference_path)
-            # Let the provider's upload event settle before checking the trusted route again.
-            session.page.wait_for_timeout(50)
         except FlowGenerationRuntimeError:
             raise
         except BaseException:
@@ -191,15 +249,7 @@ class FlowGenerationRuntime:
                 failed_step="upload_reference", failed_locator="REFERENCE_INPUT"
             ) from None
 
-        self._require_current_flow_page(session)
-        try:
-            resolve_upload_complete(session.page, _target=self._locator_target)
-        except FlowGenerationRuntimeError:
-            raise
-        except BaseException:
-            raise FlowGenerationRuntimeError(
-                failed_step="verify_reference", failed_locator="UPLOAD_COMPLETE"
-            ) from None
+        self._wait_for_upload_transition(session, upload_was_complete)
 
         self._require_current_flow_page(session)
         try:
@@ -229,10 +279,11 @@ class FlowGenerationRuntime:
         self,
         session: _AuthenticatedFlowSession,
         initial_results: frozenset[str],
+        workspace: FlowWorkspaceIdentity,
     ) -> FlowGenerationObservation:
         deadline = self._monotonic() + self._config.generation_timeout_seconds
         while True:
-            self._require_current_flow_page(session)
+            self._require_workspace_identity(session, workspace)
             try:
                 resolve_generating_indicator(session.page, _target=self._locator_target)
                 return FlowGenerationObservation(reference_verified=True, prompt_verified=True)
@@ -240,11 +291,53 @@ class FlowGenerationRuntime:
                 pass
 
             result_fingerprints = self._completed_result_fingerprints(session.page)
-            if result_fingerprints and result_fingerprints != initial_results:
+            if result_fingerprints - initial_results:
                 return FlowGenerationObservation(reference_verified=True, prompt_verified=True)
             if self._monotonic() >= deadline:
                 raise FlowDispatchAmbiguousError()
             session.page.wait_for_timeout(50)
+
+    def _await_reconciled_result_confirmation(
+        self,
+        session: _AuthenticatedFlowSession,
+        workspace: FlowWorkspaceIdentity,
+        prior_result_fingerprints: frozenset[str],
+    ) -> FlowGenerationObservation:
+        deadline = self._monotonic() + self._config.generation_timeout_seconds
+        while True:
+            self._require_workspace_identity(session, workspace)
+            if self._completed_result_fingerprints(session.page) - prior_result_fingerprints:
+                return FlowGenerationObservation(reference_verified=True, prompt_verified=True)
+            if self._monotonic() >= deadline:
+                raise FlowDispatchAmbiguousError()
+            session.page.wait_for_timeout(50)
+
+    def _wait_for_upload_transition(
+        self,
+        session: _AuthenticatedFlowSession,
+        upload_was_complete: bool,
+    ) -> None:
+        deadline = self._monotonic() + self._config.generation_timeout_seconds
+        completion_was_absent = not upload_was_complete
+        while True:
+            self._require_current_flow_page(session)
+            completion_present = self._upload_complete_present(session.page)
+            if completion_present and completion_was_absent:
+                return
+            if not completion_present:
+                completion_was_absent = True
+            if self._monotonic() >= deadline:
+                raise FlowGenerationRuntimeError(
+                    failed_step="verify_reference", failed_locator="UPLOAD_COMPLETE"
+                )
+            session.page.wait_for_timeout(50)
+
+    def _upload_complete_present(self, page: Page) -> bool:
+        try:
+            resolve_upload_complete(page, _target=self._locator_target)
+            return True
+        except FlowGenerationUiContractError:
+            return False
 
     def _completed_result_fingerprints(self, page: Page) -> frozenset[str]:
         try:
@@ -262,6 +355,20 @@ class FlowGenerationRuntime:
             raise
         except BaseException:
             raise FlowGenerationRuntimeError(failed_step="open_workspace") from None
+
+    def _require_workspace_identity(
+        self,
+        session: _AuthenticatedFlowSession,
+        expected: FlowWorkspaceIdentity,
+    ) -> None:
+        try:
+            actual = session.workspace_identity()
+        except FlowGenerationRuntimeError:
+            raise
+        except BaseException:
+            raise FlowGenerationRuntimeError(failed_step="open_workspace") from None
+        if actual != expected:
+            raise FlowGenerationRuntimeError(failed_step="open_workspace")
 
     def _verify_reference_hash(self, reference_path: Path, expected_hash: str) -> None:
         if not _is_sha256(expected_hash):
