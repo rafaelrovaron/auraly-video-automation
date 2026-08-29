@@ -9,9 +9,9 @@ import re
 import stat
 import struct
 import warnings
-from dataclasses import dataclass
-from typing import BinaryIO
 from pathlib import Path, PureWindowsPath
+from dataclasses import dataclass
+from typing import BinaryIO, Callable
 from uuid import uuid4
 
 from PIL import Image, UnidentifiedImageError
@@ -24,6 +24,10 @@ _SAFE_IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
 _FORMAT_SUFFIXES = {"png": ".png", "jpeg": ".jpeg", "webp": ".webp"}
 _PILLOW_FORMATS = {"PNG": "png", "JPEG": "jpeg", "WEBP": "webp"}
 _EXTENSION_FORMATS = {".png": "png", ".jpg": "jpeg", ".jpeg": "jpeg", ".webp": "webp"}
+
+# Private deterministic race seam. Production leaves it unset.
+_before_flow_artifact_link: Callable[[], None] | None = None
+_after_flow_artifact_revalidation_before_link: Callable[[], None] | None = None
 
 
 class FlowArtifactInvalidError(RuntimeError):
@@ -43,6 +47,18 @@ class FlowArtifactFacts:
     height: int
     size_bytes: int
     sha256: str
+
+
+@dataclass(frozen=True)
+class _FileIdentity:
+    device: int
+    inode: int
+
+
+@dataclass(frozen=True)
+class _ArtifactSnapshot:
+    facts: FlowArtifactFacts
+    identity: _FileIdentity
 
 
 def allocate_flow_staging_path(
@@ -101,58 +117,7 @@ def resolve_flow_final_path(
 
 def inspect_flow_artifact(path: Path) -> FlowArtifactFacts:
     """Fully decode a bounded image and return facts only for valid 2K artifacts."""
-    if _path_is_link_or_junction(path) or not path.is_file():
-        raise FlowArtifactInvalidError("artifact is not a regular file")
-    try:
-        size_bytes = path.stat().st_size
-    except OSError as exc:
-        raise FlowArtifactInvalidError("unable to stat artifact") from exc
-    if size_bytes <= 0 or size_bytes > _MAX_ARTIFACT_BYTES:
-        raise FlowArtifactInvalidError("artifact size is outside the permitted range")
-
-    try:
-        with warnings.catch_warnings():
-            warnings.simplefilter("error", Image.DecompressionBombWarning)
-            old_max_pixels = Image.MAX_IMAGE_PIXELS
-            Image.MAX_IMAGE_PIXELS = _MAX_ARTIFACT_PIXELS
-            try:
-                with Image.open(path) as image:
-                    image.verify()
-                    pillow_format = image.format
-                with Image.open(path) as image:
-                    image.load()
-                    width, height = image.size
-                    if image.format != pillow_format:
-                        raise FlowArtifactInvalidError("artifact format changed while decoding")
-            finally:
-                Image.MAX_IMAGE_PIXELS = old_max_pixels
-    except (Image.DecompressionBombError, OSError, SyntaxError, UnidentifiedImageError) as exc:
-        raise FlowArtifactInvalidError("artifact does not fully decode") from exc
-    except Image.DecompressionBombWarning as exc:
-        raise FlowArtifactInvalidError("artifact exceeds the pixel limit") from exc
-
-    try:
-        image_format = _PILLOW_FORMATS[pillow_format or ""]
-    except KeyError as exc:
-        raise FlowArtifactInvalidError("artifact format is unsupported") from exc
-    if width <= 0 or height <= 0 or max(width, height) < 2048:
-        raise FlowArtifactInvalidError("artifact does not meet the 2K requirement")
-    _validate_extension(path, image_format)
-    _validate_container(path, image_format, size_bytes)
-    digest = _sha256(path)
-    try:
-        final_size = path.stat().st_size
-    except OSError as exc:
-        raise FlowArtifactInvalidError("unable to re-stat artifact") from exc
-    if final_size != size_bytes:
-        raise FlowArtifactInvalidError("artifact changed during inspection")
-    return FlowArtifactFacts(
-        format=image_format,
-        width=width,
-        height=height,
-        size_bytes=size_bytes,
-        sha256=digest,
-    )
+    return _inspect_artifact(path).facts
 
 
 def publish_flow_artifact_exclusive(
@@ -163,6 +128,7 @@ def publish_flow_artifact_exclusive(
 ) -> FlowArtifactFacts:
     """Hard-link a staged artifact into place without an overwrite or copy fallback."""
     root = _canonical_root(trusted_root)
+    root_identity = _directory_identity(root)
     staging = _contained_path(staging_path, root)
     final = _contained_path(final_path, root)
     expected_staging = final.parent / ".staging"
@@ -171,46 +137,208 @@ def publish_flow_artifact_exclusive(
     _make_directory(final.parent, root)
     _contained_path(staging, root)
     _contained_path(final, root)
-    staged_facts = inspect_flow_artifact(staging)
-    if final.suffix.lower() != _FORMAT_SUFFIXES[staged_facts.format]:
+    staged = _inspect_artifact(staging, root=root, root_identity=root_identity)
+    if final.suffix.lower() != _FORMAT_SUFFIXES[staged.facts.format]:
         raise FlowArtifactInvalidError("final artifact suffix does not match staged bytes")
 
     try:
+        if _before_flow_artifact_link is not None:
+            _before_flow_artifact_link()
+        _assert_bound_artifact(staging, root, root_identity, staged.identity)
+        _assert_root_identity(root, root_identity)
+        _contained_path(final, root)
+        if _after_flow_artifact_revalidation_before_link is not None:
+            _after_flow_artifact_revalidation_before_link()
         os.link(staging, final)
     except FileExistsError:
-        return _recover_matching_final(staging, final, staged_facts)
+        return _recover_matching_final(staging, final, staged, root, root_identity)
+    except FlowArtifactInvalidError as exc:
+        raise FlowArtifactConflictError("Flow artifact changed before publication") from exc
     except OSError as exc:
         raise FlowArtifactConflictError("exclusive Flow artifact publication failed") from exc
 
     try:
-        final_facts = inspect_flow_artifact(final)
-        if final_facts != staged_facts:
+        _assert_bound_artifact(staging, root, root_identity, staged.identity)
+        _assert_bound_artifact(final, root, root_identity, staged.identity)
+        final = _contained_path(final, root)
+        final_snapshot = _inspect_artifact(
+            final,
+            root=root,
+            root_identity=root_identity,
+            expected_identity=staged.identity,
+        )
+        if final_snapshot.facts != staged.facts:
             raise FlowArtifactConflictError("published artifact differs from staging evidence")
         _sync_file_and_directory(final)
+        _assert_bound_artifact(final, root, root_identity, staged.identity)
+        _assert_bound_artifact(staging, root, root_identity, staged.identity)
         os.unlink(staging)
         _sync_directory(final.parent)
-    except FlowArtifactConflictError:
-        raise
+    except (FlowArtifactConflictError, FlowArtifactInvalidError) as exc:
+        if isinstance(exc, FlowArtifactConflictError):
+            raise
+        raise FlowArtifactConflictError("Flow artifact changed during publication") from exc
     except OSError as exc:
         raise FlowArtifactConflictError("Flow artifact publication could not be finalized") from exc
-    return staged_facts
+    return staged.facts
 
 
 def _recover_matching_final(
-    staging: Path, final: Path, staged_facts: FlowArtifactFacts
+    staging: Path,
+    final: Path,
+    staged: _ArtifactSnapshot,
+    root: Path,
+    root_identity: _FileIdentity,
 ) -> FlowArtifactFacts:
     try:
-        final_facts = inspect_flow_artifact(final)
+        _assert_bound_artifact(staging, root, root_identity, staged.identity)
+        final_snapshot = _inspect_artifact(
+            final,
+            root=root,
+            root_identity=root_identity,
+            expected_identity=staged.identity,
+        )
     except FlowArtifactInvalidError as exc:
         raise FlowArtifactConflictError("existing final artifact is invalid") from exc
-    if final_facts != staged_facts:
+    if final_snapshot.facts != staged.facts:
         raise FlowArtifactConflictError("existing final artifact conflicts with staging evidence")
     try:
+        _sync_file_and_directory(final)
+        _assert_bound_artifact(final, root, root_identity, staged.identity)
+        _assert_bound_artifact(staging, root, root_identity, staged.identity)
         os.unlink(staging)
         _sync_directory(final.parent)
+    except FlowArtifactInvalidError as exc:
+        raise FlowArtifactConflictError("matching artifact residue changed during recovery") from exc
     except OSError as exc:
         raise FlowArtifactConflictError("matching artifact residue could not be finalized") from exc
-    return final_facts
+    return final_snapshot.facts
+
+
+def _inspect_artifact(
+    path: Path,
+    *,
+    root: Path | None = None,
+    root_identity: _FileIdentity | None = None,
+    expected_identity: _FileIdentity | None = None,
+) -> _ArtifactSnapshot:
+    if root is not None:
+        if root_identity is None:
+            raise AssertionError("root identity is required for bound inspection")
+        _assert_root_identity(root, root_identity)
+        path = _contained_path(path, root)
+    initial_stat = _regular_file_stat(path)
+    initial_identity = _identity_from_stat(initial_stat)
+    if expected_identity is not None and initial_identity != expected_identity:
+        raise FlowArtifactInvalidError("artifact identity changed")
+    size_bytes = initial_stat.st_size
+    if size_bytes <= 0 or size_bytes > _MAX_ARTIFACT_BYTES:
+        raise FlowArtifactInvalidError("artifact size is outside the permitted range")
+    try:
+        descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_BINARY", 0))
+    except OSError as exc:
+        raise FlowArtifactInvalidError("unable to open artifact") from exc
+    try:
+        opened_stat = os.fstat(descriptor)
+        opened_identity = _identity_from_stat(opened_stat)
+        if opened_identity != initial_identity or not stat.S_ISREG(opened_stat.st_mode):
+            raise FlowArtifactInvalidError("artifact identity changed while opening")
+        with os.fdopen(descriptor, "rb", closefd=False) as stream:
+            facts = _inspect_open_stream(stream, path, size_bytes)
+        final_stat = _regular_file_stat(path)
+        if (
+            _identity_from_stat(final_stat) != opened_identity
+            or final_stat.st_size != size_bytes
+            or os.fstat(descriptor).st_size != size_bytes
+        ):
+            raise FlowArtifactInvalidError("artifact changed during inspection")
+        if root is not None and root_identity is not None:
+            _assert_root_identity(root, root_identity)
+            _contained_path(path, root)
+        return _ArtifactSnapshot(facts=facts, identity=opened_identity)
+    except OSError as exc:
+        raise FlowArtifactInvalidError("artifact inspection failed") from exc
+    finally:
+        os.close(descriptor)
+
+
+def _inspect_open_stream(stream: BinaryIO, path: Path, size_bytes: int) -> FlowArtifactFacts:
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", Image.DecompressionBombWarning)
+            old_max_pixels = Image.MAX_IMAGE_PIXELS
+            Image.MAX_IMAGE_PIXELS = _MAX_ARTIFACT_PIXELS
+            try:
+                stream.seek(0)
+                with Image.open(stream) as image:
+                    image.verify()
+                    pillow_format = image.format
+                stream.seek(0)
+                with Image.open(stream) as image:
+                    image.load()
+                    width, height = image.size
+                    if image.format != pillow_format:
+                        raise FlowArtifactInvalidError("artifact format changed while decoding")
+            finally:
+                Image.MAX_IMAGE_PIXELS = old_max_pixels
+    except (Image.DecompressionBombError, OSError, SyntaxError, UnidentifiedImageError) as exc:
+        raise FlowArtifactInvalidError("artifact does not fully decode") from exc
+    except Image.DecompressionBombWarning as exc:
+        raise FlowArtifactInvalidError("artifact exceeds the pixel limit") from exc
+    try:
+        image_format = _PILLOW_FORMATS[pillow_format or ""]
+    except KeyError as exc:
+        raise FlowArtifactInvalidError("artifact format is unsupported") from exc
+    if width <= 0 or height <= 0 or max(width, height) < 2048:
+        raise FlowArtifactInvalidError("artifact does not meet the 2K requirement")
+    _validate_extension(path, image_format)
+    _validate_container(stream, image_format, size_bytes)
+    digest = _sha256_stream(stream)
+    return FlowArtifactFacts(
+        format=image_format,
+        width=width,
+        height=height,
+        size_bytes=size_bytes,
+        sha256=digest,
+    )
+
+
+def _regular_file_stat(path: Path) -> os.stat_result:
+    try:
+        metadata = os.stat(path, follow_symlinks=False)
+    except OSError as exc:
+        raise FlowArtifactInvalidError("unable to stat artifact") from exc
+    if not stat.S_ISREG(metadata.st_mode):
+        raise FlowArtifactInvalidError("artifact is not a regular file")
+    return metadata
+
+
+def _identity_from_stat(metadata: os.stat_result) -> _FileIdentity:
+    return _FileIdentity(device=metadata.st_dev, inode=metadata.st_ino)
+
+
+def _directory_identity(path: Path) -> _FileIdentity:
+    try:
+        metadata = os.stat(path, follow_symlinks=False)
+    except OSError as exc:
+        raise FlowArtifactInvalidError("unable to stat trusted Flow work root") from exc
+    if not stat.S_ISDIR(metadata.st_mode):
+        raise FlowArtifactInvalidError("trusted Flow work root is not a directory")
+    return _identity_from_stat(metadata)
+
+
+def _assert_root_identity(root: Path, expected: _FileIdentity) -> None:
+    if _directory_identity(root) != expected or _path_is_link_or_junction(root):
+        raise FlowArtifactInvalidError("trusted Flow work root changed")
+
+
+def _assert_bound_artifact(
+    path: Path, root: Path, root_identity: _FileIdentity, expected: _FileIdentity
+) -> None:
+    _assert_root_identity(root, root_identity)
+    path = _contained_path(path, root)
+    if _identity_from_stat(_regular_file_stat(path)) != expected:
+        raise FlowArtifactInvalidError("artifact identity changed")
 
 
 def _candidate_directory(
@@ -314,15 +442,15 @@ def _validate_extension(path: Path, image_format: str) -> None:
         raise FlowArtifactInvalidError("artifact extension is unsupported")
 
 
-def _validate_container(path: Path, image_format: str, size_bytes: int) -> None:
+def _validate_container(stream: BinaryIO, image_format: str, size_bytes: int) -> None:
     try:
-        with path.open("rb") as stream:
-            if image_format == "png":
-                _validate_png_container(stream, size_bytes)
-            elif image_format == "jpeg":
-                _validate_jpeg_container(stream, size_bytes)
-            else:
-                _validate_webp_container(stream, size_bytes)
+        stream.seek(0)
+        if image_format == "png":
+            _validate_png_container(stream, size_bytes)
+        elif image_format == "jpeg":
+            _validate_jpeg_container(stream, size_bytes)
+        else:
+            _validate_webp_container(stream, size_bytes)
     except (OSError, ValueError, struct.error) as exc:
         raise FlowArtifactInvalidError("artifact container is malformed") from exc
 
@@ -352,11 +480,50 @@ def _validate_png_container(stream: BinaryIO, size_bytes: int) -> None:
 
 
 def _validate_jpeg_container(stream: BinaryIO, size_bytes: int) -> None:
-    if size_bytes < 4 or stream.read(2) != b"\xff\xd8":
+    data = stream.read(size_bytes)
+    if len(data) != size_bytes or size_bytes < 4 or data[:2] != b"\xff\xd8":
         raise ValueError
-    stream.seek(-2, os.SEEK_END)
-    if stream.read(2) != b"\xff\xd9":
-        raise ValueError
+    offset = 2
+    in_scan = False
+    while offset < len(data):
+        if in_scan:
+            marker_offset = data.find(b"\xff", offset)
+            if marker_offset < 0 or marker_offset + 1 >= len(data):
+                raise ValueError
+            marker = data[marker_offset + 1]
+            if marker == 0x00 or 0xD0 <= marker <= 0xD7:
+                offset = marker_offset + 2
+                continue
+            if marker == 0xD9:
+                if marker_offset + 2 != len(data):
+                    raise ValueError
+                return
+            offset = marker_offset
+            in_scan = False
+            continue
+        if data[offset] != 0xFF:
+            raise ValueError
+        while offset < len(data) and data[offset] == 0xFF:
+            offset += 1
+        if offset >= len(data):
+            raise ValueError
+        marker = data[offset]
+        offset += 1
+        if marker == 0xD9:
+            if offset != len(data):
+                raise ValueError
+            return
+        if marker == 0x00 or 0xD0 <= marker <= 0xD7 or marker == 0x01:
+            continue
+        if offset + 2 > len(data):
+            raise ValueError
+        segment_length = struct.unpack(">H", data[offset : offset + 2])[0]
+        if segment_length < 2 or offset + segment_length > len(data):
+            raise ValueError
+        offset += segment_length
+        if marker == 0xDA:
+            in_scan = True
+    raise ValueError
 
 
 def _validate_webp_container(stream: BinaryIO, size_bytes: int) -> None:
@@ -368,12 +535,12 @@ def _validate_webp_container(stream: BinaryIO, size_bytes: int) -> None:
         raise ValueError
 
 
-def _sha256(path: Path) -> str:
+def _sha256_stream(stream: BinaryIO) -> str:
     digest = hashlib.sha256()
     try:
-        with path.open("rb") as stream:
-            while chunk := stream.read(_HASH_CHUNK_SIZE):
-                digest.update(chunk)
+        stream.seek(0)
+        while chunk := stream.read(_HASH_CHUNK_SIZE):
+            digest.update(chunk)
     except OSError as exc:
         raise FlowArtifactInvalidError("unable to hash artifact") from exc
     return digest.hexdigest()

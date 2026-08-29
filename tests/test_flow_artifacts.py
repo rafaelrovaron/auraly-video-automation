@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import os
 from pathlib import Path
+import shutil
 import subprocess
 
 import pytest
@@ -52,6 +53,20 @@ def _valid_staging_and_final(root: Path) -> tuple[Path, Path]:
     staging, final = _paths(root)
     _write_image(staging, "PNG")
     return staging, final
+
+
+def _replace_directory_with_link(link: Path, target: Path) -> None:
+    if os.name == "nt":
+        created = subprocess.run(
+            ["cmd", "/c", "mklink", "/J", str(link), str(target)],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if created.returncode != 0:
+            pytest.skip("junctions unavailable in this environment")
+    else:
+        link.symlink_to(target, target_is_directory=True)
 
 
 def test_candidate_staging_and_final_paths_are_canonical_and_distinct(tmp_path: Path) -> None:
@@ -214,6 +229,152 @@ def test_matching_crash_residue_recovers_without_changing_final_bytes(
     assert facts.sha256 == hashlib.sha256(before).hexdigest()
 
 
+def test_matching_residue_syncs_final_before_unlinking_staging(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    staging, final = _valid_staging_and_final(tmp_path)
+    final.parent.mkdir(parents=True, exist_ok=True)
+    os.link(staging, final)
+    import auraly_pipeline.flow.artifacts as artifacts
+
+    events: list[str] = []
+    original_sync = artifacts._sync_file_and_directory
+    original_unlink = artifacts.os.unlink
+
+    def observe_sync(path: Path) -> None:
+        assert path == final
+        events.append("sync-final")
+        original_sync(path)
+
+    def observe_unlink(path: str | os.PathLike[str]) -> None:
+        if Path(path) == staging:
+            assert events == ["sync-final"]
+            events.append("unlink-staging")
+        original_unlink(path)
+
+    monkeypatch.setattr(artifacts, "_sync_file_and_directory", observe_sync)
+    monkeypatch.setattr(artifacts.os, "unlink", observe_unlink)
+    publish_flow_artifact_exclusive(staging, final, trusted_root=tmp_path)
+
+    assert events == ["sync-final", "unlink-staging"]
+    assert not staging.exists()
+
+
+def test_crash_after_staging_before_link_preserves_residue(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    staging, final = _valid_staging_and_final(tmp_path)
+    import auraly_pipeline.flow.artifacts as artifacts
+
+    def interrupt_before_link() -> None:
+        raise OSError("injected interruption")
+
+    monkeypatch.setattr(artifacts, "_before_flow_artifact_link", interrupt_before_link, raising=False)
+    with pytest.raises(FlowArtifactConflictError):
+        publish_flow_artifact_exclusive(staging, final, trusted_root=tmp_path)
+
+    assert staging.exists()
+    assert not final.exists()
+
+
+def test_staging_identity_replacement_before_link_is_detected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    staging, final = _valid_staging_and_final(tmp_path)
+    replacement = staging.with_name("replacement.part")
+    _write_image(replacement, "PNG", axis=2049)
+    import auraly_pipeline.flow.artifacts as artifacts
+
+    def replace_staging_before_link() -> None:
+        os.replace(replacement, staging)
+
+    monkeypatch.setattr(
+        artifacts, "_before_flow_artifact_link", replace_staging_before_link, raising=False
+    )
+    with pytest.raises(FlowArtifactConflictError):
+        publish_flow_artifact_exclusive(staging, final, trusted_root=tmp_path)
+
+    assert staging.exists()
+    assert not final.exists()
+
+
+def test_parent_link_substitution_before_link_is_detected_and_preserves_residue(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    staging, final = _valid_staging_and_final(tmp_path)
+    original_parent = final.parent
+    preserved_parent = tmp_path / "preserved-generation"
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    import auraly_pipeline.flow.artifacts as artifacts
+
+    def replace_parent_before_link() -> None:
+        original_parent.rename(preserved_parent)
+        outside_staging = outside / ".staging" / staging.name
+        outside_staging.parent.mkdir(parents=True)
+        shutil.copyfile(preserved_parent / ".staging" / staging.name, outside_staging)
+        _replace_directory_with_link(original_parent, outside)
+
+    monkeypatch.setattr(
+        artifacts, "_before_flow_artifact_link", replace_parent_before_link, raising=False
+    )
+    with pytest.raises(FlowArtifactConflictError):
+        publish_flow_artifact_exclusive(staging, final, trusted_root=tmp_path)
+
+    assert (preserved_parent / ".staging" / staging.name).exists()
+    assert not (outside / final.name).exists()
+
+
+def test_parent_link_substitution_after_revalidation_fails_closed_after_escaped_link(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    staging, final = _valid_staging_and_final(tmp_path)
+    original_parent = final.parent
+    preserved_parent = tmp_path / "preserved-generation"
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    import auraly_pipeline.flow.artifacts as artifacts
+
+    def replace_parent_after_revalidation() -> None:
+        original_parent.rename(preserved_parent)
+        outside_staging = outside / ".staging" / staging.name
+        outside_staging.parent.mkdir(parents=True)
+        shutil.copyfile(preserved_parent / ".staging" / staging.name, outside_staging)
+        _replace_directory_with_link(original_parent, outside)
+
+    monkeypatch.setattr(
+        artifacts,
+        "_after_flow_artifact_revalidation_before_link",
+        replace_parent_after_revalidation,
+        raising=False,
+    )
+    with pytest.raises(FlowArtifactConflictError):
+        publish_flow_artifact_exclusive(staging, final, trusted_root=tmp_path)
+
+    assert (preserved_parent / ".staging" / staging.name).exists()
+    assert (outside / ".staging" / staging.name).exists()
+    assert (outside / final.name).exists()
+
+
+def test_crash_after_link_before_final_sync_preserves_both_names(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    staging, final = _valid_staging_and_final(tmp_path)
+    import auraly_pipeline.flow.artifacts as artifacts
+
+    def interrupt_final_sync(path: Path) -> None:
+        assert path == final
+        raise OSError("injected interruption")
+
+    monkeypatch.setattr(artifacts, "_sync_file_and_directory", interrupt_final_sync)
+    with pytest.raises(FlowArtifactConflictError):
+        publish_flow_artifact_exclusive(staging, final, trusted_root=tmp_path)
+
+    assert staging.samefile(final)
+    assert staging.exists()
+    assert final.exists()
+
+
 def test_mismatched_crash_residue_blocks_and_preserves_existing_final(tmp_path: Path) -> None:
     staging, final = _valid_staging_and_final(tmp_path)
     final.parent.mkdir(parents=True, exist_ok=True)
@@ -289,6 +450,14 @@ def test_inspect_rejects_trailing_polyglot_payload(tmp_path: Path, suffix: str) 
     image_format = {".png": "PNG", ".jpg": "JPEG", ".webp": "WEBP"}[suffix]
     fixture = _write_image(tmp_path / f"polyglot{suffix}", image_format)
     fixture.write_bytes(fixture.read_bytes() + b"MZ executable marker")
+
+    with pytest.raises(FlowArtifactInvalidError):
+        inspect_flow_artifact(fixture)
+
+
+def test_inspect_rejects_jpeg_polyglot_with_a_second_eoi_at_eof(tmp_path: Path) -> None:
+    fixture = _write_image(tmp_path / "jpeg-polyglot.jpg", "JPEG")
+    fixture.write_bytes(fixture.read_bytes() + b"MZ executable marker" + b"\xff\xd9")
 
     with pytest.raises(FlowArtifactInvalidError):
         inspect_flow_artifact(fixture)
