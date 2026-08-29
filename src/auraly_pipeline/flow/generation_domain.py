@@ -113,7 +113,7 @@ class FlowGenerationObservation(ContractModel):
     prompt_verified: bool
 
 
-@dataclass(frozen=True)
+@dataclass
 class FlowGenerationRuntimeError(RuntimeError):
     """Typed internal generation failure with allowlisted scalar fields only."""
 

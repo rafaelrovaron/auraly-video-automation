@@ -21,6 +21,7 @@ from auraly_pipeline.flow import (
     GoogleFlowRuntime,
 )
 from auraly_pipeline.flow.runtime import (
+    FlowBrowserSession,
     PRODUCTION_TARGET,
     _FlowRuntimeTarget,
     _classify_url,
@@ -70,6 +71,13 @@ def test_ready_uses_managed_persistent_headed_context_without_actions(tmp_path: 
     assert observation.authenticated is True
     assert observation.ui_ready is True
     assert observation.status == "ready"
+
+
+def test_authenticated_session_reuses_goal_4b_launch_and_route_trust(tmp_path: Path) -> None:
+    """Generation gets a narrow authenticated page seam, never profile or credential access."""
+    with FlowBrowserSession(config(tmp_path), _target=local_target("ready.html")) as session:
+        session.require_current_flow_page()
+        assert session.page.url == fake_flow_url("ready.html")
 
 
 def test_login_timeout_has_no_screenshot_or_trace(tmp_path: Path) -> None:

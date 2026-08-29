@@ -9,7 +9,12 @@ from typing import Any, cast
 import pytest
 
 from auraly_pipeline.flow import FLOW_URL, FlowBrowserLaunchError
-from auraly_pipeline.flow.config import FlowRuntimeConfig, resolve_flow_runtime_config
+from auraly_pipeline.flow.config import (
+    FlowGenerationConfig,
+    FlowRuntimeConfig,
+    resolve_flow_generation_config,
+    resolve_flow_runtime_config,
+)
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
@@ -21,6 +26,57 @@ def _assert_config_error(**options: object) -> None:
 
     assert raised.value.failed_step == "validate_config"
     assert str(raised.value) == ""
+
+
+def test_generation_timeout_defaults_and_environment() -> None:
+    config = resolve_flow_generation_config(environment={})
+
+    assert config == FlowGenerationConfig(
+        generation_timeout_seconds=600,
+        download_timeout_seconds=120,
+    )
+
+    overridden = resolve_flow_generation_config(
+        environment={
+            "AURALY_FLOW_GENERATION_TIMEOUT_SECONDS": "900",
+            "AURALY_FLOW_DOWNLOAD_TIMEOUT_SECONDS": "180",
+        }
+    )
+
+    assert overridden.generation_timeout_seconds == 900
+    assert overridden.download_timeout_seconds == 180
+
+
+@pytest.mark.parametrize(
+    ("name", "value"),
+    (
+        ("AURALY_FLOW_GENERATION_TIMEOUT_SECONDS", ""),
+        ("AURALY_FLOW_GENERATION_TIMEOUT_SECONDS", "0"),
+        ("AURALY_FLOW_GENERATION_TIMEOUT_SECONDS", "-1"),
+        ("AURALY_FLOW_GENERATION_TIMEOUT_SECONDS", "1.5"),
+        ("AURALY_FLOW_GENERATION_TIMEOUT_SECONDS", "3601"),
+        ("AURALY_FLOW_DOWNLOAD_TIMEOUT_SECONDS", ""),
+        ("AURALY_FLOW_DOWNLOAD_TIMEOUT_SECONDS", "0"),
+        ("AURALY_FLOW_DOWNLOAD_TIMEOUT_SECONDS", "-1"),
+        ("AURALY_FLOW_DOWNLOAD_TIMEOUT_SECONDS", "1.5"),
+        ("AURALY_FLOW_DOWNLOAD_TIMEOUT_SECONDS", "3601"),
+    ),
+)
+def test_generation_config_rejects_invalid_or_excessive_timeout(
+    name: str,
+    value: str,
+) -> None:
+    with pytest.raises(FlowBrowserLaunchError) as raised:
+        resolve_flow_generation_config(environment={name: value})
+
+    assert raised.value.failed_step == "validate_config"
+    assert str(raised.value) == ""
+
+
+def test_generation_config_exposes_no_target_or_browser_launch_override() -> None:
+    import inspect
+
+    assert set(inspect.signature(resolve_flow_generation_config).parameters) == {"environment"}
 
 
 def test_config_precedence_is_cli_then_env_then_exact_defaults(tmp_path: Path) -> None:

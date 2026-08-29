@@ -12,6 +12,9 @@ from .domain import FLOW_URL, FlowBrowserLaunchError
 
 _DEFAULT_LOGIN_TIMEOUT_SECONDS = 300
 _DEFAULT_NAVIGATION_TIMEOUT_SECONDS = 30
+_DEFAULT_GENERATION_TIMEOUT_SECONDS = 600
+_DEFAULT_DOWNLOAD_TIMEOUT_SECONDS = 120
+_MAX_GENERATION_OPERATION_TIMEOUT_SECONDS = 3600
 
 
 @dataclass(frozen=True)
@@ -25,6 +28,44 @@ class FlowRuntimeConfig:
     login_timeout_seconds: int
     navigation_timeout_seconds: int
     flow_url: Literal["https://labs.google/fx/tools/flow"] = field(default=FLOW_URL, init=False)
+
+
+@dataclass(frozen=True)
+class FlowGenerationConfig:
+    """Bounded worker-only timeouts for generation and one 2K download."""
+
+    generation_timeout_seconds: int
+    download_timeout_seconds: int
+
+
+def resolve_flow_generation_config(
+    *,
+    environment: Mapping[str, str] | None = None,
+) -> FlowGenerationConfig:
+    """Resolve generation operation timeouts without exposing browser target options."""
+    try:
+        values = os.environ if environment is None else environment
+        generation_timeout_seconds = _resolve_timeout_option(
+            cli_value=None,
+            environment=values,
+            environment_name="AURALY_FLOW_GENERATION_TIMEOUT_SECONDS",
+            default=_DEFAULT_GENERATION_TIMEOUT_SECONDS,
+            maximum=_MAX_GENERATION_OPERATION_TIMEOUT_SECONDS,
+        )
+        download_timeout_seconds = _resolve_timeout_option(
+            cli_value=None,
+            environment=values,
+            environment_name="AURALY_FLOW_DOWNLOAD_TIMEOUT_SECONDS",
+            default=_DEFAULT_DOWNLOAD_TIMEOUT_SECONDS,
+            maximum=_MAX_GENERATION_OPERATION_TIMEOUT_SECONDS,
+        )
+    except (TypeError, ValueError):
+        raise FlowBrowserLaunchError(failed_step="validate_config") from None
+
+    return FlowGenerationConfig(
+        generation_timeout_seconds=generation_timeout_seconds,
+        download_timeout_seconds=download_timeout_seconds,
+    )
 
 
 def resolve_flow_runtime_config(
@@ -130,6 +171,7 @@ def _resolve_timeout_option(
     environment: Mapping[str, str],
     environment_name: str,
     default: int,
+    maximum: int | None = None,
 ) -> int:
     if cli_value is not None:
         value = cli_value
@@ -137,7 +179,12 @@ def _resolve_timeout_option(
         value = int(environment[environment_name])
     else:
         value = default
-    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int)
+        or value <= 0
+        or (maximum is not None and value > maximum)
+    ):
         raise ValueError("timeout must be a positive integer")
     return value
 

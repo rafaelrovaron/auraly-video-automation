@@ -1,6 +1,11 @@
 """Google Flow preflight contracts and runtime components."""
 
-from .config import FlowRuntimeConfig, resolve_flow_runtime_config
+from .config import (
+    FlowGenerationConfig,
+    FlowRuntimeConfig,
+    resolve_flow_generation_config,
+    resolve_flow_runtime_config,
+)
 from .artifacts import (
     FlowArtifactConflictError,
     FlowArtifactFacts,
@@ -13,6 +18,7 @@ from .artifacts import (
 from .diagnostics import FlowDiagnosticWriter, sanitize_trace_archive
 from .lock import BrowserRuntimeLock
 from .runtime import GoogleFlowRuntime
+from .generation import FlowGenerationCheckpointSink, FlowGenerationRequest, FlowGenerationRuntime
 from .service import FlowPreflightService
 from .generation_domain import (
     FlowCandidateObservation,
@@ -49,6 +55,10 @@ __all__ = [
     "FlowArtifactFacts",
     "FlowArtifactInvalidError",
     "FlowRuntimeConfig",
+    "FlowGenerationConfig",
+    "FlowGenerationCheckpointSink",
+    "FlowGenerationRequest",
+    "FlowGenerationRuntime",
     "FlowAuthenticationTimeoutError",
     "FlowBrowserLaunchError",
     "FlowDiagnosticSanitizationError",
@@ -78,6 +88,7 @@ __all__ = [
     "inspect_flow_artifact",
     "publish_flow_artifact_exclusive",
     "resolve_flow_runtime_config",
+    "resolve_flow_generation_config",
     "resolve_flow_final_path",
     "sanitize_trace_archive",
 ]

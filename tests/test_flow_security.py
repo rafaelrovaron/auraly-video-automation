@@ -573,12 +573,34 @@ def test_flow_source_scan_rejects_storage_state_calls(tmp_path: Path) -> None:
     assert "call:storage_state" in _flow_source_findings(source_root)
 
 
-def test_flow_package_has_no_forbidden_integrations_or_provider_mutations() -> None:
-    """A Goal 4B source change cannot add app coupling or provider-mutating browser methods."""
+def test_flow_package_limits_provider_mutations_to_checkpointed_generation_runtime() -> None:
+    """Task 8 permits exactly the reviewed input/dispatch actions, nowhere else in Flow."""
     inventory = _scan_flow_source(FLOW_SOURCE_ROOT)
 
-    assert _flow_source_findings(FLOW_SOURCE_ROOT) == set()
-    assert inventory.playwright_importers == frozenset({"runtime.py"})
+    findings = _flow_source_findings(FLOW_SOURCE_ROOT)
+    assert findings == {"call:set_input_files", "call:fill", "call:click"}
+    assert inventory.playwright_importers == frozenset({"generation.py", "runtime.py"})
+
+    generation_tree = _module_tree(FLOW_SOURCE_ROOT / "generation.py")
+    generation_calls = {
+        node.func.attr
+        for node in ast.walk(generation_tree)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+    }
+    assert {"set_input_files", "fill", "click"}.issubset(generation_calls)
+    assert not any(
+        attribute in {"storage_state", "goto", "evaluate"}
+        for attribute in generation_calls
+    )
+    for module_path in inventory.module_paths:
+        if module_path == "generation.py":
+            continue
+        module_calls = {
+            node.func.attr
+            for node in ast.walk(_module_tree(FLOW_SOURCE_ROOT / module_path))
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+        }
+        assert not module_calls & FORBIDDEN_BROWSER_CALLS
 
     runtime_tree = _module_tree(FLOW_SOURCE_ROOT / "runtime.py")
     launches = [
