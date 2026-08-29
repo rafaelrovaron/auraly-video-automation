@@ -29,6 +29,7 @@ _EXTENSION_FORMATS = {".png": "png", ".jpg": "jpeg", ".jpeg": "jpeg", ".webp": "
 _before_flow_artifact_link: Callable[[], None] | None = None
 _after_flow_artifact_revalidation_before_link: Callable[[], None] | None = None
 _after_flow_artifact_cleanup_revalidation: Callable[[], None] | None = None
+_after_flow_artifact_cleanup_quarantine_identity_check: Callable[[int, str], None] | None = None
 
 
 class FlowArtifactInvalidError(RuntimeError):
@@ -381,7 +382,7 @@ def _bind_staging_cleanup(
             parent_descriptor=parent_descriptor,
             windows_delete_handle=True,
         )
-    if os.unlink not in os.supports_dir_fd:
+    if os.stat not in os.supports_dir_fd:
         raise FlowArtifactInvalidError("platform cannot bind staging cleanup to a directory handle")
     flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
     try:
@@ -415,7 +416,17 @@ def _delete_bound_staging(binding: _StagingCleanupBinding) -> None:
             if _identity_from_stat(os.fstat(binding.descriptor)) != binding.parent_identity:
                 raise FlowArtifactInvalidError("staging directory changed before cleanup")
             quarantine_name = _move_posix_staging_to_quarantine(binding)
-            os.unlink(quarantine_name, dir_fd=binding.descriptor)
+            if _after_flow_artifact_cleanup_quarantine_identity_check is not None:
+                _after_flow_artifact_cleanup_quarantine_identity_check(
+                    binding.descriptor, quarantine_name
+                )
+            # POSIX has no unlink-by-handle primitive.  unlinkat(dir_fd, name)
+            # would resolve the quarantine entry again and could delete a
+            # replacement installed after the identity check above.  Preserve
+            # the residue and fail closed instead of claiming finalized cleanup.
+            raise FlowArtifactInvalidError(
+                "platform cannot safely remove quarantined staging artifact by identity"
+            )
     except OSError as exc:
         raise FlowArtifactInvalidError("unable to remove bound staging artifact") from exc
     finally:
@@ -423,7 +434,7 @@ def _delete_bound_staging(binding: _StagingCleanupBinding) -> None:
 
 
 def _move_posix_staging_to_quarantine(binding: _StagingCleanupBinding) -> str:
-    """Atomically move the expected entry before any POSIX unlink by name."""
+    """Atomically isolate the current entry for identity validation and preservation."""
     for _ in range(16):
         quarantine_name = f".cleanup-{uuid4().hex}.part"
         try:
