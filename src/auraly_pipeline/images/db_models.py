@@ -154,6 +154,10 @@ class FlowGenerationRunRow(Base):
             "dispatch_confirmed_at IS NULL OR dispatch_intent_at IS NOT NULL",
             name="flow_run_dispatch_confirmation_requires_intent",
         ),
+        CheckConstraint(
+            "dispatch_confirmed_at IS NULL OR dispatch_intent_at <= dispatch_confirmed_at",
+            name="flow_run_dispatch_timestamp_order",
+        ),
         UniqueConstraint("image_generation_id", name="uq_flow_generation_runs_image_generation_id"),
         Index("ix_flow_generation_runs_stage", "stage"),
     )

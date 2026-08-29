@@ -64,6 +64,10 @@ def upgrade() -> None:
             "dispatch_confirmed_at IS NULL OR dispatch_intent_at IS NOT NULL",
             name="flow_run_dispatch_confirmation_requires_intent",
         ),
+        sa.CheckConstraint(
+            "dispatch_confirmed_at IS NULL OR dispatch_intent_at <= dispatch_confirmed_at",
+            name="flow_run_dispatch_timestamp_order",
+        ),
         sa.UniqueConstraint("image_generation_id", name="uq_flow_generation_runs_image_generation_id"),
     )
     op.create_index(
@@ -117,6 +121,16 @@ def upgrade() -> None:
 
     op.execute(
         """
+        CREATE TRIGGER prevent_flow_generation_run_generation_update
+        BEFORE UPDATE OF image_generation_id ON flow_generation_runs
+        WHEN NEW.image_generation_id IS NOT OLD.image_generation_id
+        BEGIN
+            SELECT RAISE(ABORT, 'Flow run generation identity is immutable');
+        END
+        """
+    )
+    op.execute(
+        """
         CREATE TRIGGER enforce_flow_slot_candidate_generation_insert
         BEFORE INSERT ON flow_candidate_slots
         WHEN NEW.image_candidate_id IS NOT NULL AND NOT EXISTS (
@@ -152,6 +166,7 @@ def upgrade() -> None:
 def downgrade() -> None:
     op.execute("DROP TRIGGER IF EXISTS enforce_flow_slot_candidate_generation_update")
     op.execute("DROP TRIGGER IF EXISTS enforce_flow_slot_candidate_generation_insert")
+    op.execute("DROP TRIGGER IF EXISTS prevent_flow_generation_run_generation_update")
     op.drop_index("ix_flow_candidate_slots_state", table_name="flow_candidate_slots")
     op.drop_index("ix_flow_candidate_slots_run_id", table_name="flow_candidate_slots")
     op.drop_table("flow_candidate_slots")

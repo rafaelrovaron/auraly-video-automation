@@ -12,6 +12,7 @@ from auraly_pipeline.campaigns.persistence import migrate_database, sqlite_url
 
 
 NOW = "2026-08-15T12:00:00+00:00"
+EARLIER = "2026-08-15T11:59:59+00:00"
 
 INVALID_RUN_CASES = (
     {"required_candidate_count": 1},
@@ -209,21 +210,40 @@ def test_flow_run_constraints_reject_duplicate_generation_run(tmp_path: Path) ->
     engine.dispose()
 
 
-def test_flow_slot_constraints_reject_duplicate_index_and_candidate_link(tmp_path: Path) -> None:
+def test_flow_run_constraints_reject_confirmation_before_intent(tmp_path: Path) -> None:
+    engine = _database(tmp_path)
+    with pytest.raises(IntegrityError):
+        with engine.begin() as connection:
+            _insert_run(
+                connection,
+                dispatch_intent_at=NOW,
+                dispatch_confirmed_at=EARLIER,
+            )
+    engine.dispose()
+
+
+def test_flow_slot_constraints_reject_duplicate_index(tmp_path: Path) -> None:
     engine = _database(tmp_path)
     with engine.begin() as connection:
         _insert_run(connection)
         _insert_slot(connection, id="slot-1", state="ingested", image_candidate_id="candidate-1")
-        _insert_run(connection, id="run-2", image_generation_id="generation-2")
     with pytest.raises(IntegrityError):
         with engine.begin() as connection:
             _insert_slot(connection, id="slot-2")
+    engine.dispose()
+
+
+def test_flow_slot_constraints_reject_duplicate_candidate_link(tmp_path: Path) -> None:
+    engine = _database(tmp_path)
+    with engine.begin() as connection:
+        _insert_run(connection)
+        _insert_slot(connection, id="slot-1", state="ingested", image_candidate_id="candidate-1")
     with pytest.raises(IntegrityError):
         with engine.begin() as connection:
             _insert_slot(
                 connection,
-                id="slot-3",
-                run_id="run-2",
+                id="slot-2",
+                slot_index=1,
                 state="ingested",
                 image_candidate_id="candidate-1",
             )
@@ -242,6 +262,22 @@ def test_flow_slot_constraints_reject_candidate_from_another_generation(tmp_path
                 run_id="run-2",
                 state="ingested",
                 image_candidate_id="candidate-1",
+            )
+    engine.dispose()
+
+
+def test_flow_run_constraints_reject_reassigning_linked_candidate_generation(tmp_path: Path) -> None:
+    engine = _database(tmp_path)
+    with engine.begin() as connection:
+        _insert_run(connection)
+        _insert_slot(connection, state="ingested", image_candidate_id="candidate-1")
+    with pytest.raises(IntegrityError):
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "UPDATE flow_generation_runs SET image_generation_id='generation-2' "
+                    "WHERE id='run-1'"
+                )
             )
     engine.dispose()
 
