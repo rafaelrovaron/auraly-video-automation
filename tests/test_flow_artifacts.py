@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+from typing import Any
 
 import pytest
 
@@ -209,17 +210,16 @@ def test_matching_crash_residue_recovers_without_changing_final_bytes(
     staging, final = _valid_staging_and_final(tmp_path)
     import auraly_pipeline.flow.artifacts as artifacts
 
-    original_unlink = artifacts.os.unlink
+    original_delete = artifacts._delete_bound_staging
 
-    def fail_staging_unlink(path: str | os.PathLike[str]) -> None:
-        if Path(path) == staging:
-            raise OSError("injected interruption")
-        original_unlink(path)
+    def fail_staging_delete(binding: Any) -> None:
+        artifacts._close_cleanup_binding(binding)
+        raise OSError("injected interruption")
 
-    monkeypatch.setattr(artifacts.os, "unlink", fail_staging_unlink)
+    monkeypatch.setattr(artifacts, "_delete_bound_staging", fail_staging_delete)
     with pytest.raises(FlowArtifactConflictError):
         publish_flow_artifact_exclusive(staging, final, trusted_root=tmp_path)
-    monkeypatch.setattr(artifacts.os, "unlink", original_unlink)
+    monkeypatch.setattr(artifacts, "_delete_bound_staging", original_delete)
 
     assert staging.samefile(final)
     before = final.read_bytes()
@@ -239,25 +239,74 @@ def test_matching_residue_syncs_final_before_unlinking_staging(
 
     events: list[str] = []
     original_sync = artifacts._sync_file_and_directory
-    original_unlink = artifacts.os.unlink
+    original_delete = getattr(artifacts, "_delete_bound_staging", None)
 
     def observe_sync(path: Path) -> None:
         assert path == final
         events.append("sync-final")
         original_sync(path)
 
-    def observe_unlink(path: str | os.PathLike[str]) -> None:
-        if Path(path) == staging:
-            assert events == ["sync-final"]
-            events.append("unlink-staging")
-        original_unlink(path)
+    def observe_delete(binding: object) -> None:
+        assert events == ["sync-final"]
+        events.append("unlink-staging")
+        assert original_delete is not None
+        original_delete(binding)
 
     monkeypatch.setattr(artifacts, "_sync_file_and_directory", observe_sync)
-    monkeypatch.setattr(artifacts.os, "unlink", observe_unlink)
+    monkeypatch.setattr(artifacts, "_delete_bound_staging", observe_delete, raising=False)
     publish_flow_artifact_exclusive(staging, final, trusted_root=tmp_path)
 
     assert events == ["sync-final", "unlink-staging"]
     assert not staging.exists()
+
+
+@pytest.mark.parametrize("recovery", [False, True])
+def test_cleanup_parent_substitution_never_deletes_external_staging_alias(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, recovery: bool
+) -> None:
+    staging, final = _valid_staging_and_final(tmp_path)
+    if recovery:
+        final.parent.mkdir(parents=True, exist_ok=True)
+        os.link(staging, final)
+    original_parent = final.parent
+    preserved_parent = tmp_path / "preserved-generation"
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    import auraly_pipeline.flow.artifacts as artifacts
+    hook_completed = False
+
+    def replace_parent_after_cleanup_revalidation() -> None:
+        nonlocal hook_completed
+        original_parent.rename(preserved_parent)
+        outside_staging = outside / ".staging" / staging.name
+        outside_staging.parent.mkdir(parents=True)
+        shutil.copyfile(preserved_parent / ".staging" / staging.name, outside_staging)
+        _replace_directory_with_link(original_parent, outside)
+        assert artifacts._path_is_link_or_junction(original_parent)
+        assert artifacts._directory_identity(preserved_parent / ".staging") != artifacts._directory_identity(
+            outside / ".staging"
+        )
+        assert (preserved_parent / ".staging" / staging.name).exists()
+        assert outside_staging.exists()
+        hook_completed = True
+
+    monkeypatch.setattr(
+        artifacts,
+        "_after_flow_artifact_cleanup_revalidation",
+        replace_parent_after_cleanup_revalidation,
+        raising=False,
+    )
+
+    with pytest.raises(FlowArtifactConflictError):
+        publish_flow_artifact_exclusive(staging, final, trusted_root=tmp_path)
+
+    if hook_completed:
+        assert not (preserved_parent / ".staging" / staging.name).exists()
+        assert (outside / ".staging" / staging.name).exists()
+    else:
+        assert (original_parent / ".staging" / staging.name).exists()
+        assert not (outside / ".staging" / staging.name).exists()
+    assert not (outside / final.name).exists()
 
 
 def test_crash_after_staging_before_link_preserves_residue(

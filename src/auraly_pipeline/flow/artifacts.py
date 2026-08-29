@@ -28,6 +28,7 @@ _EXTENSION_FORMATS = {".png": "png", ".jpg": "jpeg", ".jpeg": "jpeg", ".webp": "
 # Private deterministic race seam. Production leaves it unset.
 _before_flow_artifact_link: Callable[[], None] | None = None
 _after_flow_artifact_revalidation_before_link: Callable[[], None] | None = None
+_after_flow_artifact_cleanup_revalidation: Callable[[], None] | None = None
 
 
 class FlowArtifactInvalidError(RuntimeError):
@@ -59,6 +60,15 @@ class _FileIdentity:
 class _ArtifactSnapshot:
     facts: FlowArtifactFacts
     identity: _FileIdentity
+
+
+@dataclass(frozen=True)
+class _StagingCleanupBinding:
+    staging_name: str
+    parent_identity: _FileIdentity
+    descriptor: int
+    parent_descriptor: int
+    windows_delete_handle: bool
 
 
 def allocate_flow_staging_path(
@@ -172,7 +182,11 @@ def publish_flow_artifact_exclusive(
         _sync_file_and_directory(final)
         _assert_bound_artifact(final, root, root_identity, staged.identity)
         _assert_bound_artifact(staging, root, root_identity, staged.identity)
-        os.unlink(staging)
+        cleanup = _bind_staging_cleanup(staging, root, root_identity, staged.identity)
+        _run_cleanup_race_hook(cleanup)
+        _finalize_bound_staging_cleanup(cleanup, staging.parent)
+        _assert_root_identity(root, root_identity)
+        _contained_path(final, root)
         _sync_directory(final.parent)
     except (FlowArtifactConflictError, FlowArtifactInvalidError) as exc:
         if isinstance(exc, FlowArtifactConflictError):
@@ -206,7 +220,11 @@ def _recover_matching_final(
         _sync_file_and_directory(final)
         _assert_bound_artifact(final, root, root_identity, staged.identity)
         _assert_bound_artifact(staging, root, root_identity, staged.identity)
-        os.unlink(staging)
+        cleanup = _bind_staging_cleanup(staging, root, root_identity, staged.identity)
+        _run_cleanup_race_hook(cleanup)
+        _finalize_bound_staging_cleanup(cleanup, staging.parent)
+        _assert_root_identity(root, root_identity)
+        _contained_path(final, root)
         _sync_directory(final.parent)
     except FlowArtifactInvalidError as exc:
         raise FlowArtifactConflictError("matching artifact residue changed during recovery") from exc
@@ -339,6 +357,201 @@ def _assert_bound_artifact(
     path = _contained_path(path, root)
     if _identity_from_stat(_regular_file_stat(path)) != expected:
         raise FlowArtifactInvalidError("artifact identity changed")
+
+
+def _bind_staging_cleanup(
+    staging: Path, root: Path, root_identity: _FileIdentity, expected: _FileIdentity
+) -> _StagingCleanupBinding:
+    _assert_bound_artifact(staging, root, root_identity, expected)
+    parent = staging.parent
+    parent_identity = _directory_identity(parent)
+    if os.name == "nt":
+        parent_descriptor = _open_windows_parent_lock(parent, parent_identity)
+        try:
+            descriptor = _open_windows_delete_handle(staging, expected)
+        except BaseException:
+            os.close(parent_descriptor)
+            raise
+        return _StagingCleanupBinding(
+            staging_name=staging.name,
+            parent_identity=parent_identity,
+            descriptor=descriptor,
+            parent_descriptor=parent_descriptor,
+            windows_delete_handle=True,
+        )
+    if os.unlink not in os.supports_dir_fd:
+        raise FlowArtifactInvalidError("platform cannot bind staging cleanup to a directory handle")
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+    try:
+        descriptor = os.open(parent, flags)
+    except OSError as exc:
+        raise FlowArtifactInvalidError("unable to bind staging directory for cleanup") from exc
+    try:
+        if _identity_from_stat(os.fstat(descriptor)) != parent_identity:
+            raise FlowArtifactInvalidError("staging directory changed during cleanup binding")
+        metadata = os.stat(staging.name, dir_fd=descriptor, follow_symlinks=False)
+        if not stat.S_ISREG(metadata.st_mode) or _identity_from_stat(metadata) != expected:
+            raise FlowArtifactInvalidError("staging artifact changed during cleanup binding")
+    except BaseException:
+        os.close(descriptor)
+        raise
+    return _StagingCleanupBinding(
+        staging_name=staging.name,
+        parent_identity=parent_identity,
+        descriptor=descriptor,
+        parent_descriptor=descriptor,
+        windows_delete_handle=False,
+    )
+
+
+def _delete_bound_staging(binding: _StagingCleanupBinding) -> None:
+    try:
+        if binding.windows_delete_handle:
+            _delete_windows_handle(binding.descriptor)
+        else:
+            if _identity_from_stat(os.fstat(binding.descriptor)) != binding.parent_identity:
+                raise FlowArtifactInvalidError("staging directory changed before cleanup")
+            os.unlink(binding.staging_name, dir_fd=binding.descriptor)
+    except OSError as exc:
+        raise FlowArtifactInvalidError("unable to remove bound staging artifact") from exc
+    finally:
+        _close_cleanup_binding(binding)
+
+
+def _assert_cleanup_parent_current(parent: Path, expected: _FileIdentity) -> None:
+    if _path_is_link_or_junction(parent) or _directory_identity(parent) != expected:
+        raise FlowArtifactInvalidError("staging directory changed before cleanup")
+
+
+def _finalize_bound_staging_cleanup(binding: _StagingCleanupBinding, parent: Path) -> None:
+    try:
+        _assert_cleanup_parent_current(parent, binding.parent_identity)
+    except BaseException:
+        _close_cleanup_binding(binding)
+        raise
+    _delete_bound_staging(binding)
+
+
+def _run_cleanup_race_hook(binding: _StagingCleanupBinding) -> None:
+    try:
+        if _after_flow_artifact_cleanup_revalidation is not None:
+            _after_flow_artifact_cleanup_revalidation()
+    except BaseException:
+        _close_cleanup_binding(binding)
+        raise
+
+
+def _close_cleanup_binding(binding: _StagingCleanupBinding) -> None:
+    try:
+        os.close(binding.descriptor)
+    finally:
+        if binding.parent_descriptor != binding.descriptor:
+            os.close(binding.parent_descriptor)
+
+
+def _open_windows_parent_lock(parent: Path, expected: _FileIdentity) -> int:
+    import ctypes
+    import msvcrt
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    create_file = kernel32.CreateFileW
+    create_file.argtypes = (
+        wintypes.LPCWSTR,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        ctypes.c_void_p,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.HANDLE,
+    )
+    create_file.restype = wintypes.HANDLE
+    handle = create_file(
+        str(parent),
+        0x80000000,  # GENERIC_READ
+        0x00000001 | 0x00000002,  # read/write sharing, deliberately no delete sharing
+        None,
+        3,  # OPEN_EXISTING
+        0x02000000,  # FILE_FLAG_BACKUP_SEMANTICS
+        None,
+    )
+    if handle == wintypes.HANDLE(-1).value:
+        raise FlowArtifactInvalidError("unable to bind staging directory for cleanup")
+    try:
+        descriptor = msvcrt.open_osfhandle(handle, os.O_RDONLY)
+    except OSError as exc:
+        ctypes.windll.kernel32.CloseHandle(handle)
+        raise FlowArtifactInvalidError("unable to bind staging directory for cleanup") from exc
+    if _identity_from_stat(os.fstat(descriptor)) != expected:
+        os.close(descriptor)
+        raise FlowArtifactInvalidError("staging directory changed during cleanup binding")
+    return descriptor
+
+
+def _open_windows_delete_handle(staging: Path, expected: _FileIdentity) -> int:
+    import ctypes
+    import msvcrt
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    create_file = kernel32.CreateFileW
+    create_file.argtypes = (
+        wintypes.LPCWSTR,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        ctypes.c_void_p,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.HANDLE,
+    )
+    create_file.restype = wintypes.HANDLE
+    handle = create_file(
+        str(staging),
+        0x00010000,  # DELETE
+        0x00000001 | 0x00000002 | 0x00000004,  # read/write/delete sharing
+        None,
+        3,  # OPEN_EXISTING
+        0x00000080,  # FILE_ATTRIBUTE_NORMAL
+        None,
+    )
+    if handle == wintypes.HANDLE(-1).value:
+        raise FlowArtifactInvalidError("unable to bind staging artifact for cleanup")
+    try:
+        descriptor = msvcrt.open_osfhandle(handle, os.O_RDONLY)
+    except OSError as exc:
+        ctypes.windll.kernel32.CloseHandle(handle)
+        raise FlowArtifactInvalidError("unable to bind staging artifact for cleanup") from exc
+    if _identity_from_stat(os.fstat(descriptor)) != expected:
+        os.close(descriptor)
+        raise FlowArtifactInvalidError("staging artifact changed during cleanup binding")
+    return descriptor
+
+
+def _delete_windows_handle(descriptor: int) -> None:
+    import ctypes
+    import msvcrt
+    from ctypes import wintypes
+
+    class _FileDispositionInfo(ctypes.Structure):
+        _fields_ = [("delete_file", wintypes.BOOL)]
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    set_information = kernel32.SetFileInformationByHandle
+    set_information.argtypes = (
+        wintypes.HANDLE,
+        wintypes.DWORD,
+        ctypes.c_void_p,
+        wintypes.DWORD,
+    )
+    set_information.restype = wintypes.BOOL
+    disposition = _FileDispositionInfo(True)
+    if not set_information(
+        msvcrt.get_osfhandle(descriptor),
+        4,  # FileDispositionInfo
+        ctypes.byref(disposition),
+        ctypes.sizeof(disposition),
+    ):
+        raise OSError(ctypes.get_last_error(), "SetFileInformationByHandle failed")
 
 
 def _candidate_directory(
