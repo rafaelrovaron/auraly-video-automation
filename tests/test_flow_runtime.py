@@ -83,6 +83,25 @@ def test_authenticated_session_reuses_goal_4b_launch_and_route_trust(tmp_path: P
         assert session.page.url == fake_flow_url("ready.html")
 
 
+def test_authenticated_session_exit_preserves_close_browser_failure(tmp_path: Path) -> None:
+    """The real reusable session retains its close classification for generation callers."""
+    target = local_target("ready.html")
+    page = _FakePage(url=target.flow_url, ready=True)
+    context = _FakeContext(page=page, close_error=RuntimeError("private close failure"))
+
+    with pytest.raises(FlowUnexpectedStateError) as caught:
+        with FlowBrowserSession(
+            config(tmp_path),
+            _target=target,
+            _playwright_factory=_playwright_factory(context),
+        ) as session:
+            session.require_current_flow_page()
+
+    assert caught.value.failed_step == "close_browser"
+    assert context.close_calls == 1
+    assert context.manager_exit_calls == 1
+
+
 def test_workspace_identity_accepts_only_safe_production_flow_subpaths() -> None:
     safe = _workspace_identity_for_url("https://labs.google/fx/tools/flow/workspace-1")
 

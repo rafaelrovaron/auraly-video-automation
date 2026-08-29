@@ -15,6 +15,7 @@ from playwright.sync_api import Locator, Page
 
 from .config import FlowGenerationConfig
 from .config import FlowRuntimeConfig
+from .domain import FlowUnexpectedStateError
 from .generation_domain import (
     FlowDispatchAmbiguousError,
     FlowGenerationObservation,
@@ -33,6 +34,7 @@ from .generation_locators import (
     resolve_upload_complete,
 )
 from .lock import BrowserRuntimeLock
+from .locators import blocking_overlay_present
 from .runtime import FlowBrowserSession
 
 
@@ -136,6 +138,7 @@ class FlowGenerationRuntime:
         self._verify_reference_hash(request.reference_path, request.reference_sha256)
         self._verify_prompt_hash(request.prompt_snapshot, request.prompt_sha256)
         intent_started = False
+        dispatch_confirmed = False
         try:
             with self._open_authenticated_session(workspace=request.workspace) as session:
                 observation = self._prepare_inputs_in_session(
@@ -148,11 +151,11 @@ class FlowGenerationRuntime:
                 checkpoint_sink.record_inputs_verified(observation)
 
                 self._require_workspace_identity(session, request.workspace)
-                generate = resolve_generate_control(session.page, _target=self._locator_target)
                 initial_results = self._completed_result_fingerprints(session.page)
 
                 intent_started = True
                 checkpoint_sink.record_dispatch_intent(request.workspace)
+                generate = self._fresh_generate_control_after_intent(session, request)
                 self._require_workspace_identity(session, request.workspace)
                 self._raise_if_injected("after_intent")
                 generate.click()
@@ -160,15 +163,16 @@ class FlowGenerationRuntime:
                 self._raise_if_injected("before_confirmation")
                 self._await_positive_confirmation(session, initial_results, request.workspace)
                 checkpoint_sink.record_dispatch_confirmed(observation)
+                dispatch_confirmed = True
                 return observation
         except FlowDispatchAmbiguousError:
             raise
         except FlowGenerationRuntimeError:
-            if intent_started:
+            if intent_started and not dispatch_confirmed:
                 raise FlowDispatchAmbiguousError() from None
             raise
         except BaseException:
-            if intent_started:
+            if intent_started and not dispatch_confirmed:
                 raise FlowDispatchAmbiguousError() from None
             raise FlowGenerationRuntimeError(failed_step="open_workspace") from None
 
@@ -200,6 +204,10 @@ class FlowGenerationRuntime:
                     if workspace is not None:
                         self._open_workspace(session, workspace)
                     yield session
+            except FlowUnexpectedStateError as error:
+                if error.failed_step == "close_browser":
+                    raise FlowGenerationRuntimeError(failed_step="close_browser") from None
+                raise FlowGenerationRuntimeError(failed_step="open_workspace") from None
             except FlowGenerationRuntimeError:
                 raise
             except BaseException:
@@ -217,6 +225,10 @@ class FlowGenerationRuntime:
                 if workspace is not None:
                     session.open_workspace(workspace)
                 yield session
+        except FlowUnexpectedStateError as error:
+            if error.failed_step == "close_browser":
+                raise FlowGenerationRuntimeError(failed_step="close_browser") from None
+            raise FlowGenerationRuntimeError(failed_step="open_workspace") from None
         except FlowGenerationRuntimeError:
             raise
         except BaseException:
@@ -277,6 +289,35 @@ class FlowGenerationRuntime:
                 failed_step="verify_prompt", failed_locator="GENERATION_PROMPT"
             )
         return FlowGenerationObservation(reference_verified=True, prompt_verified=True)
+
+    def _fresh_generate_control_after_intent(
+        self,
+        session: _AuthenticatedFlowSession,
+        request: FlowGenerationRequest,
+    ) -> Locator:
+        """Revalidate the mutable dispatch surface and return the one current Generate control."""
+        self._require_workspace_identity(session, request.workspace)
+        try:
+            if blocking_overlay_present(session.page):
+                raise FlowGenerationRuntimeError(
+                    failed_step="dispatch_generate", failed_locator="GENERATE_CONTROL"
+                )
+            if not self._upload_complete_present(session.page):
+                raise FlowGenerationRuntimeError(
+                    failed_step="verify_reference", failed_locator="UPLOAD_COMPLETE"
+                )
+            prompt = resolve_generation_prompt(session.page, _target=self._locator_target)
+            if _sha256_text(prompt.input_value()) != request.prompt_sha256:
+                raise FlowGenerationRuntimeError(
+                    failed_step="verify_prompt", failed_locator="GENERATION_PROMPT"
+                )
+            return resolve_generate_control(session.page, _target=self._locator_target)
+        except FlowGenerationRuntimeError:
+            raise
+        except BaseException:
+            raise FlowGenerationRuntimeError(
+                failed_step="dispatch_generate", failed_locator="GENERATE_CONTROL"
+            ) from None
 
     def _await_positive_confirmation(
         self,

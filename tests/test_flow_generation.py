@@ -14,6 +14,7 @@ import pytest
 
 from auraly_pipeline.flow.config import FlowGenerationConfig
 from auraly_pipeline.flow.config import FlowRuntimeConfig
+from auraly_pipeline.flow.domain import FlowUnexpectedStateError
 from auraly_pipeline.flow import generation as generation_module
 from auraly_pipeline.flow.generation import (
     FlowGenerationCheckpointSink,
@@ -390,6 +391,17 @@ def _make_generate_show_completed_result(page: Page) -> None:
     )
 
 
+def _make_generate_without_confirmation(page: Page) -> None:
+    page.evaluate(
+        """() => {
+            window.generateClicks = 0;
+            document.querySelector('button').addEventListener('click', () => {
+                window.generateClicks += 1;
+            });
+        }"""
+    )
+
+
 def test_dispatch_commits_intent_before_exactly_one_click(
     flow_generation_page: Page,
     reference_png: Path,
@@ -407,6 +419,68 @@ def test_dispatch_commits_intent_before_exactly_one_click(
     ]
     assert checkpoint_sink.click_counts == [0, 0, 1]
     assert flow_generation_page.evaluate("window.generateClicks") == 1
+
+
+def test_dispatch_resolves_a_fresh_unique_generate_control_after_intent(
+    flow_generation_page: Page,
+    reference_png: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = _runtime_for_fixture("ready.html", flow_generation_page)
+    _make_generate_show_generating(flow_generation_page)
+    resolved_controls: list[Locator] = []
+    intent_returned = False
+    original_resolver = generation_module.resolve_generate_control
+
+    def track_resolver(page: Page, *, _target: _GenerationLocatorTarget) -> Locator:
+        assert intent_returned is True
+        control = original_resolver(page, _target=_target)
+        resolved_controls.append(control)
+        return control
+
+    monkeypatch.setattr(generation_module, "resolve_generate_control", track_resolver)
+
+    class IntentSink(_CheckpointSink):
+        def record_dispatch_intent(self, workspace: FlowWorkspaceIdentity) -> None:
+            nonlocal intent_returned
+            super().record_dispatch_intent(workspace)
+            intent_returned = True
+
+    runtime.prepare_and_dispatch(_prepared_request(reference_png), IntentSink(flow_generation_page))
+
+    assert len(resolved_controls) == 1
+    assert flow_generation_page.evaluate("window.generateClicks") == 1
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    (
+        "document.body.insertAdjacentHTML('beforeend', '<dialog open aria-label=\"Blocking\"></dialog>')",
+        "document.querySelector('button').setAttribute('aria-disabled', 'true')",
+        "document.querySelector('button').insertAdjacentHTML('afterend', '<button>Generate</button>')",
+        "document.querySelector('input[aria-label=\"Prompt\"]').value = 'mutated'",
+        "document.querySelector('[aria-label=\"Reference upload complete\"]').remove()",
+    ),
+)
+def test_post_intent_gate_rejects_mutated_dispatch_surface_without_click(
+    flow_generation_page: Page,
+    reference_png: Path,
+    mutation: str,
+) -> None:
+    class MutatingIntentSink(_CheckpointSink):
+        def record_dispatch_intent(self, workspace: FlowWorkspaceIdentity) -> None:
+            super().record_dispatch_intent(workspace)
+            flow_generation_page.evaluate(mutation)
+
+    runtime = _runtime_for_fixture("ready.html", flow_generation_page)
+    _make_generate_show_generating(flow_generation_page)
+    checkpoint_sink = MutatingIntentSink(flow_generation_page)
+
+    with pytest.raises(FlowDispatchAmbiguousError):
+        runtime.prepare_and_dispatch(_prepared_request(reference_png), checkpoint_sink)
+
+    assert flow_generation_page.evaluate("window.generateClicks || 0") == 0
+    assert checkpoint_sink.events == ["inputs_verified", "dispatch_intent_recorded"]
 
 
 @pytest.mark.parametrize("crash_point", ("after_intent", "during_click", "before_confirmation"))
@@ -623,32 +697,48 @@ def test_prepare_rejects_stale_upload_completion_and_waits_for_new_completion(
     assert observed.reference_verified is True
 
 
-@pytest.mark.parametrize("after_intent", (False, True))
-def test_session_close_failure_is_sanitized_or_ambiguous_by_dispatch_boundary(
+def test_close_failure_before_confirmation_is_ambiguous_after_intent(
     flow_generation_page: Page,
     reference_png: Path,
-    after_intent: bool,
 ) -> None:
     runtime = _runtime_for_fixture(
         "ready.html",
         flow_generation_page,
-        close_error=RuntimeError("PRIVATE_CLOSE_TOKEN https://private.invalid/?token=secret"),
+        close_error=FlowUnexpectedStateError(failed_step="close_browser"),
+        generation_timeout_seconds=0,
     )
-    if after_intent:
-        _make_generate_show_generating(flow_generation_page)
-        with pytest.raises(FlowDispatchAmbiguousError):
-            runtime.prepare_and_dispatch(_prepared_request(reference_png), _CheckpointSink(flow_generation_page))
-        assert flow_generation_page.evaluate("window.generateClicks || 0") <= 1
-    else:
-        with pytest.raises(FlowGenerationRuntimeError) as raised:
-            runtime.prepare_inputs(
-                reference_path=reference_png,
-                reference_sha256=_sha256(reference_png),
-                prompt_snapshot="PRIVATE_PROMPT",
-                prompt_sha256=_sha256_text("PRIVATE_PROMPT"),
-            )
-        assert raised.value.failed_step == "open_workspace"
-        assert "PRIVATE_CLOSE_TOKEN" not in str(raised.value)
+    checkpoint_sink = _CheckpointSink(flow_generation_page)
+    _make_generate_without_confirmation(flow_generation_page)
+
+    with pytest.raises(FlowDispatchAmbiguousError):
+        runtime.prepare_and_dispatch(_prepared_request(reference_png), checkpoint_sink)
+
+    assert flow_generation_page.evaluate("window.generateClicks || 0") == 1
+    assert checkpoint_sink.events == ["inputs_verified", "dispatch_intent_recorded"]
+
+
+def test_close_failure_after_durable_confirmation_preserves_close_browser(
+    flow_generation_page: Page,
+    reference_png: Path,
+) -> None:
+    runtime = _runtime_for_fixture(
+        "ready.html",
+        flow_generation_page,
+        close_error=FlowUnexpectedStateError(failed_step="close_browser"),
+    )
+    _make_generate_show_generating(flow_generation_page)
+    checkpoint_sink = _CheckpointSink(flow_generation_page)
+
+    with pytest.raises(FlowGenerationRuntimeError) as raised:
+        runtime.prepare_and_dispatch(_prepared_request(reference_png), checkpoint_sink)
+
+    assert raised.value.failed_step == "close_browser"
+    assert flow_generation_page.evaluate("window.generateClicks || 0") == 1
+    assert checkpoint_sink.events == [
+        "inputs_verified",
+        "dispatch_intent_recorded",
+        "dispatch_confirmed",
+    ]
 
 
 def test_preintent_session_factory_error_is_sanitized(
