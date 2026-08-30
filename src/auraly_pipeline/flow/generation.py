@@ -375,8 +375,21 @@ class FlowGenerationRuntime:
                 candidate.fingerprint
                 for candidate in observe_completed_candidate_slots(page, _target=self._locator_target)
             )
-        except FlowGenerationUiContractError:
-            return frozenset()
+        except FlowGenerationUiContractError as error:
+            if self._candidate_grid_is_absent(page, error):
+                return frozenset()
+            raise
+
+    @staticmethod
+    def _candidate_grid_is_absent(page: Page, error: FlowGenerationUiContractError) -> bool:
+        """Treat only a truly absent, unblocked grid as a valid empty result baseline."""
+        if (
+            error.failed_step != "observe_candidates"
+            or error.failed_locator != "CANDIDATE_GRID"
+            or blocking_overlay_present(page)
+        ):
+            return False
+        return not page.get_by_role("list", name="Generated candidates", exact=True).all()
 
     def _require_current_flow_page(self, session: _AuthenticatedFlowSession) -> None:
         try:

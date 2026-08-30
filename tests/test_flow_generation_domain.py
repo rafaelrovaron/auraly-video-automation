@@ -64,6 +64,9 @@ def test_generation_observation_carries_only_verification_facts() -> None:
     """Returning a prompt or reference path would cross the browser privacy boundary."""
     observation = FlowGenerationObservation(reference_verified=True, prompt_verified=True)
 
+    assert observation.persisted_fields == {}
+    with pytest.raises(TypeError):
+        observation.persisted_fields["private"] = "value"
     assert observation.model_dump() == {"reference_verified": True, "prompt_verified": True}
     assert {"prompt", "reference_path", "url", "html"}.isdisjoint(
         FlowGenerationObservation.model_fields

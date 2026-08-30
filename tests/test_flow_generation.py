@@ -26,6 +26,7 @@ from auraly_pipeline.flow.generation_domain import (
     FlowDispatchAmbiguousError,
     FlowGenerationObservation,
     FlowGenerationRuntimeError,
+    FlowGenerationUiContractError,
     FlowWorkspaceIdentity,
 )
 from auraly_pipeline.flow.generation_locators import (
@@ -546,6 +547,37 @@ def test_dispatch_rejects_nonpositive_click_return_confirmation(
 
     assert flow_generation_page.evaluate("window.generateClicks") == 1
     assert checkpoint_sink.events == ["inputs_verified", "dispatch_intent_recorded"]
+
+
+def test_dispatch_requires_a_trustworthy_result_baseline_before_attribution(
+    flow_generation_page: Page,
+    reference_png: Path,
+) -> None:
+    """Collapsing an invalid baseline to empty would attribute a pre-existing result to this click."""
+    class RepairingIntentSink(_CheckpointSink):
+        def record_dispatch_intent(self, workspace: FlowWorkspaceIdentity) -> None:
+            super().record_dispatch_intent(workspace)
+            flow_generation_page.evaluate("document.querySelectorAll('li')[1].remove()")
+
+    runtime = _runtime_for_fixture("ready.html", flow_generation_page, generation_timeout_seconds=0)
+    flow_generation_page.evaluate(
+        """document.querySelector('main').insertAdjacentHTML(
+            'beforeend',
+            '<ul aria-label="Generated candidates">'
+            + '<li role="listitem" data-flow-candidate-id="preexisting" data-flow-completion-role="completed"><button>Request 2K</button></li>'
+            + '<li role="listitem" data-flow-candidate-id="preexisting" data-flow-completion-role="completed"><button>Request 2K</button></li>'
+            + '</ul>',
+        )"""
+    )
+    _make_generate_without_confirmation(flow_generation_page)
+    checkpoint_sink = RepairingIntentSink(flow_generation_page)
+
+    with pytest.raises(FlowGenerationUiContractError) as raised:
+        runtime.prepare_and_dispatch(_prepared_request(reference_png), checkpoint_sink)
+
+    assert raised.value.failed_step == "observe_candidates"
+    assert flow_generation_page.evaluate("window.generateClicks || 0") == 0
+    assert checkpoint_sink.events == ["inputs_verified"]
 
 
 def test_dispatch_rejects_workspace_identity_mismatch_before_click(

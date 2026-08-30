@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 import re
+from types import MappingProxyType
 from typing import Literal
 from weakref import WeakKeyDictionary
 
@@ -71,6 +73,7 @@ _LOCATOR_NAMES: frozenset[str] = frozenset(
 _ERROR_FACTS: WeakKeyDictionary[
     BaseException, tuple[FlowGenerationFailedStep, FlowGenerationLocatorName | None]
 ] = WeakKeyDictionary()
+_EMPTY_PERSISTED_FIELDS: Mapping[str, object] = MappingProxyType({})
 
 
 class FlowWorkspaceIdentity(ContractModel):
@@ -114,6 +117,11 @@ class FlowGenerationObservation(ContractModel):
 
     reference_verified: bool
     prompt_verified: bool
+
+    @property
+    def persisted_fields(self) -> Mapping[str, object]:
+        """Compatibility view proving no private browser value is persisted."""
+        return _EMPTY_PERSISTED_FIELDS
 
 
 class FlowGenerationRuntimeError(RuntimeError):
