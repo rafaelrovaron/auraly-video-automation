@@ -11,13 +11,25 @@ import re
 import time
 from typing import Protocol
 
-from playwright.sync_api import Locator, Page
+from playwright.sync_api import Download, Locator, Page, TimeoutError as PlaywrightTimeoutError
 
+from .artifacts import (
+    FlowArtifactConflictError,
+    FlowArtifactFacts,
+    FlowArtifactInvalidError,
+    allocate_flow_staging_path,
+    inspect_flow_artifact,
+    publish_flow_artifact_exclusive,
+    resolve_flow_final_path,
+)
 from .config import FlowGenerationConfig
 from .config import FlowRuntimeConfig
+from .diagnostics import FlowGridEvidence, publish_flow_grid_evidence
 from .domain import FlowUnexpectedStateError
 from .generation_domain import (
+    FlowCandidateObservation,
     FlowDispatchAmbiguousError,
+    FlowDownloadCorrelationError,
     FlowGenerationObservation,
     FlowGenerationRuntimeError,
     FlowGenerationUiContractError,
@@ -27,6 +39,7 @@ from .generation_locators import (
     _GenerationLocatorTarget,
     _PRODUCTION_GENERATION_TARGET,
     observe_completed_candidate_slots,
+    resolve_candidate_2k_action,
     resolve_generate_control,
     resolve_generating_indicator,
     resolve_generation_prompt,
@@ -39,7 +52,23 @@ from .runtime import FlowBrowserSession
 
 
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
-_CRASH_POINTS = frozenset({"after_intent", "during_click", "before_confirmation"})
+_CRASH_POINTS = frozenset(
+    {
+        "after_intent",
+        "during_click",
+        "before_confirmation",
+        "after_download_event",
+        "after_download_save",
+        "after_download_checkpoint",
+        "after_download_publication",
+    }
+)
+_EVIDENCE_MASK_LABELS = (
+    "Account identity",
+    "Prompt",
+    "Reference preview",
+    "Upload filename",
+)
 
 
 class FlowGenerationCheckpointSink(Protocol):
@@ -50,6 +79,28 @@ class FlowGenerationCheckpointSink(Protocol):
     def record_dispatch_intent(self, workspace: FlowWorkspaceIdentity) -> None: ...
 
     def record_dispatch_confirmed(self, observation: FlowGenerationObservation) -> None: ...
+
+
+class FlowGenerationDownloadCheckpointSink(FlowGenerationCheckpointSink, Protocol):
+    """Durable candidate/evidence/download checkpoints added by Task 9."""
+
+    def bind_candidate_slot(
+        self, slot_index: int, observation: FlowCandidateObservation
+    ) -> None: ...
+
+    def record_candidates_observed(self, evidence: FlowGridEvidence) -> None: ...
+
+    def candidate_fingerprint(self, slot_index: int) -> str: ...
+
+    def record_download_intent(self, slot_index: int, fingerprint: str) -> None: ...
+
+    def record_downloaded(
+        self,
+        slot_index: int,
+        *,
+        relative_path: str,
+        sha256: str,
+    ) -> None: ...
 
 
 class _AuthenticatedFlowSession(Protocol):
@@ -76,6 +127,17 @@ class FlowGenerationRequest:
     workspace: FlowWorkspaceIdentity
 
 
+@dataclass(frozen=True)
+class FlowGenerationArtifactContext:
+    """Trusted generation identity and work root for evidence and two artifacts."""
+
+    campaign_id: str
+    scene_variant_id: str
+    generation_number: int
+    work_root: Path
+    workspace: FlowWorkspaceIdentity
+
+
 class FlowGenerationRuntime:
     """Perform verified input preparation and one checkpoint-protected Generate click."""
 
@@ -88,6 +150,7 @@ class FlowGenerationRuntime:
         _locator_target: _GenerationLocatorTarget = _PRODUCTION_GENERATION_TARGET,
         _set_input_files: InputFileSetter | None = None,
         _monotonic: Callable[[], float] = time.monotonic,
+        artifact_context: FlowGenerationArtifactContext | None = None,
     ) -> None:
         if (runtime_config is None) == (_session_factory is None):
             raise ValueError("generation runtime requires exactly one session source")
@@ -97,13 +160,144 @@ class FlowGenerationRuntime:
         self._locator_target = _locator_target
         self._set_input_files = _set_input_files or _playwright_set_input_files
         self._monotonic = _monotonic
+        self._artifact_context = artifact_context
         self._crash_point: str | None = None
+        self._inject_unrelated_download = False
+        self._download_actions: list[tuple[int, str]] = []
 
     def inject_crash(self, crash_point: str) -> None:
         """Private deterministic-test seam for post-intent crash boundaries."""
         if crash_point not in _CRASH_POINTS:
             raise ValueError("unknown generation crash point")
         self._crash_point = crash_point
+
+    def inject_unrelated_download_before_slot(self) -> None:
+        """Private deterministic seam proving an unrelated event makes correlation fail."""
+        self._inject_unrelated_download = True
+
+    @property
+    def download_actions(self) -> list[tuple[int, str]]:
+        """Safe test-facing record of slot/resolution actions, never provider download data."""
+        return list(self._download_actions)
+
+    def observe_and_download(
+        self,
+        checkpoint_sink: FlowGenerationDownloadCheckpointSink,
+    ) -> tuple[FlowArtifactFacts, FlowArtifactFacts]:
+        """Observe exactly two stable slots and download each bound 2K artifact once."""
+        self.observe_candidates(checkpoint_sink)
+        first = self.download_slot(0, checkpoint_sink)
+        second = self.download_slot(1, checkpoint_sink)
+        return first, second
+
+    def observe_candidates(
+        self,
+        checkpoint_sink: FlowGenerationDownloadCheckpointSink,
+    ) -> tuple[FlowCandidateObservation, FlowCandidateObservation]:
+        """Bind the first two stable semantic candidates and persist masked grid evidence."""
+        context = self._require_artifact_context("observe_candidates")
+        try:
+            with self._open_authenticated_session(workspace=context.workspace) as session:
+                observations = self._await_stable_candidates(session, context.workspace)
+                for slot_index, observation in enumerate(observations):
+                    checkpoint_sink.bind_candidate_slot(slot_index, observation)
+                evidence = self._capture_grid_evidence_in_session(
+                    session,
+                    expected=observations,
+                )
+                checkpoint_sink.record_candidates_observed(evidence)
+                return observations
+        except FlowGenerationRuntimeError:
+            raise
+        except BaseException:
+            raise FlowGenerationRuntimeError(failed_step="observe_candidates") from None
+
+    def capture_grid_evidence(self) -> FlowGridEvidence:
+        """Capture and publish only a screenshot with every private region masked."""
+        context = self._require_artifact_context("capture_grid_evidence")
+        try:
+            with self._open_authenticated_session(workspace=context.workspace) as session:
+                return self._capture_grid_evidence_in_session(session, expected=None)
+        except FlowGenerationRuntimeError:
+            raise
+        except BaseException:
+            raise FlowGenerationRuntimeError(failed_step="capture_grid_evidence") from None
+
+    def download_slot(
+        self,
+        slot_index: int,
+        checkpoint_sink: FlowGenerationDownloadCheckpointSink,
+    ) -> FlowArtifactFacts:
+        """Correlate one exact persisted slot action to one Playwright download event."""
+        context = self._require_artifact_context("capture_download")
+        if isinstance(slot_index, bool) or slot_index not in {0, 1}:
+            raise FlowDownloadCorrelationError()
+        try:
+            with self._open_authenticated_session(workspace=context.workspace) as session:
+                self._require_workspace_identity(session, context.workspace)
+                try:
+                    fingerprint = checkpoint_sink.candidate_fingerprint(slot_index)
+                    action = resolve_candidate_2k_action(
+                        session.page,
+                        fingerprint,
+                        _target=self._locator_target,
+                    )
+                except BaseException:
+                    raise FlowDownloadCorrelationError() from None
+
+                checkpoint_sink.record_download_intent(slot_index, fingerprint)
+                download = self._one_download_from_action(session.page, action, slot_index)
+                self._raise_if_injected("after_download_event")
+                if download.failure() is not None:
+                    raise FlowDownloadCorrelationError()
+
+                staging_path = allocate_flow_staging_path(
+                    work_root=context.work_root,
+                    campaign_id=context.campaign_id,
+                    scene_variant_id=context.scene_variant_id,
+                    generation_number=context.generation_number,
+                    candidate_index=slot_index,
+                )
+                try:
+                    download.save_as(staging_path)
+                except BaseException:
+                    raise FlowDownloadCorrelationError() from None
+                if download.failure() is not None:
+                    raise FlowDownloadCorrelationError()
+                self._raise_if_injected("after_download_save")
+
+                staged = inspect_flow_artifact(staging_path)
+                relative_staging = staging_path.relative_to(
+                    context.work_root.resolve(strict=False)
+                ).as_posix()
+                checkpoint_sink.record_downloaded(
+                    slot_index,
+                    relative_path=relative_staging,
+                    sha256=staged.sha256,
+                )
+                self._raise_if_injected("after_download_checkpoint")
+
+                final_path = resolve_flow_final_path(
+                    work_root=context.work_root,
+                    campaign_id=context.campaign_id,
+                    scene_variant_id=context.scene_variant_id,
+                    generation_number=context.generation_number,
+                    candidate_index=slot_index,
+                    image_format=staged.format,
+                )
+                published = publish_flow_artifact_exclusive(
+                    staging_path,
+                    final_path,
+                    trusted_root=context.work_root,
+                )
+                self._raise_if_injected("after_download_publication")
+                return published
+        except (FlowArtifactConflictError, FlowArtifactInvalidError):
+            raise
+        except FlowDownloadCorrelationError:
+            raise
+        except BaseException:
+            raise FlowDownloadCorrelationError() from None
 
     def prepare_inputs(
         self,
@@ -191,6 +385,187 @@ class FlowGenerationRuntime:
         except BaseException:
             raise FlowDispatchAmbiguousError() from None
 
+    def _await_stable_candidates(
+        self,
+        session: _AuthenticatedFlowSession,
+        workspace: FlowWorkspaceIdentity,
+    ) -> tuple[FlowCandidateObservation, FlowCandidateObservation]:
+        deadline = self._monotonic() + self._config.generation_timeout_seconds
+        previous: tuple[FlowCandidateObservation, FlowCandidateObservation] | None = None
+        last_error: FlowGenerationUiContractError | None = None
+        while True:
+            self._require_workspace_identity(session, workspace)
+            try:
+                observed = observe_completed_candidate_slots(
+                    session.page,
+                    _target=self._locator_target,
+                )
+                last_error = None
+            except FlowGenerationUiContractError as error:
+                observed = ()
+                last_error = error
+
+            if len(observed) >= 2:
+                selected = (observed[0], observed[1])
+                if previous == selected:
+                    return selected
+                previous = selected
+            else:
+                previous = None
+
+            if self._monotonic() >= deadline:
+                if last_error is not None:
+                    raise last_error
+                raise FlowGenerationUiContractError(
+                    failed_step="observe_candidates",
+                    failed_locator="CANDIDATE_GRID",
+                )
+            session.page.wait_for_timeout(50)
+
+    def _capture_grid_evidence_in_session(
+        self,
+        session: _AuthenticatedFlowSession,
+        *,
+        expected: tuple[FlowCandidateObservation, FlowCandidateObservation] | None,
+    ) -> FlowGridEvidence:
+        context = self._require_artifact_context("capture_grid_evidence")
+        self._require_workspace_identity(session, context.workspace)
+        self._require_evidence_candidates(session.page, expected)
+        try:
+            masks = [
+                self._unique_visible_label(session.page, label)
+                for label in _EVIDENCE_MASK_LABELS
+            ]
+            screenshot_png = session.page.screenshot(
+                type="png",
+                mask=masks,
+                mask_color="#FF00FF",
+                animations="disabled",
+            )
+        except FlowGenerationRuntimeError:
+            raise
+        except BaseException:
+            raise FlowGenerationRuntimeError(failed_step="capture_grid_evidence") from None
+
+        self._require_workspace_identity(session, context.workspace)
+        self._require_evidence_candidates(session.page, expected)
+        try:
+            inspection_root = self._inspection_root(context)
+            local_evidence = publish_flow_grid_evidence(
+                screenshot_png,
+                evidence_root=inspection_root,
+            )
+            final_path = inspection_root / local_evidence.relative_path
+            relative_path = final_path.relative_to(
+                context.work_root.resolve(strict=False)
+            ).as_posix()
+            return FlowGridEvidence(
+                relative_path=relative_path,
+                sha256=local_evidence.sha256,
+            )
+        except BaseException:
+            raise FlowGenerationRuntimeError(failed_step="capture_grid_evidence") from None
+
+    def _require_evidence_candidates(
+        self,
+        page: Page,
+        expected: tuple[FlowCandidateObservation, FlowCandidateObservation] | None,
+    ) -> None:
+        try:
+            observed = observe_completed_candidate_slots(page, _target=self._locator_target)
+        except FlowGenerationUiContractError:
+            raise FlowGenerationUiContractError(
+                failed_step="capture_grid_evidence",
+                failed_locator="CANDIDATE_SLOT",
+            ) from None
+        if len(observed) < 2:
+            raise FlowGenerationUiContractError(
+                failed_step="capture_grid_evidence",
+                failed_locator="CANDIDATE_GRID",
+            )
+        selected = (observed[0], observed[1])
+        if expected is not None and selected != expected:
+            raise FlowGenerationUiContractError(
+                failed_step="capture_grid_evidence",
+                failed_locator="CANDIDATE_SLOT",
+            )
+
+    @staticmethod
+    def _unique_visible_label(page: Page, label: str) -> Locator:
+        candidates = tuple(
+            candidate
+            for candidate in page.get_by_label(label, exact=True).all()
+            if candidate.is_visible()
+        )
+        if len(candidates) != 1:
+            raise FlowGenerationRuntimeError(failed_step="capture_grid_evidence")
+        return candidates[0]
+
+    def _one_download_from_action(
+        self,
+        page: Page,
+        action: Locator,
+        slot_index: int,
+    ) -> Download:
+        events: list[Download] = []
+
+        def observe(download: Download) -> None:
+            events.append(download)
+
+        page.on("download", observe)
+        try:
+            with page.expect_download(
+                timeout=self._config.download_timeout_seconds * 1000
+            ) as pending:
+                if self._inject_unrelated_download:
+                    self._inject_unrelated_download = False
+                    unrelated = page.get_by_role(
+                        "button", name="Unrelated download", exact=True
+                    )
+                    matches = tuple(
+                        candidate
+                        for candidate in unrelated.all()
+                        if candidate.is_visible() and candidate.is_enabled()
+                    )
+                    if len(matches) != 1:
+                        raise FlowDownloadCorrelationError()
+                    matches[0].click()
+                self._download_actions.append((slot_index, "2K"))
+                action.click()
+            download = pending.value
+            page.wait_for_timeout(0)
+            if len(events) != 1:
+                raise FlowDownloadCorrelationError()
+            return download
+        except PlaywrightTimeoutError:
+            raise FlowDownloadCorrelationError() from None
+        finally:
+            page.remove_listener("download", observe)
+
+    @staticmethod
+    def _inspection_root(context: FlowGenerationArtifactContext) -> Path:
+        candidate_path = resolve_flow_final_path(
+            work_root=context.work_root,
+            campaign_id=context.campaign_id,
+            scene_variant_id=context.scene_variant_id,
+            generation_number=context.generation_number,
+            candidate_index=0,
+            image_format="png",
+        )
+        return candidate_path.parent / "inspection"
+
+    def _require_artifact_context(
+        self,
+        failed_step: str,
+    ) -> FlowGenerationArtifactContext:
+        if self._artifact_context is None:
+            if failed_step == "capture_download":
+                raise FlowDownloadCorrelationError()
+            if failed_step == "observe_candidates":
+                raise FlowGenerationRuntimeError(failed_step="observe_candidates")
+            raise FlowGenerationRuntimeError(failed_step="capture_grid_evidence")
+        return self._artifact_context
+
     @contextmanager
     def _open_authenticated_session(
         self,
@@ -209,6 +584,8 @@ class FlowGenerationRuntime:
                     raise FlowGenerationRuntimeError(failed_step="close_browser") from None
                 raise FlowGenerationRuntimeError(failed_step="open_workspace") from None
             except FlowGenerationRuntimeError:
+                raise
+            except (FlowArtifactConflictError, FlowArtifactInvalidError):
                 raise
             except BaseException:
                 raise FlowGenerationRuntimeError(failed_step="open_workspace") from None
@@ -230,6 +607,8 @@ class FlowGenerationRuntime:
                 raise FlowGenerationRuntimeError(failed_step="close_browser") from None
             raise FlowGenerationRuntimeError(failed_step="open_workspace") from None
         except FlowGenerationRuntimeError:
+            raise
+        except (FlowArtifactConflictError, FlowArtifactInvalidError):
             raise
         except BaseException:
             raise FlowGenerationRuntimeError(failed_step="open_workspace") from None

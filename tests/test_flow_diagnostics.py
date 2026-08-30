@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from dataclasses import fields
+import hashlib
 import json
 from pathlib import Path
 import struct
@@ -1443,6 +1445,62 @@ def test_writer_normalizes_diagnostics_root_creation_errors(
         )
 
     assert not raw_trace.exists()
+
+
+def test_grid_evidence_publication_is_exclusive_sanitized_and_relative(
+    tmp_path: Path,
+) -> None:
+    publish = getattr(diagnostics_module, "publish_flow_grid_evidence")
+
+    published = publish(PNG_BYTES, evidence_root=tmp_path)
+
+    payload = (tmp_path / published.relative_path).read_bytes()
+    assert [item.name for item in fields(published)] == ["relative_path", "sha256"]
+    assert published.relative_path == "grid.png"
+    assert published.sha256 == hashlib.sha256(payload).hexdigest()
+    with pytest.raises(FlowDiagnosticSanitizationError):
+        publish(PNG_BYTES, evidence_root=tmp_path)
+    assert (tmp_path / "grid.png").read_bytes() == payload
+
+
+@pytest.mark.parametrize(
+    "screenshot_png",
+    (b"not a png", _png_with_text(b"PRIVATE PROMPT")),
+)
+def test_grid_evidence_rejects_unsanitized_or_invalid_bytes_without_publication(
+    tmp_path: Path,
+    screenshot_png: bytes,
+) -> None:
+    publish = getattr(diagnostics_module, "publish_flow_grid_evidence")
+
+    with pytest.raises(FlowDiagnosticSanitizationError):
+        publish(
+            screenshot_png,
+            evidence_root=tmp_path,
+            deny_values=("PRIVATE PROMPT",),
+        )
+
+    assert not list(tmp_path.rglob("*"))
+
+
+def test_grid_evidence_removes_visible_file_if_staging_cleanup_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    publish = getattr(diagnostics_module, "publish_flow_grid_evidence")
+    real_unlink = diagnostics_module._unlink_if_present
+
+    def fail_stage_cleanup(path: Path) -> None:
+        if path.suffix == ".stage":
+            raise FlowDiagnosticSanitizationError()
+        real_unlink(path)
+
+    monkeypatch.setattr(diagnostics_module, "_unlink_if_present", fail_stage_cleanup)
+
+    with pytest.raises(FlowDiagnosticSanitizationError):
+        publish(PNG_BYTES, evidence_root=tmp_path)
+
+    assert not (tmp_path / "grid.png").exists()
 
 
 def test_result_json_contains_only_allowlisted_public_fields_and_no_private_values(

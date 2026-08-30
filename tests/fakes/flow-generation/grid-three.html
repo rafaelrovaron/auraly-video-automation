@@ -3,11 +3,38 @@
   <head><meta charset="utf-8"><title>Flow three candidates</title></head>
   <body>
     <main aria-label="Flow workspace">
+      <section aria-label="Private generation inputs">
+        <output aria-label="Account identity">person@example.com</output>
+        <label>Prompt <input aria-label="Prompt" value="PRIVATE PROMPT"></label>
+        <img aria-label="Reference preview" alt="Reference preview" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNg+M/wHwAEAQEAX+XDSwAAAABJRU5ErkJggg==">
+        <output aria-label="Upload filename">reference-secret.png</output>
+      </section>
       <ul aria-label="Generated candidates">
-        <li role="listitem" aria-label="Completed candidate" data-flow-candidate-id="candidate-a" data-flow-completion-role="completed"><button type="button">Request 2K</button></li>
-        <li role="listitem" aria-label="Completed candidate" data-flow-candidate-id="candidate-b" data-flow-completion-role="completed"><button type="button">Request 2K</button></li>
-        <li role="listitem" aria-label="Completed candidate" data-flow-candidate-id="candidate-c" data-flow-completion-role="completed"><button type="button">Request 2K</button></li>
+        <li role="listitem" aria-label="Completed candidate" data-flow-candidate-id="candidate-a" data-flow-completion-role="completed"><button type="button" data-download-bytes="iVBORw0KGgoAAAANSUhEUgAACAAAAAABCAYAAABKFE7yAAAAJklEQVR4nO3BAQ0AAAQAMFqIIYb+hchh+5/VswEAAAAAAAAAxGcHHzMBkbdOhcYAAAAASUVORK5CYII=">Request 2K</button></li>
+        <li role="listitem" aria-label="Completed candidate" data-flow-candidate-id="candidate-b" data-flow-completion-role="completed"><button type="button" data-download-bytes="iVBORw0KGgoAAAANSUhEUgAACAAAAAABCAYAAABKFE7yAAAAJklEQVR4nO3BAQ0AAAQAMFqIIYb+hchh+5/VswEAAAAAAAAAxGcHHzMBkbdOhcYAAAAASUVORK5CYII=">Request 2K</button></li>
+        <li role="listitem" aria-label="Completed candidate" data-flow-candidate-id="candidate-c" data-flow-completion-role="completed"><button type="button" data-download-bytes="iVBORw0KGgoAAAANSUhEUgAACAAAAAABCAYAAABKFE7yAAAAJklEQVR4nO3BAQ0AAAQAMFqIIYb+hchh+5/VswEAAAAAAAAAxGcHHzMBkbdOhcYAAAAASUVORK5CYII=">Request 2K</button></li>
       </ul>
+      <button type="button" aria-label="Unrelated download" data-download-bytes="iVBORw0KGgoAAAANSUhEUgAACAAAAAABCAYAAABKFE7yAAAAJklEQVR4nO3BAQ0AAAQAMFqIIYb+hchh+5/VswEAAAAAAAAAxGcHHzMBkbdOhcYAAAAASUVORK5CYII=">Unrelated</button>
     </main>
+    <script>
+      window.flowDownloadActions = [];
+      document.querySelectorAll('[data-download-bytes]').forEach((button) => {
+        button.addEventListener('click', () => {
+          const count = Number(button.dataset.downloadCount || '1');
+          if (button.dataset.downloadDisabled === 'true') return;
+          window.flowDownloadActions.push(button.closest('[data-flow-candidate-id]')?.dataset.flowCandidateId || 'unrelated');
+          for (let index = 0; index < count; index += 1) {
+            const link = document.createElement('a');
+            const bytes = Uint8Array.from(atob(button.dataset.downloadBytes), (value) => value.charCodeAt(0));
+            link.href = URL.createObjectURL(new Blob([bytes], {type: 'image/png'}));
+            link.download = `provider-suggested-${index}.png`;
+            document.body.appendChild(link);
+            link.click();
+            URL.revokeObjectURL(link.href);
+            link.remove();
+          }
+        });
+      });
+    </script>
   </body>
 </html>

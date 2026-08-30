@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime
+import hashlib
 import json
 import math
 import os
@@ -26,6 +28,7 @@ from .domain import (
 
 
 _SCREENSHOT_NAME: Literal["screenshot.png"] = "screenshot.png"
+_GRID_EVIDENCE_NAME: Literal["grid.png"] = "grid.png"
 _TRACE_NAME: Literal["trace.zip"] = "trace.zip"
 _RESULT_NAME = "result.json"
 _TRACE_MEMBER = "trace.trace"
@@ -197,6 +200,87 @@ _SENSITIVE_VALUE_PARTS = (
     "storage",
     "token",
 )
+
+
+@dataclass(frozen=True)
+class FlowGridEvidence:
+    """Only the relative reference and digest of one masked candidate-grid image."""
+
+    relative_path: str
+    sha256: str
+
+
+def publish_flow_grid_evidence(
+    screenshot_png: bytes,
+    *,
+    evidence_root: Path,
+    deny_values: Sequence[str] = (),
+) -> FlowGridEvidence:
+    """Validate and exclusively publish an already-masked Playwright screenshot."""
+    stage: Path | None = None
+    final: Path | None = None
+    final_created = False
+    try:
+        _validate_png_screenshot(screenshot_png, deny_values=deny_values)
+        root = evidence_root.resolve(strict=False)
+        root.mkdir(parents=True, exist_ok=True)
+        root = root.resolve(strict=True)
+        if not root.is_dir():
+            raise FlowDiagnosticSanitizationError()
+        final = root / _GRID_EVIDENCE_NAME
+        stage = root / f".{_GRID_EVIDENCE_NAME}.{secrets.token_hex(8)}.stage"
+        _write_sanitized_screenshot(stage, screenshot_png, deny_values=deny_values)
+        os.link(stage, final)
+        final_created = True
+        with final.open("r+b") as published_file:
+            payload = published_file.read(_MAX_SCREENSHOT_BYTES + 1)
+            if len(payload) > _MAX_SCREENSHOT_BYTES or published_file.read(1):
+                raise FlowDiagnosticSanitizationError()
+            os.fsync(published_file.fileno())
+        _validate_png_screenshot(payload, deny_values=deny_values)
+        _sync_diagnostic_directory(root)
+        _unlink_if_present(stage)
+        return FlowGridEvidence(
+            relative_path=_GRID_EVIDENCE_NAME,
+            sha256=hashlib.sha256(payload).hexdigest(),
+        )
+    except FlowDiagnosticSanitizationError:
+        _cleanup_grid_evidence(stage, final, final_created=final_created)
+        raise
+    except (FileExistsError, OSError, TypeError, ValueError):
+        _cleanup_grid_evidence(stage, final, final_created=final_created)
+        raise FlowDiagnosticSanitizationError() from None
+
+
+def _cleanup_grid_evidence(
+    stage: Path | None,
+    final: Path | None,
+    *,
+    final_created: bool,
+) -> None:
+    cleanup_error: FlowDiagnosticSanitizationError | None = None
+    for path in (final if final_created else None, stage):
+        if path is None:
+            continue
+        try:
+            _unlink_if_present(path)
+        except FlowDiagnosticSanitizationError as error:
+            cleanup_error = error
+    if cleanup_error is not None:
+        raise cleanup_error
+
+
+def _sync_diagnostic_directory(path: Path) -> None:
+    try:
+        descriptor = os.open(path, os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        os.fsync(descriptor)
+    except OSError:
+        pass
+    finally:
+        os.close(descriptor)
 
 
 def sanitize_trace_archive(

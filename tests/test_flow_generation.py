@@ -3,16 +3,20 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterator
+import base64
 from contextlib import AbstractContextManager, contextmanager
+from io import BytesIO
 import hashlib
 import inspect
 import json
 from pathlib import Path
 from typing import Literal
 
+from PIL import Image
 from playwright.sync_api import Locator, Page, sync_playwright
 import pytest
 
+from auraly_pipeline.flow.artifacts import FlowArtifactInvalidError
 from auraly_pipeline.flow.config import FlowGenerationConfig
 from auraly_pipeline.flow.config import FlowRuntimeConfig
 from auraly_pipeline.flow.domain import FlowUnexpectedStateError
@@ -23,7 +27,9 @@ from auraly_pipeline.flow.generation import (
     FlowGenerationRuntime,
 )
 from auraly_pipeline.flow.generation_domain import (
+    FlowCandidateObservation,
     FlowDispatchAmbiguousError,
+    FlowDownloadCorrelationError,
     FlowGenerationObservation,
     FlowGenerationRuntimeError,
     FlowGenerationUiContractError,
@@ -153,6 +159,88 @@ class _CheckpointSink(FlowGenerationCheckpointSink):
     def record_dispatch_confirmed(self, observation: FlowGenerationObservation) -> None:
         assert observation.reference_verified and observation.prompt_verified
         self._record("dispatch_confirmed")
+
+
+class _Task9CheckpointSink(_CheckpointSink):
+    def __init__(self, page: Page) -> None:
+        super().__init__(page)
+        self.bound_slots: dict[int, str] = {}
+        self._slot_events: dict[int, list[str]] = {0: [], 1: []}
+        self._slot_states: dict[int, str] = {0: "pending", 1: "pending"}
+        self.downloaded_paths: dict[int, str] = {}
+        self.grid_evidence: object | None = None
+        self.run_state = "dispatch_confirmed"
+
+    def bind_candidate_slot(self, slot_index: int, observation: FlowCandidateObservation) -> None:
+        assert slot_index == observation.semantic_order
+        existing = self.bound_slots.get(slot_index)
+        assert existing in {None, observation.fingerprint}
+        self.bound_slots[slot_index] = observation.fingerprint
+        self._slot_states[slot_index] = "observed"
+
+    def record_candidates_observed(self, evidence: object) -> None:
+        self.grid_evidence = evidence
+        self.run_state = "candidates_observed"
+
+    def candidate_fingerprint(self, slot_index: int) -> str:
+        return self.bound_slots[slot_index]
+
+    def record_download_intent(self, slot_index: int, fingerprint: str) -> None:
+        assert self.bound_slots[slot_index] == fingerprint
+        self._slot_events[slot_index].append("download_intent_recorded")
+        self._slot_states[slot_index] = "download_intent_recorded"
+
+    def record_downloaded(
+        self,
+        slot_index: int,
+        *,
+        relative_path: str,
+        sha256: str,
+    ) -> None:
+        assert len(sha256) == 64
+        self._slot_events[slot_index].append("downloaded")
+        self._slot_states[slot_index] = "downloaded"
+        self.downloaded_paths[slot_index] = relative_path
+
+    def slot_events(self, slot_index: int) -> list[str]:
+        return list(self._slot_events[slot_index])
+
+    def slot_state(self, slot_index: int) -> str:
+        return self._slot_states[slot_index]
+
+
+TASK9_SCENE_ID = "11111111-1111-4111-8111-111111111111"
+
+
+def _task9_runtime(
+    fixture: str,
+    page: Page,
+    work_root: Path,
+    *,
+    generation_timeout_seconds: int = 1,
+) -> FlowGenerationRuntime:
+    page.goto(_fixture_url(fixture))
+    context_type = getattr(generation_module, "FlowGenerationArtifactContext")
+    context = context_type(
+        campaign_id="campaign-1",
+        scene_variant_id=TASK9_SCENE_ID,
+        generation_number=1,
+        work_root=work_root,
+        workspace=_workspace(),
+    )
+
+    def session_factory() -> AbstractContextManager[_LocalAuthenticatedSession]:
+        return _session(page)
+
+    return FlowGenerationRuntime(
+        FlowGenerationConfig(
+            generation_timeout_seconds=generation_timeout_seconds,
+            download_timeout_seconds=1,
+        ),
+        _session_factory=session_factory,
+        _locator_target=LOCAL_TARGET,
+        artifact_context=context,
+    )
 
 
 @pytest.fixture(scope="module", name="flow_generation_page")
@@ -912,4 +1000,336 @@ def test_production_session_holds_goal_4b_lock_through_session_close(
         "workspace_opened",
         "session_closed",
         "lock_released",
+    ]
+
+
+def test_observe_binds_first_two_validated_semantic_slots(
+    flow_generation_page: Page,
+    tmp_path: Path,
+) -> None:
+    runtime = _task9_runtime("grid-two.html", flow_generation_page, tmp_path)
+    checkpoint_sink = _Task9CheckpointSink(flow_generation_page)
+
+    observations = runtime.observe_candidates(checkpoint_sink)
+
+    assert [item.semantic_order for item in observations] == [0, 1]
+    assert len({item.fingerprint for item in observations}) == 2
+    assert checkpoint_sink.bound_slots == {
+        0: observations[0].fingerprint,
+        1: observations[1].fingerprint,
+    }
+    assert checkpoint_sink.run_state == "candidates_observed"
+
+
+def test_grid_evidence_masks_input_and_identity_regions(
+    flow_generation_page: Page,
+    tmp_path: Path,
+) -> None:
+    runtime = _task9_runtime("grid-two.html", flow_generation_page, tmp_path)
+
+    published = runtime.capture_grid_evidence()
+
+    payload = (tmp_path / published.relative_path).read_bytes()
+    assert published.sha256 == hashlib.sha256(payload).hexdigest()
+    assert b"PRIVATE PROMPT" not in payload
+    assert b"person@example.com" not in payload
+    assert b"reference-secret.png" not in payload
+    with Image.open(BytesIO(payload)) as image:
+        assert (255, 0, 255) in set(image.convert("RGB").getdata())
+
+
+@pytest.mark.parametrize("completed_count", [0, 1])
+def test_candidate_observation_times_out_without_two_completed_slots(
+    flow_generation_page: Page,
+    tmp_path: Path,
+    completed_count: int,
+) -> None:
+    runtime = _task9_runtime(
+        "grid-two.html",
+        flow_generation_page,
+        tmp_path,
+        generation_timeout_seconds=0,
+    )
+    flow_generation_page.evaluate(
+        "count => Array.from(document.querySelectorAll('[data-flow-candidate-id]')).slice(count).forEach(item => item.remove())",
+        completed_count,
+    )
+    checkpoint_sink = _Task9CheckpointSink(flow_generation_page)
+
+    with pytest.raises(FlowGenerationUiContractError) as raised:
+        runtime.observe_candidates(checkpoint_sink)
+
+    assert raised.value.failed_step == "observe_candidates"
+    assert checkpoint_sink.bound_slots == {}
+
+
+def test_candidate_observation_rejects_duplicate_fingerprints(
+    flow_generation_page: Page,
+    tmp_path: Path,
+) -> None:
+    runtime = _task9_runtime(
+        "grid-two.html", flow_generation_page, tmp_path, generation_timeout_seconds=0
+    )
+    flow_generation_page.locator("[data-flow-candidate-id='candidate-b']").evaluate(
+        "item => item.dataset.flowCandidateId = 'candidate-a'"
+    )
+    checkpoint_sink = _Task9CheckpointSink(flow_generation_page)
+
+    with pytest.raises(FlowGenerationUiContractError):
+        runtime.observe_candidates(checkpoint_sink)
+
+    assert checkpoint_sink.bound_slots == {}
+
+
+def test_candidate_change_between_observation_and_evidence_fails_closed(
+    flow_generation_page: Page,
+    tmp_path: Path,
+) -> None:
+    runtime = _task9_runtime("grid-two.html", flow_generation_page, tmp_path)
+
+    class MutatingSink(_Task9CheckpointSink):
+        def bind_candidate_slot(
+            self, slot_index: int, observation: FlowCandidateObservation
+        ) -> None:
+            super().bind_candidate_slot(slot_index, observation)
+            if slot_index == 1:
+                flow_generation_page.locator("[data-flow-candidate-id='candidate-b']").evaluate(
+                    "item => item.dataset.flowCandidateId = 'candidate-changed'"
+                )
+
+    checkpoint_sink = MutatingSink(flow_generation_page)
+
+    with pytest.raises(FlowGenerationUiContractError) as raised:
+        runtime.observe_candidates(checkpoint_sink)
+
+    assert raised.value.failed_step == "capture_grid_evidence"
+    assert set(checkpoint_sink.bound_slots) == {0, 1}
+    assert checkpoint_sink.run_state == "dispatch_confirmed"
+
+
+def test_missing_required_mask_fails_before_evidence_publication(
+    flow_generation_page: Page,
+    tmp_path: Path,
+) -> None:
+    runtime = _task9_runtime("grid-two.html", flow_generation_page, tmp_path)
+    flow_generation_page.get_by_label("Account identity", exact=True).evaluate(
+        "item => item.remove()"
+    )
+    checkpoint_sink = _Task9CheckpointSink(flow_generation_page)
+
+    with pytest.raises(FlowGenerationRuntimeError) as raised:
+        runtime.observe_candidates(checkpoint_sink)
+
+    assert raised.value.failed_step == "capture_grid_evidence"
+    assert not list(tmp_path.rglob("grid.png"))
+    assert checkpoint_sink.run_state == "dispatch_confirmed"
+
+
+def test_grid_sanitizer_failure_does_not_advance_observation_checkpoint(
+    flow_generation_page: Page,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = _task9_runtime("grid-two.html", flow_generation_page, tmp_path)
+    checkpoint_sink = _Task9CheckpointSink(flow_generation_page)
+
+    def reject_grid(*_args: object, **_kwargs: object) -> object:
+        from auraly_pipeline.flow.domain import FlowDiagnosticSanitizationError
+
+        raise FlowDiagnosticSanitizationError()
+
+    monkeypatch.setattr(generation_module, "publish_flow_grid_evidence", reject_grid)
+
+    with pytest.raises(FlowGenerationRuntimeError) as raised:
+        runtime.observe_candidates(checkpoint_sink)
+
+    assert raised.value.failed_step == "capture_grid_evidence"
+    assert checkpoint_sink.run_state == "dispatch_confirmed"
+
+
+def test_route_change_before_grid_evidence_preserves_only_bound_slots(
+    flow_generation_page: Page,
+    tmp_path: Path,
+) -> None:
+    runtime = _task9_runtime("grid-two.html", flow_generation_page, tmp_path)
+
+    class RedirectingSink(_Task9CheckpointSink):
+        def bind_candidate_slot(
+            self, slot_index: int, observation: FlowCandidateObservation
+        ) -> None:
+            super().bind_candidate_slot(slot_index, observation)
+            if slot_index == 1:
+                flow_generation_page.goto("data:text/html,redirected")
+
+    checkpoint_sink = RedirectingSink(flow_generation_page)
+
+    with pytest.raises(FlowGenerationRuntimeError) as raised:
+        runtime.observe_candidates(checkpoint_sink)
+
+    assert raised.value.failed_step == "open_workspace"
+    assert checkpoint_sink.run_state == "dispatch_confirmed"
+
+
+@pytest.mark.parametrize("slot_index", [0, 1])
+def test_download_records_intent_before_exact_2k_action(
+    flow_generation_page: Page,
+    tmp_path: Path,
+    slot_index: int,
+) -> None:
+    runtime = _task9_runtime("grid-two.html", flow_generation_page, tmp_path)
+    checkpoint_sink = _Task9CheckpointSink(flow_generation_page)
+    runtime.observe_candidates(checkpoint_sink)
+
+    artifact = runtime.download_slot(slot_index, checkpoint_sink)
+
+    assert checkpoint_sink.slot_events(slot_index) == [
+        "download_intent_recorded",
+        "downloaded",
+    ]
+    assert runtime.download_actions == [(slot_index, "2K")]
+    assert max(artifact.width, artifact.height) >= 2048
+    assert flow_generation_page.evaluate("window.flowDownloadActions") == [
+        f"candidate-{'a' if slot_index == 0 else 'b'}"
+    ]
+
+
+def test_unrelated_download_event_cannot_satisfy_slot(
+    flow_generation_page: Page,
+    tmp_path: Path,
+) -> None:
+    runtime = _task9_runtime("grid-two.html", flow_generation_page, tmp_path)
+    checkpoint_sink = _Task9CheckpointSink(flow_generation_page)
+    runtime.observe_candidates(checkpoint_sink)
+    runtime.inject_unrelated_download_before_slot()
+
+    with pytest.raises(FlowDownloadCorrelationError):
+        runtime.download_slot(0, checkpoint_sink)
+
+    assert checkpoint_sink.slot_state(0) == "download_intent_recorded"
+    assert flow_generation_page.evaluate("window.flowDownloadActions") == [
+        "unrelated",
+        "candidate-a",
+    ]
+
+
+@pytest.mark.parametrize("event_case", ["none", "two", "cancelled"])
+def test_download_requires_one_successful_event_from_the_exact_action(
+    flow_generation_page: Page,
+    tmp_path: Path,
+    event_case: str,
+) -> None:
+    runtime = _task9_runtime("grid-two.html", flow_generation_page, tmp_path)
+    checkpoint_sink = _Task9CheckpointSink(flow_generation_page)
+    runtime.observe_candidates(checkpoint_sink)
+    action = flow_generation_page.locator("[data-flow-candidate-id='candidate-a'] button")
+    if event_case == "none":
+        action.evaluate("button => button.dataset.downloadDisabled = 'true'")
+    if event_case == "two":
+        action.evaluate("button => button.dataset.downloadCount = '2'")
+
+    def cancel(download: object) -> None:
+        getattr(download, "cancel")()
+
+    if event_case == "cancelled":
+        flow_generation_page.on("download", cancel)
+    try:
+        with pytest.raises(FlowDownloadCorrelationError):
+            runtime.download_slot(0, checkpoint_sink)
+    finally:
+        if event_case == "cancelled":
+            flow_generation_page.remove_listener("download", cancel)
+
+    assert checkpoint_sink.slot_state(0) == "download_intent_recorded"
+    assert checkpoint_sink.slot_state(1) == "observed"
+
+
+@pytest.mark.parametrize("artifact_case", ["partial", "1k"])
+def test_invalid_download_bytes_never_reach_downloaded_checkpoint(
+    flow_generation_page: Page,
+    tmp_path: Path,
+    artifact_case: str,
+) -> None:
+    invalid_path = tmp_path / f"{artifact_case}.png"
+    if artifact_case == "partial":
+        invalid_path.write_bytes(b"\x89PNG\r\n\x1a\npartial")
+    else:
+        Image.new("RGBA", (1024, 1), (1, 2, 3, 255)).save(invalid_path)
+    runtime = _task9_runtime("grid-two.html", flow_generation_page, tmp_path)
+    checkpoint_sink = _Task9CheckpointSink(flow_generation_page)
+    runtime.observe_candidates(checkpoint_sink)
+    flow_generation_page.locator("[data-flow-candidate-id='candidate-a'] button").evaluate(
+        "(button, payload) => button.dataset.downloadBytes = payload",
+        base64.b64encode(invalid_path.read_bytes()).decode("ascii"),
+    )
+
+    with pytest.raises(FlowArtifactInvalidError):
+        runtime.download_slot(0, checkpoint_sink)
+
+    assert checkpoint_sink.slot_state(0) == "download_intent_recorded"
+
+
+def test_changed_download_slot_fingerprint_never_records_intent_or_uses_another_slot(
+    flow_generation_page: Page,
+    tmp_path: Path,
+) -> None:
+    runtime = _task9_runtime("grid-two.html", flow_generation_page, tmp_path)
+    checkpoint_sink = _Task9CheckpointSink(flow_generation_page)
+    runtime.observe_candidates(checkpoint_sink)
+    flow_generation_page.locator("[data-flow-candidate-id='candidate-a']").evaluate(
+        "item => item.dataset.flowCandidateId = 'candidate-changed'"
+    )
+
+    with pytest.raises(FlowDownloadCorrelationError):
+        runtime.download_slot(0, checkpoint_sink)
+
+    assert checkpoint_sink.slot_state(0) == "observed"
+    assert checkpoint_sink.slot_state(1) == "observed"
+    assert flow_generation_page.evaluate("window.flowDownloadActions") == []
+
+
+@pytest.mark.parametrize(
+    ("crash_point", "durable_state", "final_visible"),
+    (
+        ("after_download_event", "download_intent_recorded", False),
+        ("after_download_save", "download_intent_recorded", False),
+        ("after_download_checkpoint", "downloaded", False),
+        ("after_download_publication", "downloaded", True),
+    ),
+)
+def test_download_crash_boundaries_preserve_last_durable_slot_state(
+    flow_generation_page: Page,
+    tmp_path: Path,
+    crash_point: str,
+    durable_state: str,
+    final_visible: bool,
+) -> None:
+    runtime = _task9_runtime("grid-two.html", flow_generation_page, tmp_path)
+    checkpoint_sink = _Task9CheckpointSink(flow_generation_page)
+    runtime.observe_candidates(checkpoint_sink)
+    runtime.inject_crash(crash_point)
+
+    with pytest.raises(FlowDownloadCorrelationError):
+        runtime.download_slot(0, checkpoint_sink)
+
+    assert checkpoint_sink.slot_state(0) == durable_state
+    assert checkpoint_sink.slot_state(1) == "observed"
+    assert flow_generation_page.evaluate("window.flowDownloadActions") == ["candidate-a"]
+    final_files = list(tmp_path.rglob("candidate-0000.png"))
+    assert bool(final_files) is final_visible
+
+
+def test_observe_and_download_ignores_third_slot_without_interaction(
+    flow_generation_page: Page,
+    tmp_path: Path,
+) -> None:
+    runtime = _task9_runtime("grid-three.html", flow_generation_page, tmp_path)
+    checkpoint_sink = _Task9CheckpointSink(flow_generation_page)
+
+    artifacts = runtime.observe_and_download(checkpoint_sink)
+
+    assert len(artifacts) == 2
+    assert set(checkpoint_sink.bound_slots) == {0, 1}
+    assert flow_generation_page.evaluate("window.flowDownloadActions") == [
+        "candidate-a",
+        "candidate-b",
     ]

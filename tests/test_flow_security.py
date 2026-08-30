@@ -575,11 +575,16 @@ def test_flow_source_scan_rejects_storage_state_calls(tmp_path: Path) -> None:
 
 
 def test_flow_package_limits_provider_mutations_to_checkpointed_generation_runtime() -> None:
-    """Task 8 permits exactly the reviewed input/dispatch actions, nowhere else in Flow."""
+    """Tasks 8-9 permit only reviewed dispatch/download actions inside generation."""
     inventory = _scan_flow_source(FLOW_SOURCE_ROOT)
 
     findings = _flow_source_findings(FLOW_SOURCE_ROOT)
-    assert findings == {"call:set_input_files", "call:fill", "call:click"}
+    assert findings == {
+        "call:set_input_files",
+        "call:fill",
+        "call:click",
+        "call:expect_download",
+    }
     assert inventory.playwright_importers == frozenset({"generation.py", "runtime.py"})
 
     generation_tree = _module_tree(FLOW_SOURCE_ROOT / "generation.py")
@@ -588,7 +593,9 @@ def test_flow_package_limits_provider_mutations_to_checkpointed_generation_runti
         for node in ast.walk(generation_tree)
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
     }
-    assert {"set_input_files", "fill", "click"}.issubset(generation_calls)
+    assert {"set_input_files", "fill", "click", "expect_download"}.issubset(
+        generation_calls
+    )
     assert not any(
         attribute in {"storage_state", "goto", "evaluate"}
         for attribute in generation_calls
