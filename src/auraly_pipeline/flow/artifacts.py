@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import errno
 import hashlib
+import importlib
 import os
 import re
 import stat
@@ -11,7 +12,7 @@ import struct
 import warnings
 from pathlib import Path, PureWindowsPath
 from dataclasses import dataclass
-from typing import BinaryIO, Callable
+from typing import Any, BinaryIO, Callable
 from uuid import uuid4
 
 from PIL import Image, UnidentifiedImageError
@@ -517,9 +518,9 @@ def _close_cleanup_binding(binding: _StagingCleanupBinding) -> None:
 
 
 def _open_windows_parent_lock(parent: Path, expected: _FileIdentity) -> int:
-    import ctypes
-    import msvcrt
-    from ctypes import wintypes
+    ctypes: Any = importlib.import_module("ctypes")
+    msvcrt: Any = importlib.import_module("msvcrt")
+    wintypes: Any = importlib.import_module("ctypes.wintypes")
 
     kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
     create_file = kernel32.CreateFileW
@@ -556,9 +557,9 @@ def _open_windows_parent_lock(parent: Path, expected: _FileIdentity) -> int:
 
 
 def _open_windows_delete_handle(staging: Path, expected: _FileIdentity) -> int:
-    import ctypes
-    import msvcrt
-    from ctypes import wintypes
+    ctypes: Any = importlib.import_module("ctypes")
+    msvcrt: Any = importlib.import_module("msvcrt")
+    wintypes: Any = importlib.import_module("ctypes.wintypes")
 
     kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
     create_file = kernel32.CreateFileW
@@ -595,9 +596,9 @@ def _open_windows_delete_handle(staging: Path, expected: _FileIdentity) -> int:
 
 
 def _delete_windows_handle(descriptor: int) -> None:
-    import ctypes
-    import msvcrt
-    from ctypes import wintypes
+    ctypes: Any = importlib.import_module("ctypes")
+    msvcrt: Any = importlib.import_module("msvcrt")
+    wintypes: Any = importlib.import_module("ctypes.wintypes")
 
     class _FileDispositionInfo(ctypes.Structure):
         _fields_ = [("delete_file", wintypes.BOOL)]
@@ -769,7 +770,7 @@ def _path_is_link_or_junction(path: Path) -> bool:
     if path.is_symlink():
         return True
     try:
-        attributes = os.lstat(path).st_file_attributes
+        attributes = getattr(os.lstat(path), "st_file_attributes", 0)
     except (AttributeError, OSError):
         return False
     return bool(attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT)
