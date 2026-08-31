@@ -36,6 +36,7 @@ from auraly_pipeline.jobs.repository import (
     DuplicateIdempotencyRace,
     JobClaimConflict,
     JobRepository,
+    ReconciliationReason,
 )
 from auraly_pipeline.jobs.state_machine import InvalidJobTransition, JobStatus
 from auraly_pipeline.metadata_security import validate_safe_identifier
@@ -379,9 +380,18 @@ class JobService:
             raise JobNotFoundError
         return self._to_domain(row)
 
-    def resume_reconciled_job(self, job_id: str) -> Job:
+    def resume_reconciled_job(
+        self,
+        job_id: str,
+        *,
+        reason: ReconciliationReason = "no_dispatch_proven",
+    ) -> Job:
         try:
-            row = self._repository.resume_reconciled(job_id, self._as_utc(self._clock()))
+            row = self._repository.resume_reconciled(
+                job_id,
+                self._as_utc(self._clock()),
+                reason=reason,
+            )
         except InvalidJobTransition as exc:
             raise JobTransitionError from exc
         if row is None:

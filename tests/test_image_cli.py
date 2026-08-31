@@ -1,14 +1,20 @@
 from __future__ import annotations
 
 import json
+import hashlib
 from pathlib import Path
 
+from sqlalchemy import select
 from typer.testing import CliRunner
 
 from auraly_pipeline.campaigns.domain import CampaignCreate
 from auraly_pipeline.campaigns.service import CampaignService
 from auraly_pipeline.cli import app
+from auraly_pipeline.images.db_models import FlowGenerationRunRow
+from auraly_pipeline.images.domain import ImageGenerateRequest
 from auraly_pipeline.images.service import ImageCandidateNotFoundError
+from auraly_pipeline.images.service import ImageService
+from auraly_pipeline.jobs.db_models import JobRow
 from auraly_pipeline.jobs.service import JobService
 from tests.test_campaign_domain import valid_campaign_data
 
@@ -63,6 +69,53 @@ def _complete_locally(database: Path, work_root: Path) -> None:
     service.close()
     assert worked is not None
     assert worked.status == "completed"
+
+
+def _blocked_flow_generation(
+    tmp_path: Path,
+    *,
+    ambiguous: bool = False,
+) -> tuple[Path, Path, str]:
+    database, work_root, campaign_id, scenes = _database(tmp_path)
+    reference = work_root / "references" / "avatar.png"
+    reference.parent.mkdir(parents=True)
+    reference.write_bytes(b"trusted-reference")
+    workspace_path = "fx/tools/flow/cli-recovery"
+    service = ImageService.for_database(database, work_root=work_root)
+    submission = service.generate(
+        ImageGenerateRequest(
+            campaign_id=campaign_id,
+            scene_variant_id=scenes[0],
+            idempotency_key="cli-flow-recovery",
+            prompt_snapshot="PRIVATE PROMPT must not reach recovery JSON",
+            reference_image_path="references/avatar.png",
+            reference_image_sha256=hashlib.sha256(reference.read_bytes()).hexdigest(),
+            executor="playwright_python",
+            generation_contract_version="flow-generation-v1",
+            provider_action_confirmed=True,
+            provider_action_approved_by="operator-1",
+            provider_workspace_path=workspace_path,
+            provider_workspace_fingerprint=hashlib.sha256(
+                workspace_path.encode()
+            ).hexdigest(),
+        )
+    )
+    with service._sessions() as session:
+        job = session.get(JobRow, submission.job.job_id)
+        run = session.scalar(
+            select(FlowGenerationRunRow).where(
+                FlowGenerationRunRow.image_generation_id
+                == submission.generation.image_generation_id
+            )
+        )
+        assert job is not None and run is not None
+        job.status = "blocked"
+        if ambiguous:
+            run.stage = "ambiguous"
+            run.dispatch_intent_at = run.created_at
+        session.commit()
+    service.close()
+    return database, work_root, submission.generation.image_generation_id
 
 
 def test_image_generate_and_generation_get_emit_structured_json(tmp_path: Path) -> None:
@@ -432,3 +485,133 @@ def test_cli_does_not_execute_provider_or_browser(monkeypatch, tmp_path: Path) -
         1,
         2,
     ]
+
+
+def test_image_generation_recover_emits_exact_sanitized_json(tmp_path: Path) -> None:
+    database, work_root, generation_id = _blocked_flow_generation(tmp_path)
+
+    result = runner.invoke(
+        app,
+        [
+            "image",
+            "generation",
+            "recover",
+            generation_id,
+            "--reconciled-by",
+            "operator-1",
+            "--database",
+            str(database),
+            "--work-root",
+            str(work_root),
+        ],
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert set(payload) == {
+        "success",
+        "generation",
+        "flowRun",
+        "slots",
+        "job",
+        "reconciliationReason",
+    }
+    assert payload["success"] is True
+    assert payload["reconciliationReason"] == "no_dispatch_proven"
+    assert payload["job"]["status"] == "queued"
+    assert payload["flowRun"]["stage"] == "prepared"
+    assert len(payload["slots"]) == 2
+    for denied in (
+        "PRIVATE PROMPT",
+        "avatar.png",
+        str(work_root),
+        "labs.google",
+        "Traceback",
+    ):
+        assert denied not in result.stdout
+
+
+def test_image_generation_resolve_no_dispatch_emits_exact_sanitized_json(
+    tmp_path: Path,
+) -> None:
+    database, work_root, generation_id = _blocked_flow_generation(
+        tmp_path,
+        ambiguous=True,
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "image",
+            "generation",
+            "resolve-no-dispatch",
+            generation_id,
+            "--resolved-by",
+            "operator-1",
+            "--reason",
+            "Operator confirmed no generation.",
+            "--database",
+            str(database),
+            "--work-root",
+            str(work_root),
+        ],
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert set(payload) == {
+        "success",
+        "generation",
+        "flowRun",
+        "slots",
+        "job",
+        "reconciliationReason",
+    }
+    assert payload["reconciliationReason"] == "no_dispatch_proven"
+    assert payload["flowRun"]["dispatchAttemptNumber"] == 2
+    assert payload["job"]["status"] == "queued"
+
+
+def test_image_generation_recovery_failure_is_nonzero_and_sanitized(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    class FailingService:
+        def recover_generation(self, *_args, **_kwargs):
+            raise RuntimeError(
+                r"PRIVATE PROMPT token=SECRET C:\\Users\\Private\\profile labs.google"
+            )
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(
+        "auraly_pipeline.cli._image_service",
+        lambda _database, _work_root: FailingService(),
+    )
+    result = runner.invoke(
+        app,
+        [
+            "image",
+            "generation",
+            "recover",
+            "00000000-0000-4000-8000-000000000001",
+            "--reconciled-by",
+            "operator-1",
+            "--database",
+            str(tmp_path / "private.db"),
+            "--work-root",
+            str(tmp_path / "PRIVATE-work"),
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert json.loads(result.stdout) == {
+        "success": False,
+        "error": {
+            "code": "image_operation_failed",
+            "message": "The image operation failed safely.",
+        },
+    }
+    for denied in ("PRIVATE", "SECRET", "Users", "labs.google", "Traceback"):
+        assert denied not in result.stdout

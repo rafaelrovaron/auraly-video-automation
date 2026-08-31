@@ -29,7 +29,11 @@ from auraly_pipeline.image_generation import (
 )
 from auraly_pipeline.ingest import IngestError, ingest_reel
 from auraly_pipeline.images.domain import ImageGenerateRequest, ImageGenerationSubmission
-from auraly_pipeline.images.service import ImageError, ImageService
+from auraly_pipeline.images.service import (
+    ImageError,
+    ImageGenerationRecovery,
+    ImageService,
+)
 from auraly_pipeline.jobs.domain import Job, JobSubmit
 from auraly_pipeline.jobs.service import (
     JobError,
@@ -380,6 +384,27 @@ def _image_submission_payload(submission: ImageGenerationSubmission) -> dict[str
     }
 
 
+def _image_recovery_payload(result: ImageGenerationRecovery) -> dict[str, object]:
+    generation = result.generation.model_dump(
+        by_alias=True,
+        mode="json",
+        exclude={
+            "prompt_snapshot",
+            "prompt_sha256",
+            "reference_image_path",
+            "reference_image_sha256",
+        },
+    )
+    return {
+        "success": True,
+        "generation": generation,
+        "flowRun": result.flow_run.model_dump(by_alias=True, mode="json"),
+        "slots": [slot.model_dump(by_alias=True, mode="json") for slot in result.slots],
+        "job": result.job.model_dump(by_alias=True, mode="json"),
+        "reconciliationReason": result.reason,
+    }
+
+
 def _image_generate(
     *,
     campaign_id: str,
@@ -504,6 +529,60 @@ def image_generation_list_command(
         _close_image_service(service)
     serialized = [generation.model_dump(by_alias=True, mode="json") for generation in generations]
     _json_echo({"success": True, "count": len(serialized), "generations": serialized})
+
+
+@image_generation_app.command("recover")
+def image_generation_recover_command(
+    image_generation_id: Annotated[str, typer.Argument()],
+    reconciled_by: Annotated[str, typer.Option("--reconciled-by")],
+    database: Annotated[Path, typer.Option("--database")] = default_database_path(),
+    work_root: Annotated[Path, typer.Option("--work-root")] = Path("work"),
+) -> None:
+    """Resume a blocked Flow generation only from durable or read-only evidence."""
+    service: ImageService | None = None
+    try:
+        service = _image_service(database, work_root)
+        recovered = service.recover_generation(
+            image_generation_id,
+            reconciled_by=reconciled_by,
+        )
+    except (ValueError, ValidationError):
+        _image_failure("image_invalid", "Image input is invalid.")
+    except ImageError as exc:
+        _image_failure(exc.code, exc.public_message)
+    except Exception:
+        _image_failure("image_operation_failed", "The image operation failed safely.")
+    finally:
+        _close_image_service(service)
+    _json_echo(_image_recovery_payload(recovered))
+
+
+@image_generation_app.command("resolve-no-dispatch")
+def image_generation_resolve_no_dispatch_command(
+    image_generation_id: Annotated[str, typer.Argument()],
+    resolved_by: Annotated[str, typer.Option("--resolved-by")],
+    reason: Annotated[str, typer.Option("--reason")],
+    database: Annotated[Path, typer.Option("--database")] = default_database_path(),
+    work_root: Annotated[Path, typer.Option("--work-root")] = Path("work"),
+) -> None:
+    """Audit a proven no-dispatch outcome before another authorized attempt."""
+    service: ImageService | None = None
+    try:
+        service = _image_service(database, work_root)
+        recovered = service.resolve_no_dispatch(
+            image_generation_id,
+            resolved_by=resolved_by,
+            reason=reason,
+        )
+    except (ValueError, ValidationError):
+        _image_failure("image_invalid", "Image input is invalid.")
+    except ImageError as exc:
+        _image_failure(exc.code, exc.public_message)
+    except Exception:
+        _image_failure("image_operation_failed", "The image operation failed safely.")
+    finally:
+        _close_image_service(service)
+    _json_echo(_image_recovery_payload(recovered))
 
 
 @image_candidate_app.command("get")

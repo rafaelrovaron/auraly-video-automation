@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Generic, TypeVar
+from typing import Generic, Literal, TypeVar
 from uuid import uuid4
 
 from sqlalchemy import Select, func, select, text, update
@@ -25,6 +25,21 @@ class JobClaimConflict(RuntimeError):
 
 
 T = TypeVar("T")
+
+ReconciliationReason = Literal[
+    "no_dispatch_proven",
+    "existing_dispatch_reconciled",
+    "staged_artifact_reconciled",
+    "completed_generation_reconciled",
+]
+_RECONCILIATION_REASONS = frozenset(
+    {
+        "no_dispatch_proven",
+        "existing_dispatch_reconciled",
+        "staged_artifact_reconciled",
+        "completed_generation_reconciled",
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -507,13 +522,21 @@ class JobRepository:
             session.commit()
             return self._reload(session, row.id)
 
-    def resume_reconciled(self, job_id: str, now: datetime) -> JobRow | None:
+    def resume_reconciled(
+        self,
+        job_id: str,
+        now: datetime,
+        *,
+        reason: ReconciliationReason,
+    ) -> JobRow | None:
         """Resume a blocked reconcile-before-retry job after domain-level reconciliation."""
         with self._session_factory() as session:
             self._begin_immediate(session)
             row = session.get(JobRow, job_id)
             if row is None:
                 return None
+            if reason not in _RECONCILIATION_REASONS:
+                raise InvalidJobTransition("invalid reconciled job transition")
             if (
                 row.status != JobStatus.BLOCKED.value
                 or row.retry_safety != RetrySafety.RECONCILE_BEFORE_RETRY.value
@@ -531,14 +554,17 @@ class JobRepository:
                         job_id=row.id,
                         event_type="job.reconciled",
                         timestamp=now,
-                        metadata_json={"previousStatus": "blocked"},
+                        metadata_json={
+                            "previousStatus": "blocked",
+                            "reason": reason,
+                        },
                     ),
                     JobEventRow(
                         id=str(uuid4()),
                         job_id=row.id,
                         event_type="job.queued",
                         timestamp=now,
-                        metadata_json={"reason": "provider_reconciled_no_dispatch"},
+                        metadata_json={"reason": reason},
                     ),
                 ]
             )

@@ -380,6 +380,45 @@ class FlowGenerationRuntime:
         except BaseException:
             raise FlowDispatchAmbiguousError() from None
 
+    def recover_dispatch(
+        self,
+        workspace: FlowWorkspaceIdentity,
+        *,
+        expected_fingerprints: tuple[str, ...] = (),
+    ) -> bool:
+        """Observe positive dispatch evidence without exposing any Generate action."""
+        if len(expected_fingerprints) > 2 or any(
+            not _is_sha256(fingerprint) for fingerprint in expected_fingerprints
+        ):
+            return False
+        try:
+            with self._open_authenticated_session(workspace=workspace) as session:
+                self._require_workspace_identity(session, workspace)
+                try:
+                    resolve_generating_indicator(
+                        session.page,
+                        _target=self._locator_target,
+                    )
+                except FlowGenerationUiContractError:
+                    pass
+                else:
+                    return not expected_fingerprints
+                try:
+                    observed = observe_completed_candidate_slots(
+                        session.page,
+                        _target=self._locator_target,
+                    )
+                except FlowGenerationUiContractError:
+                    return False
+                if len(observed) < 2:
+                    return False
+                selected = tuple(item.fingerprint for item in observed[:2])
+                return not expected_fingerprints or selected == expected_fingerprints
+        except FlowDispatchAmbiguousError:
+            raise
+        except BaseException:
+            raise FlowDispatchAmbiguousError() from None
+
     def _await_stable_candidates(
         self,
         session: _AuthenticatedFlowSession,

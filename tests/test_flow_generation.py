@@ -593,6 +593,58 @@ def test_post_intent_failure_is_ambiguous_and_never_clicks_twice(
     assert flow_generation_page.evaluate("window.generateClicks || 0") <= 1
 
 
+@pytest.mark.parametrize(
+    ("provider_state", "expected"),
+    [("generating", True), ("ready", False)],
+)
+def test_recovery_dispatch_observation_never_clicks_generate(
+    flow_generation_page: Page,
+    provider_state: str,
+    expected: bool,
+) -> None:
+    runtime = _runtime_for_fixture("ready.html", flow_generation_page)
+    if provider_state == "generating":
+        flow_generation_page.locator("main").evaluate(
+            "element => element.insertAdjacentHTML("
+            "'beforeend', '<output role=\"status\" aria-label=\"Generating\">Generating</output>')"
+        )
+
+    observed = runtime.recover_dispatch(_workspace())
+
+    assert observed is expected
+    assert flow_generation_page.evaluate("window.generateClicks || 0") == 0
+
+
+def test_recovery_dispatch_requires_exact_persisted_candidate_fingerprints(
+    flow_generation_page: Page,
+) -> None:
+    flow_generation_page.goto(_fixture_url("grid-two.html"))
+
+    def session_factory() -> AbstractContextManager[_LocalAuthenticatedSession]:
+        return _session(flow_generation_page)
+
+    runtime = FlowGenerationRuntime(
+        FlowGenerationConfig(generation_timeout_seconds=1, download_timeout_seconds=1),
+        _session_factory=session_factory,
+        _locator_target=LOCAL_TARGET,
+    )
+    observed = generation_module.observe_completed_candidate_slots(
+        flow_generation_page,
+        _target=LOCAL_TARGET,
+    )
+    expected = tuple(item.fingerprint for item in observed[:2])
+
+    assert runtime.recover_dispatch(_workspace(), expected_fingerprints=expected) is True
+    assert (
+        runtime.recover_dispatch(
+            _workspace(),
+            expected_fingerprints=("0" * 64, expected[1]),
+        )
+        is False
+    )
+    assert flow_generation_page.evaluate("window.generateClicks || 0") == 0
+
+
 def test_dispatch_confirms_attributable_completed_result_transition(
     flow_generation_page: Page,
     reference_png: Path,

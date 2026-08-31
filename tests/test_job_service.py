@@ -865,6 +865,117 @@ def test_reconcile_before_retry_policy_cannot_use_generic_resume(tmp_path: Path)
     service.close()
 
 
+@pytest.mark.parametrize(
+    "reason",
+    [
+        "no_dispatch_proven",
+        "existing_dispatch_reconciled",
+        "staged_artifact_reconciled",
+        "completed_generation_reconciled",
+    ],
+)
+def test_resume_reconciled_records_exact_allowlisted_reason(
+    tmp_path: Path,
+    reason: str,
+) -> None:
+    class ReconcileHandler:
+        retry_safety = RetrySafety.RECONCILE_BEFORE_RETRY
+
+        def execute(self, context: JobExecutionContext) -> JobExecutionResult:
+            return JobExecutionResult(
+                outcome=JobExecutionOutcome.BLOCKED,
+                error_code="reconciliation_required",
+                error_message="Reconciliation is required before another execution.",
+            )
+
+    service = JobService.for_database(
+        tmp_path / "auraly.db",
+        clock=lambda: NOW,
+        handlers={"fake.reconcile": ReconcileHandler()},
+    )
+    submitted = service.submit_job(
+        _local_job(
+            "fake.reconcile",
+            f"reconciled-{reason}",
+            retry_safety=RetrySafety.RECONCILE_BEFORE_RETRY,
+        )
+    )
+    blocked = service.worker_once("worker-1")
+    assert blocked is not None and blocked.status == "blocked"
+
+    resumed = service.resume_reconciled_job(submitted.job_id, reason=reason)
+
+    assert resumed.status == "queued"
+    reconciled = [event for event in resumed.events if event.event_type == "job.reconciled"]
+    assert len(reconciled) == 1
+    assert reconciled[0].metadata == {
+        "previousStatus": "blocked",
+        "reason": reason,
+    }
+    queued = [event for event in resumed.events if event.event_type == "job.queued"][-1]
+    assert queued.metadata == {"reason": reason}
+    service.close()
+
+
+def test_resume_reconciled_rejects_unknown_reason(tmp_path: Path) -> None:
+    service = JobService.for_database(tmp_path / "auraly.db", clock=lambda: NOW)
+    submitted = service.submit_job(_local_job("fake.success", "unknown-reconcile-reason"))
+
+    with pytest.raises(JobTransitionError):
+        service.resume_reconciled_job(submitted.job_id, reason="operator_says_ok")  # type: ignore[arg-type]
+
+    service.close()
+
+
+@pytest.mark.parametrize(
+    ("retry_safety", "max_attempts"),
+    [
+        (RetrySafety.IDEMPOTENT, 3),
+        (RetrySafety.MANUAL_ONLY, 3),
+        (RetrySafety.RECONCILE_BEFORE_RETRY, 1),
+    ],
+)
+def test_resume_reconciled_preserves_policy_and_attempt_guards(
+    tmp_path: Path,
+    retry_safety: RetrySafety,
+    max_attempts: int,
+) -> None:
+    class BlockingHandler:
+        def __init__(self, policy: RetrySafety) -> None:
+            self.retry_safety = policy
+
+        def execute(self, context: JobExecutionContext) -> JobExecutionResult:
+            return JobExecutionResult(
+                outcome=JobExecutionOutcome.BLOCKED,
+                error_code="operator_action_required",
+                error_message="Operator action is required.",
+            )
+
+    service = JobService.for_database(
+        tmp_path / f"{retry_safety.value}-{max_attempts}.db",
+        clock=lambda: NOW,
+        handlers={"fake.blocked": BlockingHandler(retry_safety)},
+    )
+    submitted = service.submit_job(
+        _local_job(
+            "fake.blocked",
+            f"guard-{retry_safety.value}-{max_attempts}",
+            max_attempts=max_attempts,
+            retry_safety=retry_safety,
+        )
+    )
+    blocked = service.worker_once("worker-1")
+    assert blocked is not None and blocked.status == "blocked"
+
+    with pytest.raises(JobTransitionError):
+        service.resume_reconciled_job(
+            submitted.job_id,
+            reason="no_dispatch_proven",
+        )
+
+    service.close()
+
+
 def test_submit_uses_optional_retry_policy_acceptance(tmp_path: Path) -> None:
     service = JobService.for_database(
         tmp_path / "auraly.db",
