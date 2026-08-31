@@ -143,23 +143,28 @@ class FlowGenerationCheckpointSink:
 
     def record_download_intent(self, slot_index: int, fingerprint: str) -> None:
         with self._sessions() as session:
-            slot = self._slot(session, slot_index)
-            if (
-                slot.state == "download_intent_recorded"
-                and slot.provider_slot_fingerprint == fingerprint
-            ):
-                return
-            if slot.state != "observed" or slot.provider_slot_fingerprint != fingerprint:
+            now = self._clock()
+            changed = session.execute(
+                update(FlowCandidateSlotRow)
+                .where(
+                    FlowCandidateSlotRow.flow_generation_run_id == self._run_id,
+                    FlowCandidateSlotRow.slot_index == slot_index,
+                    FlowCandidateSlotRow.state == "observed",
+                    FlowCandidateSlotRow.provider_slot_fingerprint == fingerprint,
+                )
+                .values(state="download_intent_recorded", download_intent_at=now, updated_at=now)
+            ).rowcount
+            run_changed = session.execute(
+                update(FlowGenerationRunRow)
+                .where(
+                    FlowGenerationRunRow.id == self._run_id,
+                    FlowGenerationRunRow.stage.in_({"candidates_observed", "downloading"}),
+                )
+                .values(stage="downloading", updated_at=now)
+            ).rowcount
+            if changed != 1 or run_changed != 1:
+                session.rollback()
                 raise FlowCheckpointConflictError()
-            slot.state = "download_intent_recorded"
-            slot.download_intent_at = self._clock()
-            slot.updated_at = self._clock()
-            run = session.get(FlowGenerationRunRow, self._run_id)
-            if run is None or run.stage not in {"candidates_observed", "downloading"}:
-                raise ValueError("Flow run cannot start downloads")
-            if run.stage == "candidates_observed":
-                run.stage = "downloading"
-                run.updated_at = self._clock()
             session.commit()
         self._reload_slot(slot_index, "download_intent_recorded")
 
