@@ -385,7 +385,8 @@ def test_reconciliation_is_idempotently_resumable_after_split_commit(tmp_path: P
     )
     original_resume = service._jobs.resume_reconciled_job
 
-    def interrupted_resume(job_id: str) -> object:
+    def interrupted_resume(job_id: str, *, reason: str) -> object:
+        assert reason == "no_dispatch_proven"
         raise RuntimeError("injected split-commit interruption")
 
     service._jobs.resume_reconciled_job = interrupted_resume  # type: ignore[assignment,method-assign]

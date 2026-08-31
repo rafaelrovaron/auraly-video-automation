@@ -561,7 +561,7 @@ class VoiceMasterService:
                     )
                 )
                 session.commit()
-        self._jobs.resume_reconciled_job(job_id)
+        self._jobs.resume_reconciled_job(job_id, reason="no_dispatch_proven")
         return self.get(voice_master_id)
 
     def approved_for_campaign(self, campaign_id: str) -> VoiceMaster:

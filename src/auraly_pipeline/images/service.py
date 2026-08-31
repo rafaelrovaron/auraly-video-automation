@@ -456,7 +456,6 @@ class ImageService:
             raise ValueError("reason must not be empty")
         validate_safe_error_message(reason, "reason")
         try:
-            self._validated_recovery_state(image_generation_id)
             job_id = self._resolve_no_dispatch_transaction(
                 image_generation_id,
                 resolved_by=resolved_by,
@@ -591,107 +590,186 @@ class ImageService:
         JobRow,
     ]:
         with self._sessions() as session:
-            generation = session.get(ImageGenerationRow, image_generation_id)
-            if generation is None:
-                raise ImageGenerationNotFoundError
-            job = session.get(JobRow, generation.job_id)
-            run = session.scalar(
-                select(FlowGenerationRunRow).where(
-                    FlowGenerationRunRow.image_generation_id == generation.id
+            return self._validated_recovery_state_in_session(
+                session,
+                image_generation_id,
+            )
+
+    def _validated_recovery_state_in_session(
+        self,
+        session: Session,
+        image_generation_id: str,
+    ) -> tuple[
+        ImageGenerationRow,
+        FlowGenerationRunRow,
+        list[FlowCandidateSlotRow],
+        JobRow,
+    ]:
+        generation = session.get(ImageGenerationRow, image_generation_id)
+        if generation is None:
+            raise ImageGenerationNotFoundError
+        job = session.get(JobRow, generation.job_id)
+        run = session.scalar(
+            select(FlowGenerationRunRow).where(
+                FlowGenerationRunRow.image_generation_id == generation.id
+            )
+        )
+        if (
+            generation.executor != "playwright_python"
+            or job is None
+            or run is None
+            or job.job_type != "image.generate"
+            or job.campaign_id != generation.campaign_id
+            or job.scene_variant_id != generation.scene_variant_id
+            or job.retry_safety != RetrySafety.RECONCILE_BEFORE_RETRY.value
+            or job.status != "blocked"
+            or job.worker_id is not None
+            or job.lease_expires_at is not None
+            or job.attempt_count >= job.max_attempts
+            or run.required_candidate_count != 2
+            or run.required_resolution != "2K"
+            or run.provider_workspace_path is None
+            or run.provider_workspace_fingerprint is None
+            or not run.provider_action_approved_by
+            or job.input_json
+            != {"imageRequestFingerprint": generation.request_fingerprint}
+        ):
+            raise ImageRecoveryBlockedError
+        try:
+            self._generation_to_domain(generation)
+            self._flow_run_to_domain(run)
+            expected_job_fingerprint = JobSubmit(
+                job_type=job.job_type,
+                campaign_id=job.campaign_id,
+                scene_variant_id=job.scene_variant_id,
+                idempotency_key=job.idempotency_key,
+                input=job.input_json,
+                priority=job.priority,
+                max_attempts=job.max_attempts,
+                retry_safety=RetrySafety.RECONCILE_BEFORE_RETRY,
+            ).request_fingerprint
+        except ValueError:
+            raise ImageRecoveryBlockedError from None
+        if job.request_fingerprint != expected_job_fingerprint:
+            raise ImageRecoveryBlockedError
+        campaign = session.get(CampaignRow, generation.campaign_id)
+        scene = session.get(SceneVariantRow, generation.scene_variant_id)
+        if campaign is None or scene is None or scene.campaign_id != campaign.id:
+            raise ImageRecoveryBlockedError
+        authorizations = list(
+            session.scalars(
+                select(JobEventRow).where(
+                    JobEventRow.job_id == job.id,
+                    JobEventRow.event_type == "job.authorized",
                 )
             )
-            if (
-                generation.executor != "playwright_python"
-                or job is None
-                or run is None
-                or job.job_type != "image.generate"
-                or job.campaign_id != generation.campaign_id
-                or job.scene_variant_id != generation.scene_variant_id
-                or job.retry_safety != RetrySafety.RECONCILE_BEFORE_RETRY.value
-                or job.status != "blocked"
-                or job.worker_id is not None
-                or job.lease_expires_at is not None
-                or job.attempt_count >= job.max_attempts
-                or run.required_candidate_count != 2
-                or run.required_resolution != "2K"
-                or run.provider_workspace_path is None
-                or run.provider_workspace_fingerprint is None
-                or run.provider_action_approved_by == ""
-                or job.input_json
-                != {"imageRequestFingerprint": generation.request_fingerprint}
-            ):
-                raise ImageRecoveryBlockedError
-            try:
-                expected_job_fingerprint = JobSubmit(
-                    job_type=job.job_type,
-                    campaign_id=job.campaign_id,
-                    scene_variant_id=job.scene_variant_id,
-                    idempotency_key=job.idempotency_key,
-                    input=job.input_json,
-                    priority=job.priority,
-                    max_attempts=job.max_attempts,
-                    retry_safety=RetrySafety.RECONCILE_BEFORE_RETRY,
-                ).request_fingerprint
-            except ValueError:
-                raise ImageRecoveryBlockedError from None
-            if job.request_fingerprint != expected_job_fingerprint:
-                raise ImageRecoveryBlockedError
-            campaign = session.get(CampaignRow, generation.campaign_id)
-            scene = session.get(SceneVariantRow, generation.scene_variant_id)
-            if campaign is None or scene is None or scene.campaign_id != campaign.id:
-                raise ImageRecoveryBlockedError
-            authorizations = list(
-                session.scalars(
-                    select(JobEventRow).where(
-                        JobEventRow.job_id == job.id,
-                        JobEventRow.event_type == "job.authorized",
-                    )
-                )
+        )
+        if (
+            len(authorizations) != 1
+            or authorizations[0].metadata_json
+            != {
+                "executor": "playwright_python",
+                "approvedBy": run.provider_action_approved_by,
+                "workspaceFingerprint": run.provider_workspace_fingerprint,
+            }
+            or authorizations[0].timestamp != run.provider_action_approved_at
+        ):
+            raise ImageRecoveryBlockedError
+        expected_workspace_hash = hashlib.sha256(
+            run.provider_workspace_path.encode("utf-8")
+        ).hexdigest()
+        if run.provider_workspace_fingerprint != expected_workspace_hash:
+            raise ImageRecoveryBlockedError
+        slots = list(
+            session.scalars(
+                select(FlowCandidateSlotRow)
+                .where(FlowCandidateSlotRow.flow_generation_run_id == run.id)
+                .order_by(FlowCandidateSlotRow.slot_index)
             )
+        )
+        if [slot.slot_index for slot in slots] != [0, 1]:
+            raise ImageRecoveryBlockedError
+        try:
+            for slot in slots:
+                self._flow_slot_to_domain(slot)
+        except ValueError:
+            raise ImageRecoveryBlockedError from None
+        fingerprints = [
+            slot.provider_slot_fingerprint
+            for slot in slots
+            if slot.provider_slot_fingerprint is not None
+        ]
+        if len(set(fingerprints)) != len(fingerprints):
+            raise ImageRecoveryBlockedError
+        self._validate_recovery_state_compatibility(generation, run, slots)
+        if generation.reference_image_path is None or generation.reference_image_sha256 is None:
+            raise ImageRecoveryBlockedError
+        reference = (self._work_root / generation.reference_image_path).resolve(strict=True)
+        reference.relative_to(self._work_root)
+        if hashlib.sha256(reference.read_bytes()).hexdigest() != generation.reference_image_sha256:
+            raise ImageRecoveryBlockedError
+        if (
+            hashlib.sha256(generation.prompt_snapshot.encode("utf-8")).hexdigest()
+            != generation.prompt_sha256
+        ):
+            raise ImageRecoveryBlockedError
+        if run.grid_evidence_path is not None:
+            evidence = (self._work_root / run.grid_evidence_path).resolve(strict=True)
+            evidence.relative_to(self._work_root)
+            if hashlib.sha256(evidence.read_bytes()).hexdigest() != run.grid_evidence_sha256:
+                raise ImageRecoveryBlockedError
+        return generation, run, slots, job
+
+    @staticmethod
+    def _validate_recovery_state_compatibility(
+        generation: ImageGenerationRow,
+        run: FlowGenerationRunRow,
+        slots: list[FlowCandidateSlotRow],
+    ) -> None:
+        states = [slot.state for slot in slots]
+        if generation.provider_state == "failed" or run.stage == "failed":
+            raise ImageRecoveryBlockedError
+        if generation.provider_state == "completed":
             if (
-                len(authorizations) != 1
-                or authorizations[0].metadata_json
-                != {
-                    "executor": "playwright_python",
-                    "approvedBy": run.provider_action_approved_by,
-                    "workspaceFingerprint": run.provider_workspace_fingerprint,
-                }
-                or authorizations[0].timestamp != run.provider_action_approved_at
+                run.stage != "completed"
+                or generation.completed_at is None
+                or generation.dispatched_at is None
             ):
                 raise ImageRecoveryBlockedError
-            expected_workspace_hash = hashlib.sha256(
-                run.provider_workspace_path.encode("utf-8")
-            ).hexdigest()
-            if run.provider_workspace_fingerprint != expected_workspace_hash:
+        elif (
+            generation.provider_state not in {"queued", "generating", "blocked"}
+            or run.stage == "completed"
+            or generation.completed_at is not None
+        ):
+            raise ImageRecoveryBlockedError
+        if (run.dispatch_confirmed_at is None) != (generation.dispatched_at is None):
+            raise ImageRecoveryBlockedError
+        if run.stage in {"prepared", "inputs_verified", "dispatch_intent_recorded", "ambiguous"}:
+            if states != ["pending", "pending"] or run.grid_evidence_path is not None:
                 raise ImageRecoveryBlockedError
-            slots = list(
-                session.scalars(
-                    select(FlowCandidateSlotRow)
-                    .where(FlowCandidateSlotRow.flow_generation_run_id == run.id)
-                    .order_by(FlowCandidateSlotRow.slot_index)
+        elif run.stage == "dispatch_confirmed":
+            if states != ["pending", "pending"] or run.grid_evidence_path is not None:
+                raise ImageRecoveryBlockedError
+        elif run.stage == "candidates_observed":
+            if states != ["observed", "observed"] or run.grid_evidence_path is None:
+                raise ImageRecoveryBlockedError
+        elif run.stage == "downloading":
+            if (
+                any(
+                    state
+                    not in {"observed", "download_intent_recorded", "downloaded", "ingested"}
+                    for state in states
                 )
-            )
-            if [slot.slot_index for slot in slots] != [0, 1]:
-                raise ImageRecoveryBlockedError
-            fingerprints = [
-                slot.provider_slot_fingerprint
-                for slot in slots
-                if slot.provider_slot_fingerprint is not None
-            ]
-            if len(set(fingerprints)) != len(fingerprints):
-                raise ImageRecoveryBlockedError
-            if generation.reference_image_path is None or generation.reference_image_sha256 is None:
-                raise ImageRecoveryBlockedError
-            reference = (self._work_root / generation.reference_image_path).resolve(strict=True)
-            reference.relative_to(self._work_root)
-            if hashlib.sha256(reference.read_bytes()).hexdigest() != generation.reference_image_sha256:
-                raise ImageRecoveryBlockedError
-            if (
-                hashlib.sha256(generation.prompt_snapshot.encode("utf-8")).hexdigest()
-                != generation.prompt_sha256
+                or run.grid_evidence_path is None
             ):
                 raise ImageRecoveryBlockedError
-            return generation, run, slots, job
+        elif run.stage == "completed":
+            if states != ["ingested", "ingested"] or run.grid_evidence_path is None:
+                raise ImageRecoveryBlockedError
+        elif run.stage == "blocked":
+            progressed = any(state != "pending" for state in states)
+            if progressed and run.grid_evidence_path is None:
+                raise ImageRecoveryBlockedError
 
     def _recover_from_evidence(
         self,
@@ -706,14 +784,17 @@ class ImageService:
             return "completed_generation_reconciled"
 
         if any(slot.state == "downloaded" for slot in slots):
+            downloaded: list[tuple[FlowCandidateSlotRow, FlowArtifactFacts]] = []
             for slot in slots:
                 if slot.state == "ingested":
                     self._validate_recovery_ingested(generation, slot)
                 elif slot.state == "downloaded":
                     facts = self._recovery_downloaded_facts(generation, slot)
-                    self._ingest_recovered_slot(generation, run.id, slot.slot_index, facts)
+                    downloaded.append((slot, facts))
                 else:
                     raise ImageRecoveryBlockedError
+            for slot, facts in downloaded:
+                self._ingest_recovered_slot(generation, run.id, slot.slot_index, facts)
             self._complete_recovered_generation(generation.id, run.id)
             return "staged_artifact_reconciled"
 
@@ -782,14 +863,33 @@ class ImageService:
         def reset(session: Session) -> None:
             run = session.get(FlowGenerationRunRow, run_id)
             generation = session.get(ImageGenerationRow, generation_id)
+            slots = list(
+                session.scalars(
+                    select(FlowCandidateSlotRow)
+                    .where(FlowCandidateSlotRow.flow_generation_run_id == run_id)
+                    .order_by(FlowCandidateSlotRow.slot_index)
+                )
+            )
             if (
                 run is None
                 or generation is None
+                or generation.provider_state not in {"queued", "generating", "blocked"}
+                or generation.dispatched_at is not None
+                or generation.completed_at is not None
                 or run.dispatch_intent_at is not None
                 or run.dispatch_confirmed_at is not None
                 or run.stage not in {"prepared", "inputs_verified", "blocked"}
+                or [slot.slot_index for slot in slots] != [0, 1]
             ):
                 raise ImageRecoveryBlockedError
+            try:
+                self._generation_to_domain(generation)
+                self._flow_run_to_domain(run)
+                for slot in slots:
+                    self._flow_slot_to_domain(slot)
+                self._validate_recovery_state_compatibility(generation, run, slots)
+            except ValueError:
+                raise ImageRecoveryBlockedError from None
             run.stage = "prepared"
             run.last_failure_code = None
             run.updated_at = self._utc(self._clock())
@@ -994,26 +1094,10 @@ class ImageService:
         reason: str,
     ) -> str:
         def resolve(session: Session) -> str:
-            generation = session.get(ImageGenerationRow, image_generation_id)
-            if generation is None:
-                raise ImageGenerationNotFoundError
-            job = session.get(JobRow, generation.job_id)
-            run = session.scalar(
-                select(FlowGenerationRunRow).where(
-                    FlowGenerationRunRow.image_generation_id == generation.id
-                )
+            generation, run, _slots, job = self._validated_recovery_state_in_session(
+                session,
+                image_generation_id,
             )
-            if (
-                job is None
-                or run is None
-                or generation.executor != "playwright_python"
-                or job.status != "blocked"
-                or job.retry_safety != RetrySafety.RECONCILE_BEFORE_RETRY.value
-                or job.worker_id is not None
-                or job.lease_expires_at is not None
-                or job.attempt_count >= job.max_attempts
-            ):
-                raise ImageTransitionError
             existing = session.scalar(
                 select(JobEventRow)
                 .where(
@@ -1035,7 +1119,8 @@ class ImageService:
             if already_committed:
                 return job.id
             if (
-                run.stage != "ambiguous"
+                generation.provider_state != "blocked"
+                or run.stage != "ambiguous"
                 or run.dispatch_intent_at is None
                 or run.dispatch_confirmed_at is not None
             ):
@@ -1052,8 +1137,6 @@ class ImageService:
             run.stage = "prepared"
             run.dispatch_intent_at = None
             run.dispatch_confirmed_at = None
-            run.grid_evidence_path = None
-            run.grid_evidence_sha256 = None
             run.last_failure_code = None
             run.updated_at = now
             generation.provider_state = "queued"

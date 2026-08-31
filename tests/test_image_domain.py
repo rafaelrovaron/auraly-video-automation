@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta, timezone
+import hashlib
 import re
 from typing import cast, get_args
 
@@ -42,6 +43,7 @@ def _request(*, idempotency_key: str) -> ImageGenerateRequest:
 
 
 def _playwright_request(**changes: object) -> ImageGenerateRequest:
+    workspace_path = "fx/tools/flow/domain-workspace"
     values: dict[str, object] = {
         "campaign_id": "campaign-1",
         "scene_variant_id": SCENE_ID,
@@ -53,6 +55,10 @@ def _playwright_request(**changes: object) -> ImageGenerateRequest:
         "generation_contract_version": "flow-generation-v1",
         "provider_action_confirmed": True,
         "provider_action_approved_by": "operator-1",
+        "provider_workspace_path": workspace_path,
+        "provider_workspace_fingerprint": hashlib.sha256(
+            workspace_path.encode()
+        ).hexdigest(),
     }
     values.update(changes)
     return ImageGenerateRequest.model_validate(values)
@@ -265,7 +271,7 @@ def test_playwright_fingerprint_matches_approved_canonical_payload_golden() -> N
     request = _playwright_request()
 
     assert generation_request_fingerprint(request) == (
-        "7e3b448e73592d91c255c5bafab9e53e88474cc6a1cf48e6044023ed7881583b"
+        "7b35580cfaec2005f5863fde0b0b1a742b692afbb3d8d1a5b6bf47cc61b0cf4d"
     )
 
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+import hashlib
 from pathlib import Path
 
 import pytest
@@ -15,7 +16,6 @@ from auraly_pipeline.images.db_models import ImageGenerationRow
 from auraly_pipeline.images.repository import ImageRepository
 from auraly_pipeline.images.service import (
     ImageCandidateNotFoundError,
-    ImageError,
     ImageGenerationNotFoundError,
     ImageIdempotencyConflictError,
     ImageService,
@@ -23,6 +23,7 @@ from auraly_pipeline.images.service import (
 from auraly_pipeline.jobs.domain import JobExecutionResult, RetrySafety
 from auraly_pipeline.jobs.db_models import JobRow
 from auraly_pipeline.jobs.handlers import JobExecutionContext
+from auraly_pipeline.jobs.service import JobRetrySafetyError
 from tests.test_campaign_domain import valid_campaign_data
 
 
@@ -72,6 +73,7 @@ def _playwright_request(
     *,
     key: str,
 ) -> ImageGenerateRequest:
+    workspace_path = "fx/tools/flow/task-10-workspace"
     return ImageGenerateRequest(
         campaign_id=campaign_id,
         scene_variant_id=scene_variant_id,
@@ -83,6 +85,8 @@ def _playwright_request(
         generation_contract_version="flow-generation-v1",
         provider_action_confirmed=True,
         provider_action_approved_by="operator-1",
+        provider_workspace_path=workspace_path,
+        provider_workspace_fingerprint=hashlib.sha256(workspace_path.encode()).hexdigest(),
     )
 
 
@@ -151,7 +155,7 @@ def test_generate_same_key_and_changed_fingerprint_raises_image_idempotency_conf
     service.close()
 
 
-def test_generate_rejects_playwright_before_persistence_until_flow_submission_is_atomic(
+def test_generate_rejects_playwright_before_persistence_when_handler_policy_is_incompatible(
     tmp_path: Path,
 ) -> None:
     database = tmp_path / "playwright-rejected.db"
@@ -159,11 +163,9 @@ def test_generate_rejects_playwright_before_persistence_until_flow_submission_is
     service = _service(database)
     request = _playwright_request(campaign_id, scene_variant_id, key="flow-not-ready")
 
-    with pytest.raises(ImageError) as raised:
+    with pytest.raises(JobRetrySafetyError):
         service.generate(request)
 
-    assert raised.value.code == "image_operation_failed"
-    assert raised.value.public_message == "The image operation failed safely."
     engine = create_sqlite_engine(database)
     sessions = sessionmaker(engine, expire_on_commit=False, class_=Session)
     with sessions() as session:

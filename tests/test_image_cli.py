@@ -10,7 +10,7 @@ from typer.testing import CliRunner
 from auraly_pipeline.campaigns.domain import CampaignCreate
 from auraly_pipeline.campaigns.service import CampaignService
 from auraly_pipeline.cli import app
-from auraly_pipeline.images.db_models import FlowGenerationRunRow
+from auraly_pipeline.images.db_models import FlowGenerationRunRow, ImageGenerationRow
 from auraly_pipeline.images.domain import ImageGenerateRequest
 from auraly_pipeline.images.service import ImageCandidateNotFoundError
 from auraly_pipeline.images.service import ImageService
@@ -108,11 +108,16 @@ def _blocked_flow_generation(
                 == submission.generation.image_generation_id
             )
         )
-        assert job is not None and run is not None
+        generation = session.get(
+            ImageGenerationRow,
+            submission.generation.image_generation_id,
+        )
+        assert job is not None and run is not None and generation is not None
         job.status = "blocked"
         if ambiguous:
             run.stage = "ambiguous"
             run.dispatch_intent_at = run.created_at
+            generation.provider_state = "blocked"
         session.commit()
     service.close()
     return database, work_root, submission.generation.image_generation_id
@@ -598,6 +603,53 @@ def test_image_generation_recovery_failure_is_nonzero_and_sanitized(
             "00000000-0000-4000-8000-000000000001",
             "--reconciled-by",
             "operator-1",
+            "--database",
+            str(tmp_path / "private.db"),
+            "--work-root",
+            str(tmp_path / "PRIVATE-work"),
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert json.loads(result.stdout) == {
+        "success": False,
+        "error": {
+            "code": "image_operation_failed",
+            "message": "The image operation failed safely.",
+        },
+    }
+    for denied in ("PRIVATE", "SECRET", "Users", "labs.google", "Traceback"):
+        assert denied not in result.stdout
+
+
+def test_image_generation_resolve_no_dispatch_unexpected_failure_is_sanitized(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    class FailingService:
+        def resolve_no_dispatch(self, *_args, **_kwargs):
+            raise RuntimeError(
+                r"PRIVATE PROMPT token=SECRET C:\\Users\\Private\\profile labs.google"
+            )
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(
+        "auraly_pipeline.cli._image_service",
+        lambda _database, _work_root: FailingService(),
+    )
+    result = runner.invoke(
+        app,
+        [
+            "image",
+            "generation",
+            "resolve-no-dispatch",
+            "00000000-0000-4000-8000-000000000001",
+            "--resolved-by",
+            "operator-1",
+            "--reason",
+            "Operator confirmed no generation.",
             "--database",
             str(tmp_path / "private.db"),
             "--work-root",

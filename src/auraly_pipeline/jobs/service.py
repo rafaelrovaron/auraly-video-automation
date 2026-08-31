@@ -384,7 +384,7 @@ class JobService:
         self,
         job_id: str,
         *,
-        reason: ReconciliationReason = "no_dispatch_proven",
+        reason: ReconciliationReason,
     ) -> Job:
         try:
             row = self._repository.resume_reconciled(

@@ -28,7 +28,11 @@ from auraly_pipeline.jobs.handlers import (
     SimulatedWorkerCrash,
     SuccessHandler,
 )
-from auraly_pipeline.jobs.repository import DuplicateIdempotencyRace, JobRepository
+from auraly_pipeline.jobs.repository import (
+    DuplicateIdempotencyRace,
+    JobRepository,
+    ReconciliationReason,
+)
 from auraly_pipeline.jobs.service import (
     JobClaimError,
     JobIdempotencyConflictError,
@@ -876,7 +880,7 @@ def test_reconcile_before_retry_policy_cannot_use_generic_resume(tmp_path: Path)
 )
 def test_resume_reconciled_records_exact_allowlisted_reason(
     tmp_path: Path,
-    reason: str,
+    reason: ReconciliationReason,
 ) -> None:
     class ReconcileHandler:
         retry_safety = RetrySafety.RECONCILE_BEFORE_RETRY
@@ -923,6 +927,16 @@ def test_resume_reconciled_rejects_unknown_reason(tmp_path: Path) -> None:
 
     with pytest.raises(JobTransitionError):
         service.resume_reconciled_job(submitted.job_id, reason="operator_says_ok")  # type: ignore[arg-type]
+
+    service.close()
+
+
+def test_resume_reconciled_requires_an_explicit_evidence_reason(tmp_path: Path) -> None:
+    service = JobService.for_database(tmp_path / "auraly.db", clock=lambda: NOW)
+    submitted = service.submit_job(_local_job("fake.success", "missing-reconcile-reason"))
+
+    with pytest.raises(TypeError):
+        service.resume_reconciled_job(submitted.job_id)  # type: ignore[call-arg]
 
     service.close()
 
