@@ -19,12 +19,8 @@ from auraly_pipeline.models import ContractModel
 
 ImageProvider = Literal["google_flow"]
 ImageExecutor = Literal["local_fake", "playwright_python"]
-ImageGenerationState = Literal[
-    "created", "queued", "generating", "completed", "failed", "blocked"
-]
-ImageCandidateReviewStatus = Literal[
-    "pending_review", "approved", "rejected", "superseded"
-]
+ImageGenerationState = Literal["created", "queued", "generating", "completed", "failed", "blocked"]
+ImageCandidateReviewStatus = Literal["pending_review", "approved", "rejected", "superseded"]
 FlowGenerationStage = Literal[
     "prepared",
     "inputs_verified",
@@ -102,13 +98,15 @@ class ImageGenerateRequest(ImageContract):
     reference_image_sha256: str | None = Field(default=None, pattern=_SHA256_PATTERN)
     provider: ImageProvider = "google_flow"
     executor: ImageExecutor = "local_fake"
-    generation_contract_version: Literal[
-        "image-generation-v1", "flow-generation-v1"
-    ] = "image-generation-v1"
+    generation_contract_version: Literal["image-generation-v1", "flow-generation-v1"] = (
+        "image-generation-v1"
+    )
     required_candidate_count: Literal[2] = 2
     required_output_resolution: Literal["2K"] = "2K"
     provider_action_confirmed: bool = False
     provider_action_approved_by: str | None = Field(default=None, max_length=120)
+    provider_workspace_path: str | None = None
+    provider_workspace_fingerprint: str | None = Field(default=None, pattern=_SHA256_PATTERN)
     fake_artifact_format_version: Literal["fake-png-v1"] = "fake-png-v1"
 
     @field_validator("idempotency_key")
@@ -120,6 +118,10 @@ class ImageGenerateRequest(ImageContract):
     @classmethod
     def validate_reference_path(cls, value: str | None) -> str | None:
         return None if value is None else _validate_workspace_path(value)
+
+    _provider_workspace_path = field_validator("provider_workspace_path")(
+        lambda value: None if value is None else _validate_flow_workspace_path(value)
+    )
 
     @computed_field  # type: ignore[prop-decorator]
     @property
@@ -137,6 +139,11 @@ class ImageGenerateRequest(ImageContract):
                 raise ValueError("local_fake does not permit provider-action confirmation")
             if self.provider_action_approved_by is not None:
                 raise ValueError("local_fake does not permit a provider-action approver")
+            if (
+                self.provider_workspace_path is not None
+                or self.provider_workspace_fingerprint is not None
+            ):
+                raise ValueError("local_fake does not permit a Flow workspace")
             return self
         if self.generation_contract_version != "flow-generation-v1":
             raise ValueError("playwright_python requires flow-generation-v1")
@@ -146,6 +153,15 @@ class ImageGenerateRequest(ImageContract):
             raise ValueError("playwright_python requires provider-action confirmation")
         if self.provider_action_approved_by is None:
             raise ValueError("playwright_python requires a provider-action approver")
+        if (self.provider_workspace_path is None) != (self.provider_workspace_fingerprint is None):
+            raise ValueError("playwright_python requires a bound Flow workspace identity")
+        if self.provider_workspace_path is None or self.provider_workspace_fingerprint is None:
+            raise ValueError("playwright_python requires a bound Flow workspace identity")
+        expected_workspace_fingerprint = hashlib.sha256(
+            self.provider_workspace_path.encode("utf-8")
+        ).hexdigest()
+        if self.provider_workspace_fingerprint != expected_workspace_fingerprint:
+            raise ValueError("Flow workspace fingerprint does not match its path")
         validate_safe_identifier(
             self.provider_action_approved_by,
             "provider_action_approved_by",
@@ -177,6 +193,8 @@ def generation_request_fingerprint(request: ImageGenerateRequest) -> str:
             "requiredCandidateCount": request.required_candidate_count,
             "requiredOutputResolution": request.required_output_resolution,
             "sceneVariantId": request.scene_variant_id,
+            "providerWorkspacePath": request.provider_workspace_path,
+            "providerWorkspaceFingerprint": request.provider_workspace_fingerprint,
         }
     canonical = json.dumps(
         canonical_payload,
@@ -307,14 +325,19 @@ _FLOW_SLOT_STATES = frozenset(
 _FLOW_RUN_TRANSITIONS: dict[str, frozenset[str]] = {
     "prepared": frozenset({"inputs_verified", "blocked", "failed"}),
     "inputs_verified": frozenset({"dispatch_intent_recorded", "blocked", "failed"}),
-    "dispatch_intent_recorded": frozenset(
-        {"dispatch_confirmed", "ambiguous", "blocked", "failed"}
-    ),
+    "dispatch_intent_recorded": frozenset({"dispatch_confirmed", "ambiguous", "blocked", "failed"}),
     "dispatch_confirmed": frozenset({"candidates_observed", "blocked", "failed"}),
     "candidates_observed": frozenset({"downloading", "blocked", "failed"}),
     "downloading": frozenset({"completed", "blocked", "failed"}),
     "ambiguous": frozenset(
-        {"prepared", "dispatch_confirmed", "candidates_observed", "downloading", "blocked", "failed"}
+        {
+            "prepared",
+            "dispatch_confirmed",
+            "candidates_observed",
+            "downloading",
+            "blocked",
+            "failed",
+        }
     ),
     "completed": frozenset(),
     "blocked": frozenset(),
@@ -347,9 +370,7 @@ _FLOW_FAILURE_CODES = frozenset(
 )
 
 
-def ensure_flow_run_transition(
-    current: FlowGenerationStage, target: FlowGenerationStage
-) -> None:
+def ensure_flow_run_transition(current: FlowGenerationStage, target: FlowGenerationStage) -> None:
     if current not in _FLOW_RUN_STAGES or target not in _FLOW_RUN_STAGES:
         raise ValueError("unknown Flow generation stage")
     if target not in _FLOW_RUN_TRANSITIONS[current]:
@@ -422,9 +443,7 @@ class FlowGenerationRun(ImageContract):
 
     @model_validator(mode="after")
     def validate_flow_checkpoint(self) -> Self:
-        if (self.provider_workspace_path is None) != (
-            self.provider_workspace_fingerprint is None
-        ):
+        if (self.provider_workspace_path is None) != (self.provider_workspace_fingerprint is None):
             raise ValueError("workspace path and fingerprint must be supplied together")
         if (self.grid_evidence_path is None) != (self.grid_evidence_sha256 is None):
             raise ValueError("grid evidence path and SHA-256 must be supplied together")
@@ -453,7 +472,12 @@ class FlowGenerationRun(ImageContract):
                 raise ValueError("ambiguous stage requires a durable dispatch intent")
             if self.dispatch_confirmed_at is not None:
                 raise ValueError("ambiguous stage must not retain a confirmation timestamp")
-        elif self.stage in {"dispatch_confirmed", "candidates_observed", "downloading", "completed"}:
+        elif self.stage in {
+            "dispatch_confirmed",
+            "candidates_observed",
+            "downloading",
+            "completed",
+        }:
             if self.dispatch_intent_at is None or self.dispatch_confirmed_at is None:
                 raise ValueError("post-dispatch stage requires intent and confirmation timestamps")
         if self.provider_action_approved_at > self.created_at:
@@ -461,7 +485,10 @@ class FlowGenerationRun(ImageContract):
         if self.updated_at < self.created_at:
             raise ValueError("run updated_at must not precede created_at")
         if self.dispatch_intent_at is not None:
-            if self.dispatch_intent_at < self.created_at or self.dispatch_intent_at > self.updated_at:
+            if (
+                self.dispatch_intent_at < self.created_at
+                or self.dispatch_intent_at > self.updated_at
+            ):
                 raise ValueError("dispatch intent timestamp is outside run chronology")
         if self.dispatch_confirmed_at is not None:
             dispatch_intent_at = self.dispatch_intent_at

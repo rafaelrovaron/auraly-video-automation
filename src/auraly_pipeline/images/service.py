@@ -29,7 +29,7 @@ from auraly_pipeline.images.domain import (
     generation_request_fingerprint,
 )
 from auraly_pipeline.images.repository import ImageRepository
-from auraly_pipeline.jobs.db_models import JobRow
+from auraly_pipeline.jobs.db_models import JobEventRow, JobRow
 from auraly_pipeline.jobs.domain import Job, JobSubmit, RetrySafety
 from auraly_pipeline.jobs.handlers import JobHandler
 from auraly_pipeline.jobs.service import JobIdempotencyConflictError, JobService
@@ -163,8 +163,8 @@ class ImageService:
                     stage="prepared",
                     required_candidate_count=2,
                     required_resolution="2K",
-                    provider_workspace_path=None,
-                    provider_workspace_fingerprint=None,
+                    provider_workspace_path=request.provider_workspace_path,
+                    provider_workspace_fingerprint=request.provider_workspace_fingerprint,
                     dispatch_attempt_number=1,
                     dispatch_intent_at=None,
                     dispatch_confirmed_at=None,
@@ -196,6 +196,19 @@ class ImageService:
                         for index in range(2)
                     ]
                 )
+                session.add(
+                    JobEventRow(
+                        id=str(uuid4()),
+                        job_id=job.id,
+                        event_type="job.authorized",
+                        timestamp=timestamp,
+                        metadata_json={
+                            "executor": "playwright_python",
+                            "approvedBy": request.provider_action_approved_by,
+                            "workspaceFingerprint": request.provider_workspace_fingerprint,
+                        },
+                    )
+                )
                 session.flush()
             return generation
 
@@ -211,7 +224,11 @@ class ImageService:
             scene_variant_id=request.scene_variant_id,
             idempotency_key=request.idempotency_key,
             input={"imageRequestFingerprint": request_fingerprint},
-            retry_safety=RetrySafety.IDEMPOTENT,
+            retry_safety=(
+                RetrySafety.IDEMPOTENT
+                if request.executor == "local_fake"
+                else RetrySafety.RECONCILE_BEFORE_RETRY
+            ),
         )
         try:
             submitted = self._jobs.submit_linked_job(

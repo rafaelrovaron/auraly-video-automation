@@ -13,6 +13,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from auraly_pipeline.images.db_models import ImageCandidateRow, ImageGenerationRow
+from auraly_pipeline.jobs.db_models import JobRow
+from auraly_pipeline.jobs.domain import JobSubmit
 from auraly_pipeline.images.domain import ImageCandidate
 from auraly_pipeline.images.repository import ImageRepository
 from auraly_pipeline.jobs.domain import JobExecutionOutcome, JobExecutionResult, RetrySafety
@@ -502,16 +504,44 @@ class ImageGenerateHandler:
 
     def _executor_for_claim(self, context: JobExecutionContext) -> str | None:
         with self._local_fake._sessions() as session:
+            job = session.get(JobRow, context.job_id)
             generation = session.scalar(
                 select(ImageGenerationRow).where(ImageGenerationRow.job_id == context.job_id)
             )
             if (
-                generation is None
+                job is None
+                or generation is None
                 or context.job_type != "image.generate"
                 or generation.campaign_id != context.campaign_id
+                or job.job_type != context.job_type
+                or job.campaign_id != context.campaign_id
+                or job.scene_variant_id != generation.scene_variant_id
                 or context.input != {"imageRequestFingerprint": generation.request_fingerprint}
+                or job.input_json != context.input
                 or generation.executor not in {"local_fake", "playwright_python"}
             ):
+                return None
+            expected_retry = (
+                RetrySafety.IDEMPOTENT
+                if generation.executor == "local_fake"
+                else RetrySafety.RECONCILE_BEFORE_RETRY
+            )
+            if job.retry_safety != expected_retry.value:
+                return None
+            try:
+                expected_fingerprint = JobSubmit(
+                    job_type=job.job_type,
+                    campaign_id=job.campaign_id,
+                    scene_variant_id=job.scene_variant_id,
+                    idempotency_key=job.idempotency_key,
+                    input=job.input_json,
+                    priority=job.priority,
+                    max_attempts=job.max_attempts,
+                    retry_safety=expected_retry,
+                ).request_fingerprint
+            except ValueError:
+                return None
+            if job.request_fingerprint != expected_fingerprint:
                 return None
             if generation.executor == "local_fake":
                 return "local_fake"

@@ -8,9 +8,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session, sessionmaker
 
+from auraly_pipeline.campaigns.db_models import CampaignRow, SceneVariantRow
 from auraly_pipeline.flow.artifacts import (
     FlowArtifactConflictError,
     FlowArtifactFacts,
@@ -44,6 +45,8 @@ from auraly_pipeline.images.db_models import (
 )
 from auraly_pipeline.images.domain import ImageCandidate
 from auraly_pipeline.images.repository import ImageRepository
+from auraly_pipeline.jobs.db_models import JobEventRow, JobRow
+from auraly_pipeline.jobs.domain import JobSubmit
 from auraly_pipeline.jobs.domain import JobExecutionOutcome, JobExecutionResult, RetrySafety
 from auraly_pipeline.jobs.handlers import JobExecutionContext
 
@@ -173,21 +176,28 @@ class FlowGenerationCheckpointSink:
         grid_evidence: tuple[str, str] | None = None,
     ) -> None:
         with self._sessions() as session:
-            run = session.get(FlowGenerationRunRow, self._run_id)
-            if run is None or run.stage not in expected:
-                raise ValueError("Flow checkpoint compare-and-set failed")
             now = self._clock()
-            run.stage = target
-            run.updated_at = now
+            values: dict[str, object] = {"stage": target, "updated_at": now}
             if workspace is not None:
-                run.provider_workspace_path = workspace.workspace_path
-                run.provider_workspace_fingerprint = workspace.fingerprint
+                values["provider_workspace_path"] = workspace.workspace_path
+                values["provider_workspace_fingerprint"] = workspace.fingerprint
             if target == "dispatch_intent_recorded":
-                run.dispatch_intent_at = now
+                values["dispatch_intent_at"] = now
             if confirmed:
-                run.dispatch_confirmed_at = now
+                values["dispatch_confirmed_at"] = now
             if grid_evidence is not None:
-                run.grid_evidence_path, run.grid_evidence_sha256 = grid_evidence
+                values["grid_evidence_path"], values["grid_evidence_sha256"] = grid_evidence
+            changed = session.execute(
+                update(FlowGenerationRunRow)
+                .where(
+                    FlowGenerationRunRow.id == self._run_id,
+                    FlowGenerationRunRow.stage.in_(expected),
+                )
+                .values(**values)
+            ).rowcount
+            if changed != 1:
+                session.rollback()
+                raise ValueError("Flow checkpoint compare-and-set failed")
             session.commit()
         self._reload_run(target)
 
@@ -242,15 +252,8 @@ class FlowImageGenerateHandler:
         if run.stage == "completed":
             return self._completed_if_intact(generation, slots)
         if workspace is None:
-            workspace = self._workspace_factory()
-            if workspace is None:
-                return self._blocked("flow_recovery_blocked")
+            return self._terminal("image_job_integrity_failed")
         sink = FlowGenerationCheckpointSink(self._sessions, run_id=run.id, clock=self._clock)
-        if run.provider_workspace_path is None:
-            try:
-                sink.set_workspace(workspace)
-            except ValueError:
-                return self._terminal("image_job_integrity_failed")
         artifact_context = FlowGenerationArtifactContext(
             campaign_id=generation.campaign_id,
             scene_variant_id=generation.scene_variant_id,
@@ -273,11 +276,21 @@ class FlowImageGenerateHandler:
                     sink,
                 )
                 run = self._run(run.id)
-            else:
+            elif run.stage in {
+                "dispatch_intent_recorded",
+                "dispatch_confirmed",
+                "candidates_observed",
+                "downloading",
+                "ambiguous",
+            }:
                 runtime.reconcile(workspace, sink)
                 if run.stage == "dispatch_intent_recorded":
                     self._set_run_failure(run.id, "ambiguous")
                     return self._blocked("flow_dispatch_ambiguous")
+                if run.stage == "ambiguous":
+                    return self._blocked("flow_dispatch_ambiguous")
+            else:
+                return self._terminal("image_job_integrity_failed")
             if run.stage == "dispatch_confirmed":
                 runtime.observe_candidates(sink)
                 run = self._run(run.id)
@@ -287,6 +300,16 @@ class FlowImageGenerateHandler:
                     if slot.state == "ingested":
                         self._validate_ingested(generation, slot)
                         continue
+                    if slot.state == "downloaded":
+                        self._ingest_slot(
+                            generation,
+                            run.id,
+                            slot_index,
+                            self._recover_downloaded_facts(generation, slot),
+                        )
+                        continue
+                    if slot.state != "observed":
+                        return self._blocked("flow_recovery_blocked")
                     facts = runtime.download_slot(slot_index, sink)
                     self._ingest_slot(generation, run.id, slot_index, facts)
                 self._complete(generation.id, run.id)
@@ -319,18 +342,44 @@ class FlowImageGenerateHandler:
 
     def _validate(self, context: JobExecutionContext):
         with self._sessions() as session:
+            job = session.get(JobRow, context.job_id)
             generation = session.scalar(
                 select(ImageGenerationRow).where(ImageGenerationRow.job_id == context.job_id)
             )
             if (
-                generation is None
+                job is None
+                or generation is None
                 or context.job_type != "image.generate"
                 or generation.campaign_id != context.campaign_id
                 or generation.executor != "playwright_python"
                 or context.input != {"imageRequestFingerprint": generation.request_fingerprint}
+                or job.job_type != context.job_type
+                or job.campaign_id != generation.campaign_id
+                or job.scene_variant_id != generation.scene_variant_id
+                or job.input_json != context.input
+                or job.retry_safety != RetrySafety.RECONCILE_BEFORE_RETRY.value
                 or generation.reference_image_path is None
                 or generation.reference_image_sha256 is None
             ):
+                return None
+            try:
+                expected_job_fingerprint = JobSubmit(
+                    job_type=job.job_type,
+                    campaign_id=job.campaign_id,
+                    scene_variant_id=job.scene_variant_id,
+                    idempotency_key=job.idempotency_key,
+                    input=job.input_json,
+                    priority=job.priority,
+                    max_attempts=job.max_attempts,
+                    retry_safety=RetrySafety.RECONCILE_BEFORE_RETRY,
+                ).request_fingerprint
+            except ValueError:
+                return None
+            if job.request_fingerprint != expected_job_fingerprint:
+                return None
+            campaign = session.get(CampaignRow, generation.campaign_id)
+            scene = session.get(SceneVariantRow, generation.scene_variant_id)
+            if campaign is None or scene is None or scene.campaign_id != campaign.id:
                 return None
             run = session.scalar(
                 select(FlowGenerationRunRow).where(
@@ -343,6 +392,9 @@ class FlowImageGenerateHandler:
                 or run.required_resolution != "2K"
                 or not run.provider_action_approved_by
                 or run.provider_action_approved_at is None
+                or run.provider_workspace_path is None
+                or run.provider_workspace_fingerprint is None
+                or run.stage in {"blocked", "failed", "inputs_verified"}
             ):
                 return None
             slots = list(
@@ -353,6 +405,23 @@ class FlowImageGenerateHandler:
                 )
             )
             if [slot.slot_index for slot in slots] != [0, 1]:
+                return None
+            authorization = session.scalar(
+                select(JobEventRow).where(
+                    JobEventRow.job_id == job.id,
+                    JobEventRow.event_type == "job.authorized",
+                )
+            )
+            if (
+                authorization is None
+                or authorization.metadata_json
+                != {
+                    "executor": "playwright_python",
+                    "approvedBy": run.provider_action_approved_by,
+                    "workspaceFingerprint": run.provider_workspace_fingerprint,
+                }
+                or authorization.timestamp != run.provider_action_approved_at
+            ):
                 return None
             try:
                 reference = (self._work_root / generation.reference_image_path).resolve(strict=True)
@@ -445,6 +514,39 @@ class FlowImageGenerateHandler:
             slot.state = "ingested"
             slot.updated_at = self._clock()
             session.commit()
+
+    def _recover_downloaded_facts(
+        self, generation: ImageGenerationRow, slot: FlowCandidateSlotRow
+    ) -> FlowArtifactFacts:
+        if slot.staging_path is None or slot.staged_sha256 is None:
+            raise FlowArtifactConflictError()
+        try:
+            staging = (self._work_root / slot.staging_path).resolve(strict=False)
+            staging.relative_to(self._work_root)
+        except ValueError as exc:
+            raise FlowArtifactConflictError() from exc
+        if staging.exists():
+            staged = inspect_flow_artifact(staging)
+            if staged.sha256 != slot.staged_sha256:
+                raise FlowArtifactConflictError()
+        matching: list[FlowArtifactFacts] = []
+        for image_format in ("png", "jpeg", "webp"):
+            final = resolve_flow_final_path(
+                work_root=self._work_root,
+                campaign_id=generation.campaign_id,
+                scene_variant_id=generation.scene_variant_id,
+                generation_number=generation.generation_number,
+                candidate_index=slot.slot_index,
+                image_format=image_format,
+            )
+            if not final.exists():
+                continue
+            facts = inspect_flow_artifact(final)
+            if facts.sha256 == slot.staged_sha256:
+                matching.append(facts)
+        if len(matching) != 1:
+            raise FlowArtifactConflictError()
+        return matching[0]
 
     def _validate_ingested(
         self, generation: ImageGenerationRow, slot: FlowCandidateSlotRow
