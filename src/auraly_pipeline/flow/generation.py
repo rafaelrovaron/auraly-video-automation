@@ -69,7 +69,6 @@ _EVIDENCE_MASK_LABELS = (
     "Reference preview",
     "Upload filename",
 )
-_DOWNLOAD_QUIESCENCE_MILLISECONDS = 100
 
 
 class FlowGenerationCheckpointSink(Protocol):
@@ -508,9 +507,6 @@ class FlowGenerationRuntime:
         def observe(download: Download) -> None:
             events.append(download)
 
-        # Drain already-scheduled browser work before arming the exact-action
-        # boundary, so a pre-existing provider download cannot satisfy it.
-        page.wait_for_timeout(_DOWNLOAD_QUIESCENCE_MILLISECONDS)
         page.on("download", observe)
         try:
             self._download_actions.append((slot_index, "2K"))
@@ -520,11 +516,6 @@ class FlowGenerationRuntime:
                 action.click()
             download = pending.value
             if len(events) != 1 or events[0] is not download:
-                raise FlowDownloadCorrelationError()
-            # Keep the scoped listener through a bounded quiescence interval so a
-            # second event caused by this single provider action cannot be missed.
-            page.wait_for_timeout(_DOWNLOAD_QUIESCENCE_MILLISECONDS)
-            if len(events) != 1:
                 raise FlowDownloadCorrelationError()
             return download
         except PlaywrightTimeoutError:

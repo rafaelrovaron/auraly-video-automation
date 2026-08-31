@@ -628,6 +628,37 @@ def test_flow_package_limits_provider_mutations_to_checkpointed_generation_runti
     assert "_session_factory" in inspect.signature(FlowGenerationRuntime).parameters
 
 
+def test_flow_download_expect_scope_contains_only_the_selected_semantic_action() -> None:
+    """A second provider action inside the download boundary would break Task 9 association."""
+    generation_tree = _module_tree(FLOW_SOURCE_ROOT / "generation.py")
+    download_method = next(
+        node
+        for node in ast.walk(generation_tree)
+        if isinstance(node, ast.FunctionDef) and node.name == "_one_download_from_action"
+    )
+    download_scopes = [
+        node
+        for node in ast.walk(download_method)
+        if isinstance(node, ast.With)
+        and any(
+            isinstance(item.context_expr, ast.Call)
+            and isinstance(item.context_expr.func, ast.Attribute)
+            and item.context_expr.func.attr == "expect_download"
+            for item in node.items
+        )
+    ]
+
+    assert len(download_scopes) == 1
+    scope = download_scopes[0]
+    assert len(scope.body) == 1
+    assert isinstance(scope.body[0], ast.Expr)
+    assert isinstance(scope.body[0].value, ast.Call)
+    assert isinstance(scope.body[0].value.func, ast.Attribute)
+    assert scope.body[0].value.func.attr == "click"
+    assert isinstance(scope.body[0].value.func.value, ast.Name)
+    assert scope.body[0].value.func.value.id == "action"
+
+
 def test_flow_cli_and_service_expose_no_job_database_or_arbitrary_target_boundary() -> None:
     """Only the four approved local options may reach the independent Flow service."""
     cli_tree = _module_tree(Path(cli_module.__file__))

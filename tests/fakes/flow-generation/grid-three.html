@@ -23,9 +23,7 @@
           const count = Number(button.dataset.downloadCount || '1');
           if (button.dataset.downloadDisabled === 'true') return;
           window.flowDownloadActions.push(button.closest('[data-flow-candidate-id]')?.dataset.flowCandidateId || 'unrelated');
-          const delayMilliseconds = Number(button.dataset.downloadDelayMs || '0');
           for (let index = 0; index < count; index += 1) {
-            const emitDownload = () => {
             const link = document.createElement('a');
             const bytes = Uint8Array.from(atob(button.dataset.downloadBytes), (value) => value.charCodeAt(0));
             link.href = URL.createObjectURL(new Blob([bytes], {type: 'image/png'}));
@@ -34,12 +32,6 @@
             link.click();
             URL.revokeObjectURL(link.href);
             link.remove();
-            };
-            if (index === 0 || delayMilliseconds === 0) {
-              emitDownload();
-            } else {
-              window.setTimeout(emitDownload, delayMilliseconds);
-            }
           }
         });
       });
