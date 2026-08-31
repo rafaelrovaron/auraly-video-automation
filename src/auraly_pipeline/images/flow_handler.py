@@ -436,21 +436,23 @@ class FlowImageGenerateHandler:
                 return None
             if any(slot.state == "download_intent_recorded" for slot in slots):
                 return None
-            authorization = session.scalar(
-                select(JobEventRow).where(
-                    JobEventRow.job_id == job.id,
-                    JobEventRow.event_type == "job.authorized",
+            authorizations = list(
+                session.scalars(
+                    select(JobEventRow).where(
+                        JobEventRow.job_id == job.id,
+                        JobEventRow.event_type == "job.authorized",
+                    )
                 )
             )
             if (
-                authorization is None
-                or authorization.metadata_json
+                len(authorizations) != 1
+                or authorizations[0].metadata_json
                 != {
                     "executor": "playwright_python",
                     "approvedBy": run.provider_action_approved_by,
                     "workspaceFingerprint": run.provider_workspace_fingerprint,
                 }
-                or authorization.timestamp != run.provider_action_approved_at
+                or authorizations[0].timestamp != run.provider_action_approved_at
             ):
                 return None
             try:

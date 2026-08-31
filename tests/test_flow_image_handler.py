@@ -25,7 +25,6 @@ from auraly_pipeline.flow.config import FlowGenerationConfig
 from auraly_pipeline.flow.generation import FlowGenerationRuntime
 from auraly_pipeline.images.db_models import FlowGenerationRunRow
 from auraly_pipeline.images.db_models import FlowCandidateSlotRow, ImageGenerationRow
-from auraly_pipeline.campaigns.db_models import SceneVariantRow
 from auraly_pipeline.jobs.db_models import JobEventRow, JobRow
 
 
@@ -248,7 +247,6 @@ def test_flow_integrity_matrix_rejects_before_runtime_construction(
             job.request_fingerprint = "0" * 64
         elif corruption == "scene_ownership":
             assert other_campaign_id is not None
-            job.campaign_id = other_campaign_id
         elif corruption == "executor_policy":
             job.retry_safety = "idempotent"
         elif corruption == "authorization_event":
@@ -259,7 +257,15 @@ def test_flow_integrity_matrix_rejects_before_runtime_construction(
                 )
             )
             assert authorization is not None
-            authorization.metadata_json = {"executor": "local_fake"}
+            session.add(
+                JobEventRow(
+                    id=str(uuid4()),
+                    job_id=job.id,
+                    event_type="job.authorized",
+                    timestamp=authorization.timestamp,
+                    metadata_json={"executor": "local_fake"},
+                )
+            )
         elif corruption == "workspace_and_reference_sha":
             run.provider_workspace_path = "../outside"
             reference.write_bytes(b"tampered-reference")
@@ -307,7 +313,9 @@ def test_flow_integrity_matrix_rejects_before_runtime_construction(
         JobExecutionContext(
             job_id=submission.job.job_id,
             job_type="image.generate",
-            campaign_id=campaign.campaign_id,
+            campaign_id=(
+                other_campaign_id if corruption == "scene_ownership" else campaign.campaign_id
+            ),
             input=submission.job.input,
             attempt_number=1,
         )
