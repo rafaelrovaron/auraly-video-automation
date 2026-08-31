@@ -71,15 +71,19 @@ def _pixel_bytes(generation_id: str, candidate_index: int) -> bytes:
 def deterministic_png_bytes(generation_id: str, candidate_index: int) -> bytes:
     """Return the stable local-fake RGB PNG for one generation candidate."""
     rows = b"".join(
-        b"\x00" + _pixel_bytes(generation_id, candidate_index)[
+        b"\x00"
+        + _pixel_bytes(generation_id, candidate_index)[
             row * _PNG_WIDTH * 3 : (row + 1) * _PNG_WIDTH * 3
         ]
         for row in range(_PNG_HEIGHT)
     )
     ihdr = struct.pack(">IIBBBBB", _PNG_WIDTH, _PNG_HEIGHT, 8, 2, 0, 0, 0)
-    return _PNG_SIGNATURE + _png_chunk(b"IHDR", ihdr) + _png_chunk(
-        b"IDAT", zlib.compress(rows)
-    ) + _png_chunk(b"IEND", b"")
+    return (
+        _PNG_SIGNATURE
+        + _png_chunk(b"IHDR", ihdr)
+        + _png_chunk(b"IDAT", zlib.compress(rows))
+        + _png_chunk(b"IEND", b"")
+    )
 
 
 def _png_facts(data: bytes) -> _PngFacts:
@@ -135,7 +139,7 @@ def _png_facts(data: bytes) -> _PngFacts:
     )
 
 
-class ImageGenerateHandler:
+class LocalFakeImageGenerateHandler:
     retry_safety = RetrySafety.IDEMPOTENT
 
     def __init__(
@@ -159,8 +163,7 @@ class ImageGenerateHandler:
                 or context.job_type != "image.generate"
                 or generation.campaign_id != context.campaign_id
                 or generation.executor != "local_fake"
-                or generation.provider_state
-                not in {"queued", "generating", "completed", "blocked"}
+                or generation.provider_state not in {"queued", "generating", "completed", "blocked"}
             ):
                 return self._terminal(
                     "image_job_integrity_failed",
@@ -446,4 +449,82 @@ class ImageGenerateHandler:
             outcome=JobExecutionOutcome.BLOCKED,
             error_code=code,
             error_message=message,
+        )
+
+
+class ImageGenerateHandler:
+    """Route only a durably selected image executor to its implementation."""
+
+    retry_safety = RetrySafety.IDEMPOTENT
+
+    def __init__(
+        self,
+        local_fake: LocalFakeImageGenerateHandler | sessionmaker[Session],
+        flow: object | None = None,
+        *,
+        work_root: Path | None = None,
+        clock: Callable[[], datetime] | None = None,
+    ) -> None:
+        # Retain the historical constructor used by recovery callers while the
+        # registered worker passes both concrete implementations explicitly.
+        if isinstance(local_fake, LocalFakeImageGenerateHandler):
+            self._local_fake = local_fake
+            self._flow = flow
+            return
+        if work_root is None:
+            raise TypeError("work_root is required with a session factory")
+        self._local_fake = LocalFakeImageGenerateHandler(
+            local_fake,
+            work_root=work_root,
+            clock=clock,
+        )
+        if flow is None:
+            from auraly_pipeline.images.flow_handler import FlowImageGenerateHandler
+
+            flow = FlowImageGenerateHandler(local_fake, work_root=work_root, clock=clock)
+        self._flow = flow
+
+    def accepts_retry_safety(self, retry_safety: RetrySafety) -> bool:
+        return retry_safety in {
+            RetrySafety.IDEMPOTENT,
+            RetrySafety.RECONCILE_BEFORE_RETRY,
+        }
+
+    def execute(self, context: JobExecutionContext) -> JobExecutionResult:
+        executor = self._executor_for_claim(context)
+        if executor == "local_fake":
+            return self._local_fake.execute(context)
+        if executor == "playwright_python":
+            execute = getattr(self._flow, "execute", None)
+            if callable(execute):
+                return execute(context)
+        return self._terminal_integrity_failure()
+
+    def _executor_for_claim(self, context: JobExecutionContext) -> str | None:
+        with self._local_fake._sessions() as session:
+            generation = session.scalar(
+                select(ImageGenerationRow).where(ImageGenerationRow.job_id == context.job_id)
+            )
+            if (
+                generation is None
+                or context.job_type != "image.generate"
+                or generation.campaign_id != context.campaign_id
+                or context.input != {"imageRequestFingerprint": generation.request_fingerprint}
+                or generation.executor not in {"local_fake", "playwright_python"}
+            ):
+                return None
+            if generation.executor == "local_fake":
+                return "local_fake"
+            # Flow execution has a different recovery policy, but only after the
+            # persisted request selected that executor.
+            if context.attempt_number < 1:
+                return None
+            return "playwright_python"
+
+    @staticmethod
+    def _terminal_integrity_failure() -> JobExecutionResult:
+        return JobExecutionResult(
+            outcome=JobExecutionOutcome.TERMINAL_FAILURE,
+            error_code="image_job_integrity_failed",
+            error_message="The Image Generation job relationship is invalid.",
         )

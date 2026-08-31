@@ -11,7 +11,12 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 from auraly_pipeline.campaigns.persistence import create_sqlite_engine, migrate_database
-from auraly_pipeline.images.db_models import ImageCandidateRow, ImageGenerationRow
+from auraly_pipeline.images.db_models import (
+    FlowCandidateSlotRow,
+    FlowGenerationRunRow,
+    ImageCandidateRow,
+    ImageGenerationRow,
+)
 from auraly_pipeline.images.domain import (
     ImageCandidate,
     ImageCandidateReviewStatus,
@@ -54,9 +59,7 @@ class ImageCandidateNotFoundError(ImageError):
 
 class ImageIdempotencyConflictError(ImageError):
     code = "image_idempotency_conflict"
-    public_message = (
-        "The idempotency key is already used by a different image generation request."
-    )
+    public_message = "The idempotency key is already used by a different image generation request."
 
 
 class ImageCandidateSceneMismatchError(ImageError):
@@ -121,9 +124,11 @@ class ImageService:
         self._jobs.close()
         self._engine.dispose()
 
+    def worker_once(self, worker_id: str, *, lease_seconds: int = 60) -> Job | None:
+        """Run one image Job through the durable worker service."""
+        return self._jobs.worker_once(worker_id, lease_seconds=lease_seconds)
+
     def generate(self, request: ImageGenerateRequest) -> ImageGenerationSubmission:
-        if request.executor != "local_fake":
-            raise ImageError
         request_fingerprint = generation_request_fingerprint(request)
 
         def create_linked(session: Session, job: JobRow) -> ImageGeneration:
@@ -149,6 +154,49 @@ class ImageService:
                 updated_at=timestamp,
             )
             ImageRepository.create_generation_in_session(session, generation)
+            if request.executor == "playwright_python":
+                # The authorization is durable data, never a worker/CLI choice.
+                run_id = str(uuid4())
+                flow_run = FlowGenerationRunRow(
+                    id=run_id,
+                    image_generation_id=generation.image_generation_id,
+                    stage="prepared",
+                    required_candidate_count=2,
+                    required_resolution="2K",
+                    provider_workspace_path=None,
+                    provider_workspace_fingerprint=None,
+                    dispatch_attempt_number=1,
+                    dispatch_intent_at=None,
+                    dispatch_confirmed_at=None,
+                    grid_evidence_path=None,
+                    grid_evidence_sha256=None,
+                    last_failure_code=None,
+                    provider_action_approved_by=request.provider_action_approved_by,
+                    provider_action_approved_at=timestamp,
+                    created_at=timestamp,
+                    updated_at=timestamp,
+                )
+                session.add(flow_run)
+                session.flush()
+                session.add_all(
+                    [
+                        FlowCandidateSlotRow(
+                            id=str(uuid4()),
+                            flow_generation_run_id=run_id,
+                            slot_index=index,
+                            provider_slot_fingerprint=None,
+                            state="pending",
+                            download_intent_at=None,
+                            staging_path=None,
+                            staged_sha256=None,
+                            image_candidate_id=None,
+                            created_at=timestamp,
+                            updated_at=timestamp,
+                        )
+                        for index in range(2)
+                    ]
+                )
+                session.flush()
             return generation
 
         def load_existing(job: Job) -> ImageGeneration:
@@ -214,9 +262,7 @@ class ImageService:
         now = self._utc(self._clock())
 
         def approve(session: Session) -> ImageCandidate:
-            ownership = self._repository.candidate_with_generation_in_session(
-                session, candidate_id
-            )
+            ownership = self._repository.candidate_with_generation_in_session(session, candidate_id)
             if ownership is None:
                 raise ImageCandidateNotFoundError
             candidate, generation = ownership
@@ -248,9 +294,7 @@ class ImageService:
         now = self._utc(self._clock())
 
         def reject(session: Session) -> ImageCandidate:
-            ownership = self._repository.candidate_with_generation_in_session(
-                session, candidate_id
-            )
+            ownership = self._repository.candidate_with_generation_in_session(session, candidate_id)
             if ownership is None:
                 raise ImageCandidateNotFoundError
             candidate, _generation = ownership
@@ -304,9 +348,7 @@ class ImageService:
 
         return self._review_transaction(replace)
 
-    def _review_transaction(
-        self, operation: Callable[[Session], ImageCandidate]
-    ) -> ImageCandidate:
+    def _review_transaction(self, operation: Callable[[Session], ImageCandidate]) -> ImageCandidate:
         try:
             return self._repository.immediate_transaction(operation)
         except IntegrityError as exc:

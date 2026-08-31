@@ -251,3 +251,40 @@ def test_fake_handler_rejects_symlinked_generation_path_outside_configured_work_
     images = ImageService.for_database(database, work_root=work_root)
     assert images.list_candidates(generation_id) == []
     images.close()
+
+
+def test_default_image_job_still_uses_local_fake_without_flow_import_or_launch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Changing the image router must not alter the established fake boundary."""
+    database = tmp_path / "default-fake.db"
+    work_root = tmp_path / "work"
+    campaign_id, scene_variant_id = _campaign(database)
+
+    import auraly_pipeline.images.flow_handler as flow_handler
+
+    def fail_runtime(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("local_fake must not construct a Flow runtime")
+
+    monkeypatch.setattr(flow_handler, "_build_flow_runtime", fail_runtime)
+    images = ImageService.for_database(database, work_root=work_root)
+    submission = images.generate(
+        ImageGenerateRequest(
+            campaign_id=campaign_id,
+            scene_variant_id=scene_variant_id,
+            idempotency_key="default-fake-router",
+            prompt_snapshot="A moonlit studio",
+        )
+    )
+
+    completed = images.worker_once("worker-1")
+
+    assert completed is not None
+    assert completed.status == "completed"
+    assert completed.output == {
+        "candidateCount": 2,
+        "imageGenerationId": submission.generation.image_generation_id,
+    }
+    assert len(images.list_candidates(submission.generation.image_generation_id)) == 2
+    images.close()
