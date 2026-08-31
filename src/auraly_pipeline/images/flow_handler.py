@@ -8,7 +8,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
-from sqlalchemy import select, update
+from sqlalchemy import select, text, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 from auraly_pipeline.campaigns.db_models import CampaignRow, SceneVariantRow
@@ -221,7 +222,7 @@ class FlowGenerationCheckpointSink:
             ).rowcount
             if changed != 1:
                 session.rollback()
-                raise ValueError("Flow checkpoint compare-and-set failed")
+                raise FlowCheckpointConflictError()
             session.commit()
         self._reload_run(target)
 
@@ -515,34 +516,46 @@ class FlowImageGenerateHandler:
         verified = inspect_flow_artifact(final)
         if verified != facts:
             raise FlowArtifactConflictError()
-        with self._sessions() as session:
-            slot = session.scalar(
-                select(FlowCandidateSlotRow).where(
-                    FlowCandidateSlotRow.flow_generation_run_id == run_id,
-                    FlowCandidateSlotRow.slot_index == index,
-                )
-            )
-            if slot is None or slot.state != "downloaded" or slot.staged_sha256 != facts.sha256:
-                raise FlowArtifactConflictError()
-            candidate = ImageCandidate(
-                image_candidate_id=str(uuid4()),
-                image_generation_id=generation.id,
-                candidate_index=index,
-                source_path=final.relative_to(self._work_root).as_posix(),
-                sha256=facts.sha256,
-                width=facts.width,
-                height=facts.height,
-                size_bytes=facts.size_bytes,
-                format=facts.format,
-                review_status="pending_review",
-                created_at=self._clock(),
-                updated_at=self._clock(),
-            )
-            ImageRepository.create_candidate_in_session(session, candidate)
-            slot.image_candidate_id = candidate.image_candidate_id
-            slot.state = "ingested"
-            slot.updated_at = self._clock()
-            session.commit()
+        candidate = ImageCandidate(
+            image_candidate_id=str(uuid4()),
+            image_generation_id=generation.id,
+            candidate_index=index,
+            source_path=final.relative_to(self._work_root).as_posix(),
+            sha256=facts.sha256,
+            width=facts.width,
+            height=facts.height,
+            size_bytes=facts.size_bytes,
+            format=facts.format,
+            review_status="pending_review",
+            created_at=self._clock(),
+            updated_at=self._clock(),
+        )
+        try:
+            with self._sessions() as session:
+                session.execute(text("BEGIN IMMEDIATE"))
+                ImageRepository.create_candidate_in_session(session, candidate)
+                changed = session.execute(
+                    update(FlowCandidateSlotRow)
+                    .where(
+                        FlowCandidateSlotRow.flow_generation_run_id == run_id,
+                        FlowCandidateSlotRow.slot_index == index,
+                        FlowCandidateSlotRow.state == "downloaded",
+                        FlowCandidateSlotRow.staged_sha256 == facts.sha256,
+                        FlowCandidateSlotRow.image_candidate_id.is_(None),
+                    )
+                    .values(
+                        image_candidate_id=candidate.image_candidate_id,
+                        state="ingested",
+                        updated_at=self._clock(),
+                    )
+                ).rowcount
+                if changed != 1:
+                    session.rollback()
+                    raise FlowCheckpointConflictError()
+                session.commit()
+        except IntegrityError as exc:
+            raise FlowCheckpointConflictError() from exc
+        self._reload_ingested_slot(run_id, index, candidate.image_candidate_id)
 
     def _recover_downloaded_facts(
         self, generation: ImageGenerationRow, slot: FlowCandidateSlotRow
@@ -600,6 +613,7 @@ class FlowImageGenerateHandler:
 
     def _complete(self, generation_id: str, run_id: str) -> None:
         with self._sessions() as session:
+            session.execute(text("BEGIN IMMEDIATE"))
             run = session.get(FlowGenerationRunRow, run_id)
             generation = session.get(ImageGenerationRow, generation_id)
             slots = list(
@@ -616,14 +630,53 @@ class FlowImageGenerateHandler:
                 or [slot.state for slot in sorted(slots, key=lambda item: item.slot_index)]
                 != ["ingested", "ingested"]
             ):
-                raise FlowArtifactConflictError()
+                session.rollback()
+                raise FlowCheckpointConflictError()
             now = self._clock()
-            run.stage = "completed"
-            run.updated_at = now
-            generation.provider_state = "completed"
-            generation.completed_at = now
-            generation.updated_at = now
+            run_changed = session.execute(
+                update(FlowGenerationRunRow)
+                .where(
+                    FlowGenerationRunRow.id == run_id,
+                    FlowGenerationRunRow.stage == "downloading",
+                )
+                .values(stage="completed", updated_at=now)
+            ).rowcount
+            generation_changed = session.execute(
+                update(ImageGenerationRow)
+                .where(
+                    ImageGenerationRow.id == generation_id,
+                    ImageGenerationRow.provider_state == "generating",
+                )
+                .values(provider_state="completed", completed_at=now, updated_at=now)
+            ).rowcount
+            if run_changed != 1 or generation_changed != 1:
+                session.rollback()
+                raise FlowCheckpointConflictError()
             session.commit()
+        self._reload_completed(run_id, generation_id)
+
+    def _reload_ingested_slot(self, run_id: str, index: int, candidate_id: str) -> None:
+        with self._sessions() as session:
+            slot = session.scalar(
+                select(FlowCandidateSlotRow).where(
+                    FlowCandidateSlotRow.flow_generation_run_id == run_id,
+                    FlowCandidateSlotRow.slot_index == index,
+                )
+            )
+            if slot is None or slot.state != "ingested" or slot.image_candidate_id != candidate_id:
+                raise FlowCheckpointConflictError()
+
+    def _reload_completed(self, run_id: str, generation_id: str) -> None:
+        with self._sessions() as session:
+            run = session.get(FlowGenerationRunRow, run_id)
+            generation = session.get(ImageGenerationRow, generation_id)
+            if (
+                run is None
+                or generation is None
+                or run.stage != "completed"
+                or generation.provider_state != "completed"
+            ):
+                raise FlowCheckpointConflictError()
 
     def _completed_if_intact(
         self, generation: ImageGenerationRow, slots: list[FlowCandidateSlotRow]

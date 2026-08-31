@@ -3,14 +3,20 @@ from __future__ import annotations
 import hashlib
 from contextlib import contextmanager
 from pathlib import Path
+from uuid import uuid4
 
 from playwright.sync_api import sync_playwright
-from sqlalchemy import select
+import pytest
+from sqlalchemy import select, text
 
 from auraly_pipeline.campaigns.domain import CampaignCreate
 from auraly_pipeline.campaigns.service import CampaignService
 from auraly_pipeline.images.domain import ImageGenerateRequest
-from auraly_pipeline.images.flow_handler import FlowImageGenerateHandler
+from auraly_pipeline.images.flow_handler import (
+    FlowCheckpointConflictError,
+    FlowGenerationCheckpointSink,
+    FlowImageGenerateHandler,
+)
 from auraly_pipeline.images.service import ImageService
 from auraly_pipeline.jobs.handlers import JobExecutionContext
 from tests.test_campaign_domain import valid_campaign_data
@@ -18,7 +24,58 @@ from tests.test_flow_generation import LOCAL_TARGET, _fixture_url
 from auraly_pipeline.flow.config import FlowGenerationConfig
 from auraly_pipeline.flow.generation import FlowGenerationRuntime
 from auraly_pipeline.images.db_models import FlowGenerationRunRow
-from auraly_pipeline.images.db_models import FlowCandidateSlotRow
+from auraly_pipeline.images.db_models import FlowCandidateSlotRow, ImageGenerationRow
+from auraly_pipeline.campaigns.db_models import SceneVariantRow
+from auraly_pipeline.jobs.db_models import JobEventRow, JobRow
+
+
+def test_run_checkpoint_conflict_uses_typed_flow_error(tmp_path: Path) -> None:
+    """A stale run checkpoint must reach the Flow-safe conflict boundary."""
+    database = tmp_path / "checkpoint-conflict.db"
+    work_root = tmp_path / "work"
+    campaigns = CampaignService.for_database(database)
+    campaign = campaigns.create_campaign(CampaignCreate.model_validate(valid_campaign_data()))
+    campaigns.close()
+    reference = work_root / "references" / "avatar.png"
+    reference.parent.mkdir(parents=True)
+    reference.write_bytes(b"reference")
+    workspace_path = "fx/tools/flow/local-workspace"
+    images = ImageService.for_database(database, work_root=work_root)
+    submission = images.generate(
+        ImageGenerateRequest(
+            campaign_id=campaign.campaign_id,
+            scene_variant_id=campaign.scene_variants[0].scene_variant_id,
+            idempotency_key="checkpoint-conflict",
+            prompt_snapshot="prompt",
+            reference_image_path="references/avatar.png",
+            reference_image_sha256=hashlib.sha256(reference.read_bytes()).hexdigest(),
+            executor="playwright_python",
+            generation_contract_version="flow-generation-v1",
+            provider_action_confirmed=True,
+            provider_action_approved_by="operator",
+            provider_workspace_path=workspace_path,
+            provider_workspace_fingerprint=hashlib.sha256(workspace_path.encode()).hexdigest(),
+        )
+    )
+    with images._sessions() as session:
+        run = session.scalar(
+            select(FlowGenerationRunRow).where(
+                FlowGenerationRunRow.image_generation_id
+                == submission.generation.image_generation_id
+            )
+        )
+        assert run is not None
+        run.stage = "blocked"
+        session.commit()
+    sink = FlowGenerationCheckpointSink(
+        images._sessions, run_id=run.id, clock=lambda: run.created_at
+    )
+
+    with pytest.raises(FlowCheckpointConflictError):
+        sink.record_inputs_verified(
+            type("Observation", (), {"reference_verified": True, "prompt_verified": True})()
+        )
+    images.close()
 
 
 def test_playwright_image_submission_creates_authorized_durable_flow_run(tmp_path: Path) -> None:
@@ -117,6 +174,147 @@ def test_invalid_flow_reference_is_terminal_before_runtime_construction(tmp_path
     assert result.outcome == "terminal_failure"
     assert result.error_code == "image_job_integrity_failed"
     assert runtime_calls == 0
+    images.close()
+
+
+@pytest.mark.parametrize(
+    "corruption",
+    [
+        "job_fingerprint",
+        "scene_ownership",
+        "executor_policy",
+        "authorization_event",
+        "workspace_and_reference_sha",
+        "run_contract",
+        "missing_slot",
+        "extra_slot",
+        "completed_missing_artifact",
+    ],
+)
+def test_flow_integrity_matrix_rejects_before_runtime_construction(
+    tmp_path: Path, corruption: str
+) -> None:
+    """Every persisted authorization/integrity break stops before the browser seam."""
+    database = tmp_path / f"integrity-{corruption}.db"
+    work_root = tmp_path / "work"
+    campaigns = CampaignService.for_database(database)
+    campaign = campaigns.create_campaign(CampaignCreate.model_validate(valid_campaign_data()))
+    other_campaign_id: str | None = None
+    if corruption == "scene_ownership":
+        other_data = valid_campaign_data()
+        other_data["campaignId"] = "other-campaign"
+        other_campaign_id = campaigns.create_campaign(
+            CampaignCreate.model_validate(other_data)
+        ).campaign_id
+    campaigns.close()
+    reference = work_root / "references" / "avatar.png"
+    reference.parent.mkdir(parents=True)
+    reference.write_bytes(b"reference-image")
+    workspace_path = "fx/tools/flow/local-workspace"
+    images = ImageService.for_database(database, work_root=work_root)
+    submission = images.generate(
+        ImageGenerateRequest(
+            campaign_id=campaign.campaign_id,
+            scene_variant_id=campaign.scene_variants[0].scene_variant_id,
+            idempotency_key=f"integrity-{corruption.replace('authorization', 'auth')}",
+            prompt_snapshot="A moonlit studio",
+            reference_image_path="references/avatar.png",
+            reference_image_sha256=hashlib.sha256(reference.read_bytes()).hexdigest(),
+            executor="playwright_python",
+            generation_contract_version="flow-generation-v1",
+            provider_action_confirmed=True,
+            provider_action_approved_by="creative-operator",
+            provider_workspace_path=workspace_path,
+            provider_workspace_fingerprint=hashlib.sha256(workspace_path.encode()).hexdigest(),
+        )
+    )
+    with images._sessions() as session:
+        job = session.get(JobRow, submission.job.job_id)
+        run = session.scalar(
+            select(FlowGenerationRunRow).where(
+                FlowGenerationRunRow.image_generation_id
+                == submission.generation.image_generation_id
+            )
+        )
+        slots = list(
+            session.scalars(
+                select(FlowCandidateSlotRow).where(
+                    FlowCandidateSlotRow.flow_generation_run_id == run.id
+                )
+            )
+        )
+        assert job is not None and run is not None and len(slots) == 2
+        if corruption == "job_fingerprint":
+            job.request_fingerprint = "0" * 64
+        elif corruption == "scene_ownership":
+            assert other_campaign_id is not None
+            job.campaign_id = other_campaign_id
+        elif corruption == "executor_policy":
+            job.retry_safety = "idempotent"
+        elif corruption == "authorization_event":
+            authorization = session.scalar(
+                select(JobEventRow).where(
+                    JobEventRow.job_id == job.id,
+                    JobEventRow.event_type == "job.authorized",
+                )
+            )
+            assert authorization is not None
+            authorization.metadata_json = {"executor": "local_fake"}
+        elif corruption == "workspace_and_reference_sha":
+            run.provider_workspace_path = "../outside"
+            reference.write_bytes(b"tampered-reference")
+        elif corruption == "run_contract":
+            session.execute(text("PRAGMA ignore_check_constraints = ON"))
+            run.required_resolution = "1K"
+        elif corruption == "missing_slot":
+            session.delete(slots[1])
+        elif corruption == "extra_slot":
+            session.execute(text("PRAGMA ignore_check_constraints = ON"))
+            session.add(
+                FlowCandidateSlotRow(
+                    id=str(uuid4()),
+                    flow_generation_run_id=run.id,
+                    slot_index=2,
+                    provider_slot_fingerprint=None,
+                    state="pending",
+                    download_intent_at=None,
+                    staging_path=None,
+                    staged_sha256=None,
+                    image_candidate_id=None,
+                    created_at=run.created_at,
+                    updated_at=run.updated_at,
+                )
+            )
+        else:
+            session.execute(text("PRAGMA ignore_check_constraints = ON"))
+            run.stage = "completed"
+            generation = session.get(ImageGenerationRow, submission.generation.image_generation_id)
+            assert generation is not None
+            generation.provider_state = "completed"
+            for slot in slots:
+                slot.state = "ingested"
+        session.commit()
+    calls = 0
+
+    def factory(*_args: object) -> object:
+        nonlocal calls
+        calls += 1
+        raise AssertionError("integrity rejection must precede browser construction")
+
+    result = FlowImageGenerateHandler(
+        images._sessions, work_root=work_root, _runtime_factory=factory
+    ).execute(
+        JobExecutionContext(
+            job_id=submission.job.job_id,
+            job_type="image.generate",
+            campaign_id=campaign.campaign_id,
+            input=submission.job.input,
+            attempt_number=1,
+        )
+    )
+    assert result.outcome == "terminal_failure"
+    assert result.error_code == "image_job_integrity_failed"
+    assert calls == 0
     images.close()
 
 
