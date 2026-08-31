@@ -1193,23 +1193,31 @@ def test_download_records_intent_before_exact_2k_action(
     ]
 
 
-def test_unrelated_download_event_cannot_satisfy_slot(
+def test_unrelated_download_event_cannot_satisfy_slot_when_selected_action_emits_none(
     flow_generation_page: Page,
     tmp_path: Path,
 ) -> None:
     runtime = _task9_runtime("grid-two.html", flow_generation_page, tmp_path)
     checkpoint_sink = _Task9CheckpointSink(flow_generation_page)
     runtime.observe_candidates(checkpoint_sink)
-    runtime.inject_unrelated_download_before_slot()
+    selected_action = flow_generation_page.locator(
+        "[data-flow-candidate-id='candidate-a'] button"
+    )
+    selected_action.evaluate("button => button.dataset.downloadDisabled = 'true'")
+    flow_generation_page.evaluate(
+        """() => window.setTimeout(
+            () => document.querySelector('[aria-label="Unrelated download"]').click(),
+            50,
+        )"""
+    )
 
     with pytest.raises(FlowDownloadCorrelationError):
         runtime.download_slot(0, checkpoint_sink)
 
     assert checkpoint_sink.slot_state(0) == "download_intent_recorded"
-    assert flow_generation_page.evaluate("window.flowDownloadActions") == [
-        "unrelated",
-        "candidate-a",
-    ]
+    assert checkpoint_sink.slot_state(1) == "observed"
+    assert not list(tmp_path.rglob("candidate-0000.png"))
+    assert flow_generation_page.evaluate("window.flowDownloadActions") == ["unrelated"]
 
 
 @pytest.mark.parametrize("event_case", ["none", "two", "cancelled"])
@@ -1241,6 +1249,28 @@ def test_download_requires_one_successful_event_from_the_exact_action(
 
     assert checkpoint_sink.slot_state(0) == "download_intent_recorded"
     assert checkpoint_sink.slot_state(1) == "observed"
+
+
+def test_delayed_second_event_from_selected_action_fails_before_artifact_publication(
+    flow_generation_page: Page,
+    tmp_path: Path,
+) -> None:
+    runtime = _task9_runtime("grid-two.html", flow_generation_page, tmp_path)
+    checkpoint_sink = _Task9CheckpointSink(flow_generation_page)
+    runtime.observe_candidates(checkpoint_sink)
+    flow_generation_page.locator("[data-flow-candidate-id='candidate-a'] button").evaluate(
+        """button => {
+            button.dataset.downloadCount = '2';
+            button.dataset.downloadDelayMs = '50';
+        }"""
+    )
+
+    with pytest.raises(FlowDownloadCorrelationError):
+        runtime.download_slot(0, checkpoint_sink)
+
+    assert checkpoint_sink.slot_state(0) == "download_intent_recorded"
+    assert checkpoint_sink.slot_state(1) == "observed"
+    assert not list(tmp_path.rglob("candidate-0000.png"))
 
 
 @pytest.mark.parametrize("artifact_case", ["partial", "1k"])

@@ -69,6 +69,7 @@ _EVIDENCE_MASK_LABELS = (
     "Reference preview",
     "Upload filename",
 )
+_DOWNLOAD_QUIESCENCE_MILLISECONDS = 100
 
 
 class FlowGenerationCheckpointSink(Protocol):
@@ -162,7 +163,6 @@ class FlowGenerationRuntime:
         self._monotonic = _monotonic
         self._artifact_context = artifact_context
         self._crash_point: str | None = None
-        self._inject_unrelated_download = False
         self._download_actions: list[tuple[int, str]] = []
 
     def inject_crash(self, crash_point: str) -> None:
@@ -170,10 +170,6 @@ class FlowGenerationRuntime:
         if crash_point not in _CRASH_POINTS:
             raise ValueError("unknown generation crash point")
         self._crash_point = crash_point
-
-    def inject_unrelated_download_before_slot(self) -> None:
-        """Private deterministic seam proving an unrelated event makes correlation fail."""
-        self._inject_unrelated_download = True
 
     @property
     def download_actions(self) -> list[tuple[int, str]]:
@@ -512,28 +508,22 @@ class FlowGenerationRuntime:
         def observe(download: Download) -> None:
             events.append(download)
 
+        # Drain already-scheduled browser work before arming the exact-action
+        # boundary, so a pre-existing provider download cannot satisfy it.
+        page.wait_for_timeout(_DOWNLOAD_QUIESCENCE_MILLISECONDS)
         page.on("download", observe)
         try:
+            self._download_actions.append((slot_index, "2K"))
             with page.expect_download(
                 timeout=self._config.download_timeout_seconds * 1000
             ) as pending:
-                if self._inject_unrelated_download:
-                    self._inject_unrelated_download = False
-                    unrelated = page.get_by_role(
-                        "button", name="Unrelated download", exact=True
-                    )
-                    matches = tuple(
-                        candidate
-                        for candidate in unrelated.all()
-                        if candidate.is_visible() and candidate.is_enabled()
-                    )
-                    if len(matches) != 1:
-                        raise FlowDownloadCorrelationError()
-                    matches[0].click()
-                self._download_actions.append((slot_index, "2K"))
                 action.click()
             download = pending.value
-            page.wait_for_timeout(0)
+            if len(events) != 1 or events[0] is not download:
+                raise FlowDownloadCorrelationError()
+            # Keep the scoped listener through a bounded quiescence interval so a
+            # second event caused by this single provider action cannot be missed.
+            page.wait_for_timeout(_DOWNLOAD_QUIESCENCE_MILLISECONDS)
             if len(events) != 1:
                 raise FlowDownloadCorrelationError()
             return download
