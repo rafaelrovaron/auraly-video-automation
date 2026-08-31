@@ -18,6 +18,7 @@ from tests.test_flow_generation import LOCAL_TARGET, _fixture_url
 from auraly_pipeline.flow.config import FlowGenerationConfig
 from auraly_pipeline.flow.generation import FlowGenerationRuntime
 from auraly_pipeline.images.db_models import FlowGenerationRunRow
+from auraly_pipeline.images.db_models import FlowCandidateSlotRow
 
 
 def test_playwright_image_submission_creates_authorized_durable_flow_run(tmp_path: Path) -> None:
@@ -217,4 +218,65 @@ def test_local_playwright_flow_job_ingests_two_2k_candidates(tmp_path: Path) -> 
     candidates = images.list_candidates(submission.generation.image_generation_id)
     assert [candidate.candidate_index for candidate in candidates] == [0, 1]
     assert all(max(candidate.width, candidate.height) >= 2048 for candidate in candidates)
+    images.close()
+
+
+def test_download_intent_slot_is_rejected_before_runtime_construction(tmp_path: Path) -> None:
+    """An ambiguous post-intent slot must not re-enter the browser runtime."""
+    # Reuse the persisted Flow request shape, then advance only its unsafe slot checkpoint.
+    database = tmp_path / "intent-slot.db"
+    work_root = tmp_path / "work"
+    campaigns = CampaignService.for_database(database)
+    campaign = campaigns.create_campaign(CampaignCreate.model_validate(valid_campaign_data()))
+    campaigns.close()
+    reference = work_root / "references" / "avatar.png"
+    reference.parent.mkdir(parents=True)
+    reference.write_bytes(b"reference")
+    workspace_path = "fx/tools/flow/local-workspace"
+    images = ImageService.for_database(database, work_root=work_root)
+    submission = images.generate(
+        ImageGenerateRequest(
+            campaign_id=campaign.campaign_id,
+            scene_variant_id=campaign.scene_variants[0].scene_variant_id,
+            idempotency_key="intent-slot",
+            prompt_snapshot="prompt",
+            reference_image_path="references/avatar.png",
+            reference_image_sha256=hashlib.sha256(reference.read_bytes()).hexdigest(),
+            executor="playwright_python",
+            generation_contract_version="flow-generation-v1",
+            provider_action_confirmed=True,
+            provider_action_approved_by="operator",
+            provider_workspace_path=workspace_path,
+            provider_workspace_fingerprint=hashlib.sha256(workspace_path.encode()).hexdigest(),
+        )
+    )
+    with images._sessions() as session:
+        slot = session.scalar(
+            select(FlowCandidateSlotRow).where(FlowCandidateSlotRow.slot_index == 0)
+        )
+        assert slot is not None
+        slot.provider_slot_fingerprint = "a" * 64
+        slot.download_intent_at = slot.created_at
+        slot.state = "download_intent_recorded"
+        session.commit()
+    calls = 0
+
+    def factory(*_args: object) -> object:
+        nonlocal calls
+        calls += 1
+        raise AssertionError("must not construct runtime")
+
+    result = FlowImageGenerateHandler(
+        images._sessions, work_root=work_root, _runtime_factory=factory
+    ).execute(
+        JobExecutionContext(
+            job_id=submission.job.job_id,
+            job_type="image.generate",
+            campaign_id=campaign.campaign_id,
+            input=submission.job.input,
+            attempt_number=1,
+        )
+    )
+    assert result.error_code == "image_job_integrity_failed"
+    assert calls == 0
     images.close()

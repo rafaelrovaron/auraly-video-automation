@@ -55,6 +55,10 @@ def _utc_now() -> datetime:
     return datetime.now(UTC)
 
 
+class FlowCheckpointConflictError(RuntimeError):
+    pass
+
+
 def _build_flow_runtime(context: FlowGenerationArtifactContext) -> FlowGenerationRuntime:
     """Production construction has no target or browser override seam."""
     return FlowGenerationRuntime(
@@ -98,17 +102,22 @@ class FlowGenerationCheckpointSink:
         if slot_index not in {0, 1} or observation.semantic_order != slot_index:
             raise ValueError("unexpected Flow candidate slot")
         with self._sessions() as session:
-            slot = self._slot(session, slot_index)
-            if (
-                slot.state == "observed"
-                and slot.provider_slot_fingerprint == observation.fingerprint
-            ):
-                return
-            if slot.state != "pending":
-                raise ValueError("candidate slot is already bound")
-            slot.provider_slot_fingerprint = observation.fingerprint
-            slot.state = "observed"
-            slot.updated_at = self._clock()
+            changed = session.execute(
+                update(FlowCandidateSlotRow)
+                .where(
+                    FlowCandidateSlotRow.flow_generation_run_id == self._run_id,
+                    FlowCandidateSlotRow.slot_index == slot_index,
+                    FlowCandidateSlotRow.state == "pending",
+                )
+                .values(
+                    provider_slot_fingerprint=observation.fingerprint,
+                    state="observed",
+                    updated_at=self._clock(),
+                )
+            ).rowcount
+            if changed != 1:
+                session.rollback()
+                raise FlowCheckpointConflictError()
             session.commit()
         self._reload_slot(slot_index, "observed")
 
@@ -141,7 +150,7 @@ class FlowGenerationCheckpointSink:
             ):
                 return
             if slot.state != "observed" or slot.provider_slot_fingerprint != fingerprint:
-                raise ValueError("download intent does not match its bound slot")
+                raise FlowCheckpointConflictError()
             slot.state = "download_intent_recorded"
             slot.download_intent_at = self._clock()
             slot.updated_at = self._clock()
@@ -156,13 +165,23 @@ class FlowGenerationCheckpointSink:
 
     def record_downloaded(self, slot_index: int, *, relative_path: str, sha256: str) -> None:
         with self._sessions() as session:
-            slot = self._slot(session, slot_index)
-            if slot.state != "download_intent_recorded":
-                raise ValueError("download is missing an intent checkpoint")
-            slot.state = "downloaded"
-            slot.staging_path = relative_path
-            slot.staged_sha256 = sha256
-            slot.updated_at = self._clock()
+            changed = session.execute(
+                update(FlowCandidateSlotRow)
+                .where(
+                    FlowCandidateSlotRow.flow_generation_run_id == self._run_id,
+                    FlowCandidateSlotRow.slot_index == slot_index,
+                    FlowCandidateSlotRow.state == "download_intent_recorded",
+                )
+                .values(
+                    state="downloaded",
+                    staging_path=relative_path,
+                    staged_sha256=sha256,
+                    updated_at=self._clock(),
+                )
+            ).rowcount
+            if changed != 1:
+                session.rollback()
+                raise FlowCheckpointConflictError()
             session.commit()
         self._reload_slot(slot_index, "downloaded")
 
@@ -336,6 +355,9 @@ class FlowImageGenerateHandler:
         except FlowArtifactConflictError:
             self._set_run_failure(run.id, "blocked", "flow_artifact_conflict")
             return self._blocked("flow_artifact_conflict")
+        except FlowCheckpointConflictError:
+            self._set_run_failure(run.id, "blocked", "flow_recovery_blocked")
+            return self._blocked("flow_recovery_blocked")
         except FlowGenerationRuntimeError:
             self._set_run_failure(run.id, "blocked", "flow_ui_contract_failed")
             return self._blocked("flow_ui_contract_failed")
@@ -405,6 +427,8 @@ class FlowImageGenerateHandler:
                 )
             )
             if [slot.slot_index for slot in slots] != [0, 1]:
+                return None
+            if any(slot.state == "download_intent_recorded" for slot in slots):
                 return None
             authorization = session.scalar(
                 select(JobEventRow).where(
