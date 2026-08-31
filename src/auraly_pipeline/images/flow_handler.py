@@ -465,6 +465,16 @@ class FlowImageGenerateHandler:
                 expected_stage=sink.run_stage,
             )
             return self._blocked("flow_recovery_blocked")
+        except DBAPIError as error:
+            if not _is_database_concurrency_error(error):
+                raise
+            self._set_run_failure(
+                run.id,
+                "blocked",
+                "flow_recovery_blocked",
+                expected_stage=sink.run_stage,
+            )
+            return self._blocked("flow_recovery_blocked")
         except FlowGenerationRuntimeError:
             self._set_run_failure(
                 run.id,

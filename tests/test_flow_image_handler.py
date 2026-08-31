@@ -706,11 +706,13 @@ def test_stale_checkpoint_conflict_does_not_regress_advanced_run(tmp_path: Path)
     images.close()
 
 
-def test_begin_immediate_lock_returns_blocked_without_corrupting_completed_slots(
+@pytest.mark.parametrize("lock_boundary", ["begin_immediate", "post_commit_reload"])
+def test_completion_database_lock_returns_blocked_without_corrupting_committed_state(
     tmp_path: Path,
+    lock_boundary: str,
 ) -> None:
-    """A locked completion transaction preserves both ingested candidates and artifacts."""
-    database = tmp_path / "completion-lock.db"
+    """Completion contention preserves both ingested candidates and committed checkpoints."""
+    database = tmp_path / f"completion-{lock_boundary}-lock.db"
     work_root = tmp_path / "work"
     campaigns = CampaignService.for_database(database)
     campaign = campaigns.create_campaign(CampaignCreate.model_validate(valid_campaign_data()))
@@ -724,7 +726,7 @@ def test_begin_immediate_lock_returns_blocked_without_corrupting_completed_slots
         ImageGenerateRequest(
             campaign_id=campaign.campaign_id,
             scene_variant_id=campaign.scene_variants[0].scene_variant_id,
-            idempotency_key="completion-lock",
+            idempotency_key=f"completion-lock-{lock_boundary}",
             prompt_snapshot="prompt",
             reference_image_path="references/avatar.png",
             reference_image_sha256=hashlib.sha256(reference.read_bytes()).hexdigest(),
@@ -791,7 +793,7 @@ def test_begin_immediate_lock_returns_blocked_without_corrupting_completed_slots
         def reconcile(self, _workspace: object, _sink: object) -> None:
             return None
 
-    def lock_begin_immediate(
+    def lock_completion_boundary(
         _connection: object,
         _cursor: object,
         statement: str,
@@ -800,7 +802,19 @@ def test_begin_immediate_lock_returns_blocked_without_corrupting_completed_slots
         _executemany: bool,
     ) -> None:
         nonlocal armed
-        if armed and statement.strip().upper() == "BEGIN IMMEDIATE":
+        normalized = " ".join(statement.upper().split())
+        if (
+            lock_boundary == "post_commit_reload"
+            and normalized.startswith("UPDATE FLOW_GENERATION_RUNS SET")
+        ):
+            armed = True
+            return
+        locked_begin = lock_boundary == "begin_immediate" and normalized == "BEGIN IMMEDIATE"
+        locked_reload = (
+            lock_boundary == "post_commit_reload"
+            and normalized.startswith("SELECT FLOW_GENERATION_RUNS")
+        )
+        if armed and (locked_begin or locked_reload):
             armed = False
             raise OperationalError(
                 statement,
@@ -810,10 +824,10 @@ def test_begin_immediate_lock_returns_blocked_without_corrupting_completed_slots
 
     def runtime_factory(_context: object) -> CompletionRuntime:
         nonlocal armed
-        armed = True
+        armed = lock_boundary == "begin_immediate"
         return CompletionRuntime()
 
-    event.listen(images._engine, "before_cursor_execute", lock_begin_immediate)
+    event.listen(images._engine, "before_cursor_execute", lock_completion_boundary)
     try:
         result = FlowImageGenerateHandler(
             images._sessions,
@@ -829,7 +843,7 @@ def test_begin_immediate_lock_returns_blocked_without_corrupting_completed_slots
             )
         )
     finally:
-        event.remove(images._engine, "before_cursor_execute", lock_begin_immediate)
+        event.remove(images._engine, "before_cursor_execute", lock_completion_boundary)
 
     assert result.outcome == "blocked"
     assert result.error_code == "flow_recovery_blocked"
@@ -851,7 +865,16 @@ def test_begin_immediate_lock_returns_blocked_without_corrupting_completed_slots
             )
         )
         assert run is not None
-        assert run.stage == "blocked"
-        assert run.last_failure_code == "flow_recovery_blocked"
+        if lock_boundary == "begin_immediate":
+            assert run.stage == "blocked"
+            assert run.last_failure_code == "flow_recovery_blocked"
+        else:
+            assert run.stage == "completed"
+            assert run.last_failure_code is None
+            generation = session.get(
+                ImageGenerationRow, submission.generation.image_generation_id
+            )
+            assert generation is not None
+            assert generation.provider_state == "completed"
         assert [candidate.sha256 for candidate in candidates] == expected_hashes
     images.close()
