@@ -771,6 +771,52 @@ def test_recover_generation_revalidates_job_before_pre_intent_reset(
     service.close()
 
 
+def test_recover_generation_revalidates_computed_reason_before_final_resume(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service, _work_root, generation_id, job_id = _flow_service(tmp_path)
+    run, _slots = _run_and_slots(service, generation_id)
+    original_audit_and_resume = service._audit_and_resume_recovered_job
+    state_after_interleave: list[tuple[object, ...]] = []
+
+    def audit_after_reason_becomes_false(
+        requested_generation_id: str,
+        *,
+        expected_job_id: str,
+        reconciled_by: str,
+        reason: FlowReconciliationReason,
+    ):
+        with service._sessions() as session:
+            persisted_run = session.get(FlowGenerationRunRow, run.id)
+            generation = session.get(ImageGenerationRow, generation_id)
+            assert persisted_run is not None and generation is not None
+            persisted_run.stage = "ambiguous"
+            persisted_run.dispatch_intent_at = NOW
+            generation.provider_state = "blocked"
+            session.commit()
+        state_after_interleave.append(_recovery_db_snapshot(service, generation_id, job_id))
+        return original_audit_and_resume(
+            requested_generation_id,
+            expected_job_id=expected_job_id,
+            reconciled_by=reconciled_by,
+            reason=reason,
+        )
+
+    monkeypatch.setattr(
+        service,
+        "_audit_and_resume_recovered_job",
+        audit_after_reason_becomes_false,
+    )
+
+    with pytest.raises(ImageRecoveryBlockedError):
+        service.recover_generation(generation_id, reconciled_by="operator-1")
+
+    assert len(state_after_interleave) == 1
+    assert _recovery_db_snapshot(service, generation_id, job_id) == state_after_interleave[0]
+    service.close()
+
+
 def test_recover_generation_redownloads_only_the_same_durable_intent_slot(
     tmp_path: Path,
 ) -> None:
@@ -939,6 +985,58 @@ def test_resolve_no_dispatch_revalidates_inside_atomic_transaction(
     service.close()
 
 
+def test_resolve_no_dispatch_revalidates_flow_state_in_resume_transaction(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service, _work_root, generation_id, job_id = _flow_service(tmp_path)
+    run, slots = _run_and_slots(service, generation_id)
+    with service._sessions() as session:
+        persisted_run = session.get(FlowGenerationRunRow, run.id)
+        generation = session.get(ImageGenerationRow, generation_id)
+        assert persisted_run is not None and generation is not None
+        persisted_run.stage = "ambiguous"
+        persisted_run.dispatch_intent_at = NOW
+        generation.provider_state = "blocked"
+        session.commit()
+    original_immediate_transaction = service._repository.immediate_transaction
+    transaction_calls = 0
+    state_after_interleave: list[tuple[object, ...]] = []
+
+    def immediate_transaction_with_slot_corruption(operation):
+        nonlocal transaction_calls
+        transaction_calls += 1
+        result = original_immediate_transaction(operation)
+        if transaction_calls == 1:
+            with service._sessions() as session:
+                slot = session.get(FlowCandidateSlotRow, slots[0].id)
+                assert slot is not None
+                slot.provider_slot_fingerprint = hashlib.sha256(b"unexpected-slot").hexdigest()
+                session.commit()
+            state_after_interleave.append(
+                _recovery_db_snapshot(service, generation_id, job_id)
+            )
+        return result
+
+    monkeypatch.setattr(
+        service._repository,
+        "immediate_transaction",
+        immediate_transaction_with_slot_corruption,
+    )
+
+    with pytest.raises(ImageRecoveryBlockedError):
+        service.resolve_no_dispatch(
+            generation_id,
+            resolved_by="operator-1",
+            reason="Operator confirmed that no generation occurred.",
+        )
+
+    assert transaction_calls == 2
+    assert len(state_after_interleave) == 1
+    assert _recovery_db_snapshot(service, generation_id, job_id) == state_after_interleave[0]
+    service.close()
+
+
 @pytest.mark.parametrize(
     "invalid",
     [
@@ -1035,21 +1133,21 @@ def test_resolve_no_dispatch_is_idempotent_only_when_resume_was_interrupted(
         persisted_run.dispatch_intent_at = NOW
         generation.provider_state = "blocked"
         session.commit()
-    original_resume = service._jobs.resume_reconciled_job
+    original_immediate_transaction = service._repository.immediate_transaction
     calls = 0
 
-    def interrupted_resume(
-        job_id: str,
-        *,
-        reason: FlowReconciliationReason,
-    ):
+    def interrupted_resume_transaction(operation):
         nonlocal calls
         calls += 1
-        if calls == 1:
+        if calls == 2:
             raise RuntimeError("simulated process exit after resolution commit")
-        return original_resume(job_id, reason=reason)
+        return original_immediate_transaction(operation)
 
-    monkeypatch.setattr(service._jobs, "resume_reconciled_job", interrupted_resume)
+    monkeypatch.setattr(
+        service._repository,
+        "immediate_transaction",
+        interrupted_resume_transaction,
+    )
     with pytest.raises(RuntimeError):
         service.resolve_no_dispatch(
             generation_id,

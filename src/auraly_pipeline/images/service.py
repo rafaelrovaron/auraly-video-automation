@@ -474,14 +474,21 @@ class ImageService:
                 resolved_by=resolved_by,
                 reason=reason,
             )
+            resumed = self._resume_recovered_job(
+                image_generation_id,
+                expected_job_id=job_id,
+                reason="no_dispatch_proven",
+            )
         except ImageError:
             raise
-        except (IntegrityError, OSError, ValueError, FlowArtifactInvalidError):
+        except (
+            IntegrityError,
+            OSError,
+            ValueError,
+            FlowArtifactInvalidError,
+            JobTransitionError,
+        ):
             raise ImageRecoveryBlockedError from None
-        resumed = self._jobs.resume_reconciled_job(
-            job_id,
-            reason="no_dispatch_proven",
-        )
         return self._recovery_result(
             image_generation_id,
             resumed,
@@ -814,6 +821,45 @@ class ImageService:
             progressed = any(state != "pending" for state in states)
             if progressed and run.grid_evidence_path is None:
                 raise ImageRecoveryBlockedError
+
+    @staticmethod
+    def _validate_reconciliation_reason_state(
+        reason: FlowReconciliationReason,
+        generation: ImageGenerationRow,
+        run: FlowGenerationRunRow,
+        slots: list[FlowCandidateSlotRow],
+    ) -> None:
+        states = [slot.state for slot in slots]
+        if reason == "no_dispatch_proven":
+            valid = (
+                generation.provider_state == "queued"
+                and generation.dispatched_at is None
+                and generation.completed_at is None
+                and run.stage == "prepared"
+                and run.dispatch_intent_at is None
+                and run.dispatch_confirmed_at is None
+                and run.grid_evidence_path is None
+                and states == ["pending", "pending"]
+            )
+        elif reason == "existing_dispatch_reconciled":
+            valid = (
+                generation.provider_state in {"generating", "completed"}
+                and generation.dispatched_at is not None
+                and run.dispatch_intent_at is not None
+                and run.dispatch_confirmed_at is not None
+                and run.stage
+                in {"dispatch_confirmed", "candidates_observed", "downloading", "completed"}
+            )
+        else:
+            valid = (
+                generation.provider_state == "completed"
+                and generation.dispatched_at is not None
+                and generation.completed_at is not None
+                and run.stage == "completed"
+                and states == ["ingested", "ingested"]
+            )
+        if not valid:
+            raise ImageRecoveryBlockedError
 
     def _recover_from_evidence(
         self,
@@ -1224,7 +1270,7 @@ class ImageService:
         reason: FlowReconciliationReason,
     ) -> Job:
         def audit_and_resume(session: Session) -> str:
-            _generation, _run, _slots, job = (
+            generation, run, slots, job = (
                 self._validated_recovery_state_in_session(
                     session,
                     image_generation_id,
@@ -1232,6 +1278,7 @@ class ImageService:
             )
             if job.id != expected_job_id:
                 raise ImageRecoveryBlockedError
+            self._validate_reconciliation_reason_state(reason, generation, run, slots)
             events = list(
                 session.scalars(
                     select(JobEventRow).where(
@@ -1263,6 +1310,35 @@ class ImageService:
 
         try:
             job_id = self._repository.immediate_transaction(audit_and_resume)
+        except JobTransitionError:
+            raise ImageRecoveryBlockedError from None
+        return self._jobs.get_job(job_id)
+
+    def _resume_recovered_job(
+        self,
+        image_generation_id: str,
+        *,
+        expected_job_id: str,
+        reason: FlowReconciliationReason,
+    ) -> Job:
+        def resume(session: Session) -> str:
+            generation, run, slots, job = self._validated_recovery_state_in_session(
+                session,
+                image_generation_id,
+            )
+            if job.id != expected_job_id:
+                raise ImageRecoveryBlockedError
+            self._validate_reconciliation_reason_state(reason, generation, run, slots)
+            self._jobs._resume_reconciled_job_in_session(
+                session,
+                job,
+                reason=reason,
+            )
+            session.flush()
+            return job.id
+
+        try:
+            job_id = self._repository.immediate_transaction(resume)
         except JobTransitionError:
             raise ImageRecoveryBlockedError from None
         return self._jobs.get_job(job_id)
