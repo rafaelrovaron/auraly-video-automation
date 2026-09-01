@@ -40,6 +40,15 @@ FLOW_TEST_TARGETS = (
     "tests/test_flow_cli.py",
     "tests/test_flow_security.py",
 )
+FLOW_GENERATION_TEST_TARGETS = (
+    "tests/test_image_migrations.py",
+    "tests/test_flow_generation_locators.py",
+    "tests/test_flow_artifacts.py",
+    "tests/test_flow_generation.py",
+    "tests/test_flow_image_handler.py",
+    "tests/test_flow_recovery.py",
+    "tests/test_flow_generation_security.py",
+)
 
 
 def load_verify_module() -> ModuleType:
@@ -584,6 +593,22 @@ def test_windows_ci_preserves_targets_and_includes_goal_4b_once() -> None:
 
     joined_commands = "\n".join(commands).lower()
     assert "labs.google" not in joined_commands
+    assert "auraly flow preflight" not in joined_commands
+
+
+def test_windows_flow_generation_suite_covers_persistence_browser_download_and_recovery() -> None:
+    workflow = load_verify_workflow()
+    job = workflow["jobs"]["windows-focused"]
+    commands = workflow_commands(job)
+    focused = next(command for command in commands if "scripts/verify.py fast" in command)
+    parsed_targets = focused.split()[6:]
+
+    for target in FLOW_GENERATION_TEST_TARGETS:
+        assert parsed_targets.count(target) == 1
+
+    joined_commands = "\n".join(commands).lower()
+    assert "labs.google" not in joined_commands
+    assert "accounts.google" not in joined_commands
     assert "auraly flow preflight" not in joined_commands
 
 

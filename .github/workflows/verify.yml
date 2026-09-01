@@ -103,3 +103,9 @@ jobs:
           tests/test_flow_service.py
           tests/test_flow_cli.py
           tests/test_flow_security.py
+          tests/test_flow_generation_locators.py
+          tests/test_flow_artifacts.py
+          tests/test_flow_generation.py
+          tests/test_flow_image_handler.py
+          tests/test_flow_recovery.py
+          tests/test_flow_generation_security.py
