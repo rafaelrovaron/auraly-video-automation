@@ -61,7 +61,11 @@ from auraly_pipeline.images.repository import ImageRepository
 from auraly_pipeline.jobs.db_models import JobEventRow, JobRow
 from auraly_pipeline.jobs.domain import Job, JobSubmit, RetrySafety
 from auraly_pipeline.jobs.handlers import JobHandler
-from auraly_pipeline.jobs.service import JobIdempotencyConflictError, JobService
+from auraly_pipeline.jobs.service import (
+    JobIdempotencyConflictError,
+    JobService,
+    JobTransitionError,
+)
 from auraly_pipeline.metadata_security import (
     validate_safe_error_message,
     validate_safe_identifier,
@@ -170,10 +174,12 @@ class _RecoveryDownloadCheckpointSink:
         *,
         run_id: str,
         clock: Callable[[], datetime],
+        validate_locked_state: Callable[[Session], None],
     ) -> None:
         self._sessions = sessions
         self._run_id = run_id
         self._clock = clock
+        self._validate_locked_state = validate_locked_state
 
     def candidate_fingerprint(self, slot_index: int) -> str:
         with self._sessions() as session:
@@ -201,6 +207,7 @@ class _RecoveryDownloadCheckpointSink:
     ) -> None:
         with self._sessions() as session:
             session.execute(text("BEGIN IMMEDIATE"))
+            self._validate_locked_state(session)
             slot = session.scalar(
                 select(FlowCandidateSlotRow).where(
                     FlowCandidateSlotRow.flow_generation_run_id == self._run_id,
@@ -429,18 +436,24 @@ class ImageService:
                 image_generation_id
             )
             reason = self._recover_from_evidence(generation, run, slots)
-            self._record_recovery_audit(
-                job.id,
+            resumed = self._audit_and_resume_recovered_job(
+                image_generation_id,
+                expected_job_id=job.id,
                 reconciled_by=reconciled_by,
                 reason=reason,
             )
-            resumed = self._jobs.resume_reconciled_job(job.id, reason=reason)
             return self._recovery_result(image_generation_id, resumed, reason)
         except ImageError:
             raise
         except (FlowDispatchAmbiguousError, FlowGenerationRuntimeError):
             raise ImageRecoveryBlockedError from None
-        except (IntegrityError, OSError, ValueError, FlowArtifactInvalidError):
+        except (
+            IntegrityError,
+            OSError,
+            ValueError,
+            FlowArtifactInvalidError,
+            JobTransitionError,
+        ):
             raise ImageRecoveryBlockedError from None
 
     def resolve_no_dispatch(
@@ -718,7 +731,38 @@ class ImageService:
             evidence.relative_to(self._work_root)
             if hashlib.sha256(evidence.read_bytes()).hexdigest() != run.grid_evidence_sha256:
                 raise ImageRecoveryBlockedError
+        for slot in slots:
+            if slot.state == "downloaded":
+                self._recovery_downloaded_facts(generation, slot)
+            elif slot.state == "ingested":
+                self._validate_recovery_ingested_in_session(session, generation, slot)
         return generation, run, slots, job
+
+    def _validate_recovery_run_identity(
+        self,
+        session: Session,
+        image_generation_id: str,
+        run_id: str,
+    ) -> None:
+        _generation, run, _slots, _job = self._validated_recovery_state_in_session(
+            session,
+            image_generation_id,
+        )
+        if run.id != run_id:
+            raise ImageRecoveryBlockedError
+
+    @staticmethod
+    def _recovery_slot_identity(slot: FlowCandidateSlotRow) -> tuple[object, ...]:
+        return (
+            slot.id,
+            slot.slot_index,
+            slot.state,
+            slot.provider_slot_fingerprint,
+            slot.download_intent_at,
+            slot.staging_path,
+            slot.staged_sha256,
+            slot.image_candidate_id,
+        )
 
     @staticmethod
     def _validate_recovery_state_compatibility(
@@ -835,6 +879,11 @@ class ImageService:
                 self._sessions,
                 run_id=run.id,
                 clock=lambda: self._utc(self._clock()),
+                validate_locked_state=lambda session: self._validate_recovery_run_identity(
+                    session,
+                    generation.id,
+                    run.id,
+                ),
             )
             for slot in intent_slots:
                 facts = runtime.download_slot(
@@ -861,18 +910,12 @@ class ImageService:
 
     def _reset_pre_intent_run(self, generation_id: str, run_id: str) -> None:
         def reset(session: Session) -> None:
-            run = session.get(FlowGenerationRunRow, run_id)
-            generation = session.get(ImageGenerationRow, generation_id)
-            slots = list(
-                session.scalars(
-                    select(FlowCandidateSlotRow)
-                    .where(FlowCandidateSlotRow.flow_generation_run_id == run_id)
-                    .order_by(FlowCandidateSlotRow.slot_index)
-                )
+            generation, run, slots, _job = self._validated_recovery_state_in_session(
+                session,
+                generation_id,
             )
             if (
-                run is None
-                or generation is None
+                run.id != run_id
                 or generation.provider_state not in {"queued", "generating", "blocked"}
                 or generation.dispatched_at is not None
                 or generation.completed_at is not None
@@ -882,14 +925,6 @@ class ImageService:
                 or [slot.slot_index for slot in slots] != [0, 1]
             ):
                 raise ImageRecoveryBlockedError
-            try:
-                self._generation_to_domain(generation)
-                self._flow_run_to_domain(run)
-                for slot in slots:
-                    self._flow_slot_to_domain(slot)
-                self._validate_recovery_state_compatibility(generation, run, slots)
-            except ValueError:
-                raise ImageRecoveryBlockedError from None
             run.stage = "prepared"
             run.last_failure_code = None
             run.updated_at = self._utc(self._clock())
@@ -906,11 +941,18 @@ class ImageService:
         slots: list[FlowCandidateSlotRow],
     ) -> None:
         slot_states = [slot.state for slot in slots]
+        expected_slots = [self._recovery_slot_identity(slot) for slot in slots]
 
         def promote(session: Session) -> None:
-            run = session.get(FlowGenerationRunRow, run_id)
-            generation = session.get(ImageGenerationRow, generation_id)
-            if run is None or generation is None or run.dispatch_intent_at is None:
+            generation, run, current_slots, _job = (
+                self._validated_recovery_state_in_session(session, generation_id)
+            )
+            if (
+                run.id != run_id
+                or run.dispatch_intent_at is None
+                or [self._recovery_slot_identity(slot) for slot in current_slots]
+                != expected_slots
+            ):
                 raise ImageRecoveryBlockedError
             now = self._utc(self._clock())
             if run.dispatch_confirmed_at is None:
@@ -994,6 +1036,15 @@ class ImageService:
         )
 
         def ingest(session: Session) -> None:
+            current_generation, run, _slots, _job = (
+                self._validated_recovery_state_in_session(session, generation.id)
+            )
+            if (
+                run.id != run_id
+                or current_generation.id != generation.id
+                or inspect_flow_artifact(final) != facts
+            ):
+                raise ImageRecoveryBlockedError
             slot = session.scalar(
                 select(FlowCandidateSlotRow).where(
                     FlowCandidateSlotRow.flow_generation_run_id == run_id,
@@ -1020,57 +1071,59 @@ class ImageService:
         generation: ImageGenerationRow,
         slot: FlowCandidateSlotRow,
     ) -> None:
+        with self._sessions() as session:
+            self._validate_recovery_ingested_in_session(session, generation, slot)
+
+    def _validate_recovery_ingested_in_session(
+        self,
+        session: Session,
+        generation: ImageGenerationRow,
+        slot: FlowCandidateSlotRow,
+    ) -> None:
         if slot.image_candidate_id is None:
             raise ImageRecoveryBlockedError
-        with self._sessions() as session:
-            candidate = session.get(ImageCandidateRow, slot.image_candidate_id)
-            if (
-                candidate is None
-                or candidate.image_generation_id != generation.id
-                or candidate.candidate_index != slot.slot_index
-            ):
-                raise ImageRecoveryBlockedError
-            artifact = (self._work_root / candidate.source_path).resolve(strict=True)
-            artifact.relative_to(self._work_root)
-            facts = inspect_flow_artifact(artifact)
-            if (
-                candidate.sha256,
-                candidate.width,
-                candidate.height,
-                candidate.size_bytes,
-                candidate.format,
-            ) != (facts.sha256, facts.width, facts.height, facts.size_bytes, facts.format):
-                raise ImageRecoveryBlockedError
-            expected = resolve_flow_final_path(
-                work_root=self._work_root,
-                campaign_id=generation.campaign_id,
-                scene_variant_id=generation.scene_variant_id,
-                generation_number=generation.generation_number,
-                candidate_index=slot.slot_index,
-                image_format=facts.format,
-            )
-            if (
-                artifact != expected
-                or slot.provider_slot_fingerprint is None
-                or slot.staging_path is None
-                or slot.staged_sha256 != facts.sha256
-            ):
-                raise ImageRecoveryBlockedError
+        candidate = session.get(ImageCandidateRow, slot.image_candidate_id)
+        if (
+            candidate is None
+            or candidate.image_generation_id != generation.id
+            or candidate.candidate_index != slot.slot_index
+        ):
+            raise ImageRecoveryBlockedError
+        artifact = (self._work_root / candidate.source_path).resolve(strict=True)
+        artifact.relative_to(self._work_root)
+        facts = inspect_flow_artifact(artifact)
+        if (
+            candidate.sha256,
+            candidate.width,
+            candidate.height,
+            candidate.size_bytes,
+            candidate.format,
+        ) != (facts.sha256, facts.width, facts.height, facts.size_bytes, facts.format):
+            raise ImageRecoveryBlockedError
+        expected = resolve_flow_final_path(
+            work_root=self._work_root,
+            campaign_id=generation.campaign_id,
+            scene_variant_id=generation.scene_variant_id,
+            generation_number=generation.generation_number,
+            candidate_index=slot.slot_index,
+            image_format=facts.format,
+        )
+        if (
+            artifact != expected
+            or slot.provider_slot_fingerprint is None
+            or slot.staging_path is None
+            or slot.staged_sha256 != facts.sha256
+        ):
+            raise ImageRecoveryBlockedError
 
     def _complete_recovered_generation(self, generation_id: str, run_id: str) -> None:
         def complete(session: Session) -> None:
-            run = session.get(FlowGenerationRunRow, run_id)
-            generation = session.get(ImageGenerationRow, generation_id)
-            slots = list(
-                session.scalars(
-                    select(FlowCandidateSlotRow)
-                    .where(FlowCandidateSlotRow.flow_generation_run_id == run_id)
-                    .order_by(FlowCandidateSlotRow.slot_index)
-                )
+            generation, run, slots, _job = self._validated_recovery_state_in_session(
+                session,
+                generation_id,
             )
             if (
-                run is None
-                or generation is None
+                run.id != run_id
                 or [slot.state for slot in slots] != ["ingested", "ingested"]
             ):
                 raise ImageRecoveryBlockedError
@@ -1162,42 +1215,57 @@ class ImageService:
 
         return self._repository.immediate_transaction(resolve)
 
-    def _record_recovery_audit(
+    def _audit_and_resume_recovered_job(
         self,
-        job_id: str,
+        image_generation_id: str,
         *,
+        expected_job_id: str,
         reconciled_by: str,
         reason: FlowReconciliationReason,
-    ) -> None:
-        def record(session: Session) -> None:
-            job = session.get(JobRow, job_id)
-            if job is None or job.status != "blocked":
-                raise ImageTransitionError
+    ) -> Job:
+        def audit_and_resume(session: Session) -> str:
+            _generation, _run, _slots, job = (
+                self._validated_recovery_state_in_session(
+                    session,
+                    image_generation_id,
+                )
+            )
+            if job.id != expected_job_id:
+                raise ImageRecoveryBlockedError
             events = list(
                 session.scalars(
                     select(JobEventRow).where(
-                        JobEventRow.job_id == job_id,
+                        JobEventRow.job_id == job.id,
                         JobEventRow.event_type == "job.flow_recovery_reconciled",
                     )
                 )
             )
-            if any(event.metadata_json.get("reason") == reason for event in events):
-                return
-            session.add(
-                JobEventRow(
-                    id=str(uuid4()),
-                    job_id=job_id,
-                    event_type="job.flow_recovery_reconciled",
-                    timestamp=self._utc(self._clock()),
-                    metadata_json={
-                        "reconciledBy": reconciled_by,
-                        "reason": reason,
-                    },
+            if not any(event.metadata_json.get("reason") == reason for event in events):
+                session.add(
+                    JobEventRow(
+                        id=str(uuid4()),
+                        job_id=job.id,
+                        event_type="job.flow_recovery_reconciled",
+                        timestamp=self._utc(self._clock()),
+                        metadata_json={
+                            "reconciledBy": reconciled_by,
+                            "reason": reason,
+                        },
+                    )
                 )
+            self._jobs._resume_reconciled_job_in_session(
+                session,
+                job,
+                reason=reason,
             )
             session.flush()
+            return job.id
 
-        self._repository.immediate_transaction(record)
+        try:
+            job_id = self._repository.immediate_transaction(audit_and_resume)
+        except JobTransitionError:
+            raise ImageRecoveryBlockedError from None
+        return self._jobs.get_job(job_id)
 
     def _recovery_result(
         self,

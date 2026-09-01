@@ -398,6 +398,24 @@ class JobService:
             raise JobNotFoundError
         return self._to_domain(row)
 
+    def _resume_reconciled_job_in_session(
+        self,
+        session: Session,
+        row: JobRow,
+        *,
+        reason: ReconciliationReason,
+    ) -> None:
+        """Resume within a caller-owned immediate transaction."""
+        try:
+            self._repository.resume_reconciled_in_session(
+                session,
+                row,
+                self._as_utc(self._clock()),
+                reason=reason,
+            )
+        except InvalidJobTransition as exc:
+            raise JobTransitionError from exc
+
     def recover_stale_jobs(self) -> list[Job]:
         return [
             self._to_domain(row)

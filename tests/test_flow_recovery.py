@@ -701,6 +701,76 @@ def test_recover_generation_blocks_prompt_tamper_without_state_change(tmp_path: 
     service.close()
 
 
+def test_recover_generation_revalidates_all_slots_before_first_offline_ingest(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service, work_root, generation_id, job_id = _flow_service(tmp_path)
+    run, slots = _run_and_slots(service, generation_id)
+    _seed_downloaded_slot(service, work_root, generation_id, 0)
+    _seed_downloaded_slot(service, work_root, generation_id, 1)
+    with service._sessions() as session:
+        persisted_run = session.get(FlowGenerationRunRow, run.id)
+        generation = session.get(ImageGenerationRow, generation_id)
+        assert persisted_run is not None and generation is not None
+        persisted_run.stage = "downloading"
+        persisted_run.dispatch_intent_at = NOW
+        persisted_run.dispatch_confirmed_at = NOW
+        generation.provider_state = "blocked"
+        generation.dispatched_at = NOW
+        session.commit()
+    original_ingest = service._ingest_recovered_slot
+    state_after_interleave: list[tuple[object, ...]] = []
+
+    def ingest_after_slot_corruption(*args: object, **kwargs: object) -> None:
+        if not state_after_interleave:
+            with service._sessions() as session:
+                slot_one = session.get(FlowCandidateSlotRow, slots[1].id)
+                assert slot_one is not None
+                slot_one.provider_slot_fingerprint = None
+                session.commit()
+            state_after_interleave.append(
+                _recovery_db_snapshot(service, generation_id, job_id)
+            )
+        original_ingest(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(service, "_ingest_recovered_slot", ingest_after_slot_corruption)
+
+    with pytest.raises(ImageRecoveryBlockedError):
+        service.recover_generation(generation_id, reconciled_by="operator-1")
+
+    assert len(state_after_interleave) == 1
+    assert _recovery_db_snapshot(service, generation_id, job_id) == state_after_interleave[0]
+    service.close()
+
+
+def test_recover_generation_revalidates_job_before_pre_intent_reset(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service, _work_root, generation_id, job_id = _flow_service(tmp_path)
+    original_reset = service._reset_pre_intent_run
+    state_after_interleave: list[tuple[object, ...]] = []
+
+    def reset_after_job_corruption(*args: object, **kwargs: object) -> None:
+        with service._sessions() as session:
+            job = session.get(JobRow, job_id)
+            assert job is not None
+            job.request_fingerprint = "0" * 64
+            session.commit()
+        state_after_interleave.append(_recovery_db_snapshot(service, generation_id, job_id))
+        original_reset(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(service, "_reset_pre_intent_run", reset_after_job_corruption)
+
+    with pytest.raises(ImageRecoveryBlockedError):
+        service.recover_generation(generation_id, reconciled_by="operator-1")
+
+    assert len(state_after_interleave) == 1
+    assert _recovery_db_snapshot(service, generation_id, job_id) == state_after_interleave[0]
+    service.close()
+
+
 def test_recover_generation_redownloads_only_the_same_durable_intent_slot(
     tmp_path: Path,
 ) -> None:

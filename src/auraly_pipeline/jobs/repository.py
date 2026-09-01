@@ -535,41 +535,74 @@ class JobRepository:
             row = session.get(JobRow, job_id)
             if row is None:
                 return None
-            if reason not in _RECONCILIATION_REASONS:
-                raise InvalidJobTransition("invalid reconciled job transition")
-            if (
-                row.status != JobStatus.BLOCKED.value
-                or row.retry_safety != RetrySafety.RECONCILE_BEFORE_RETRY.value
-                or row.attempt_count >= row.max_attempts
-            ):
-                raise InvalidJobTransition("invalid reconciled job transition")
-            row.status = JobStatus.QUEUED.value
-            row.next_retry_at = None
-            row.queued_at = now
-            row.updated_at = now
-            session.add_all(
-                [
-                    JobEventRow(
-                        id=str(uuid4()),
-                        job_id=row.id,
-                        event_type="job.reconciled",
-                        timestamp=now,
-                        metadata_json={
-                            "previousStatus": "blocked",
-                            "reason": reason,
-                        },
-                    ),
-                    JobEventRow(
-                        id=str(uuid4()),
-                        job_id=row.id,
-                        event_type="job.queued",
-                        timestamp=now,
-                        metadata_json={"reason": reason},
-                    ),
-                ]
+            self.resume_reconciled_in_session(
+                session,
+                row,
+                now,
+                reason=reason,
             )
             session.commit()
             return self._reload(session, row.id)
+
+    @staticmethod
+    def resume_reconciled_in_session(
+        session: Session,
+        row: JobRow,
+        now: datetime,
+        *,
+        reason: ReconciliationReason,
+    ) -> None:
+        """Apply a reconciled resume in an already-locked integrity transaction."""
+        try:
+            retry_safety = RetrySafety(row.retry_safety)
+            expected_fingerprint = JobSubmit(
+                job_type=row.job_type,
+                campaign_id=row.campaign_id,
+                scene_variant_id=row.scene_variant_id,
+                idempotency_key=row.idempotency_key,
+                input=row.input_json,
+                priority=row.priority,
+                max_attempts=row.max_attempts,
+                retry_safety=retry_safety,
+            ).request_fingerprint
+        except ValueError:
+            raise InvalidJobTransition("invalid reconciled job transition") from None
+        if row.request_fingerprint != expected_fingerprint:
+            raise InvalidJobTransition("invalid reconciled job transition")
+        if reason not in _RECONCILIATION_REASONS:
+            raise InvalidJobTransition("invalid reconciled job transition")
+        if (
+            row.status != JobStatus.BLOCKED.value
+            or retry_safety is not RetrySafety.RECONCILE_BEFORE_RETRY
+            or row.attempt_count >= row.max_attempts
+        ):
+            raise InvalidJobTransition("invalid reconciled job transition")
+        row.status = JobStatus.QUEUED.value
+        row.next_retry_at = None
+        row.queued_at = now
+        row.updated_at = now
+        session.add_all(
+            [
+                JobEventRow(
+                    id=str(uuid4()),
+                    job_id=row.id,
+                    event_type="job.reconciled",
+                    timestamp=now,
+                    metadata_json={
+                        "previousStatus": "blocked",
+                        "reason": reason,
+                    },
+                ),
+                JobEventRow(
+                    id=str(uuid4()),
+                    job_id=row.id,
+                    event_type="job.queued",
+                    timestamp=now,
+                    metadata_json={"reason": reason},
+                ),
+            ]
+        )
+        session.flush()
 
     def recover_stale(self, now: datetime) -> list[JobRow]:
         recovered_ids: list[str] = []

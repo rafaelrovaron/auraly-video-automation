@@ -941,6 +941,53 @@ def test_resume_reconciled_requires_an_explicit_evidence_reason(tmp_path: Path) 
     service.close()
 
 
+def test_resume_reconciled_revalidates_request_fingerprint_before_queueing(
+    tmp_path: Path,
+) -> None:
+    class ReconcileHandler:
+        retry_safety = RetrySafety.RECONCILE_BEFORE_RETRY
+
+        def execute(self, context: JobExecutionContext) -> JobExecutionResult:
+            return JobExecutionResult(
+                outcome=JobExecutionOutcome.BLOCKED,
+                error_code="reconciliation_required",
+                error_message="Reconciliation is required before another execution.",
+            )
+
+    service = JobService.for_database(
+        tmp_path / "auraly.db",
+        clock=lambda: NOW,
+        handlers={"fake.reconcile": ReconcileHandler()},
+    )
+    submitted = service.submit_job(
+        _local_job(
+            "fake.reconcile",
+            "reconcile-fingerprint-corruption",
+            retry_safety=RetrySafety.RECONCILE_BEFORE_RETRY,
+        )
+    )
+    blocked = service.worker_once("worker-1")
+    assert blocked is not None and blocked.status == "blocked"
+    with service._repository._session_factory() as session:
+        row = session.get(JobRow, submitted.job_id)
+        assert row is not None
+        row.request_fingerprint = "0" * 64
+        session.commit()
+
+    with pytest.raises(JobTransitionError):
+        service.resume_reconciled_job(
+            submitted.job_id,
+            reason="no_dispatch_proven",
+        )
+
+    with service._repository._session_factory() as session:
+        row = session.get(JobRow, submitted.job_id)
+        assert row is not None
+        assert row.status == "blocked"
+        assert not any(event.event_type == "job.reconciled" for event in row.events)
+    service.close()
+
+
 @pytest.mark.parametrize(
     ("retry_safety", "max_attempts"),
     [
