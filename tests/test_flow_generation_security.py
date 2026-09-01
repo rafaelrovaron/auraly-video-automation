@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import ast
 from collections.abc import Iterator
+from copy import deepcopy
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 import hashlib
 import inspect
 from io import BytesIO
 import json
+import math
 from pathlib import Path
 import sqlite3
 from typing import Any, cast
@@ -374,6 +376,8 @@ def _durable_snapshot(
     work_root: Path,
 ) -> dict[str, object]:
     with service._sessions() as session:
+        generation = session.get(ImageGenerationRow, generation_id)
+        assert generation is not None
         run = session.scalar(
             select(FlowGenerationRunRow).where(
                 FlowGenerationRunRow.image_generation_id == generation_id
@@ -415,6 +419,24 @@ def _durable_snapshot(
             for relative, sha256 in artifact_facts.items()
             if "inspection" in Path(relative).parts
         }
+        slot_evidence = tuple(
+            {
+                "slotIndex": slot.slot_index,
+                "state": slot.state,
+                "stagingPath": slot.staging_path,
+                "stagedSha256": slot.staged_sha256,
+                "imageCandidateId": slot.image_candidate_id,
+                "canonicalFinalPath": resolve_flow_final_path(
+                    work_root=work_root,
+                    campaign_id=generation.campaign_id,
+                    scene_variant_id=generation.scene_variant_id,
+                    generation_number=generation.generation_number,
+                    candidate_index=slot.slot_index,
+                    image_format="png",
+                ).relative_to(work_root).as_posix(),
+            }
+            for slot in slots
+        )
         return {
             "runStage": run.stage,
             "gridPath": run.grid_evidence_path,
@@ -432,6 +454,7 @@ def _durable_snapshot(
             "stagingArtifactFacts": staging_artifact_facts,
             "gridEvidenceFacts": grid_evidence_facts,
             "artifactFacts": artifact_facts,
+            "slotEvidence": slot_evidence,
         }
 
 
@@ -450,13 +473,35 @@ def _assert_preserved_evidence(
     before_artifacts = cast(dict[str, str], before["artifactFacts"])
     after_artifacts = cast(dict[str, str], after["artifactFacts"])
     before_staging = cast(dict[str, str], before["stagingArtifactFacts"])
-    after_finals = cast(dict[str, str], after["canonicalFinalFacts"])
+    before_slots = cast(tuple[dict[str, object], ...], before["slotEvidence"])
+    after_slots = {
+        cast(int, slot["slotIndex"]): slot
+        for slot in cast(tuple[dict[str, object], ...], after["slotEvidence"])
+    }
+    staging_owners = {
+        cast(str, slot["stagingPath"]): slot
+        for slot in before_slots
+        if slot["stagingPath"] is not None
+    }
+    for before_slot in before_slots:
+        slot_index = cast(int, before_slot["slotIndex"])
+        after_slot = after_slots[slot_index]
+        assert after_slot["slotIndex"] == slot_index
+        assert after_slot["canonicalFinalPath"] == before_slot["canonicalFinalPath"]
+        for field in ("stagingPath", "stagedSha256", "imageCandidateId"):
+            if before_slot[field] is not None:
+                assert after_slot[field] == before_slot[field]
     for source_path, sha256 in before_artifacts.items():
         if source_path in after_artifacts:
             assert after_artifacts[source_path] == sha256
             continue
         assert source_path in before_staging
-        assert sha256 in after_finals.values()
+        owner = staging_owners[source_path]
+        slot_index = cast(int, owner["slotIndex"])
+        exact_final = cast(str, owner["canonicalFinalPath"])
+        assert after_artifacts.get(exact_final) == sha256, (
+            f"slot {slot_index} staging evidence did not reach its exact canonical final"
+        )
     for category in ("canonicalFinalFacts", "gridEvidenceFacts"):
         before_category = cast(dict[str, str], before[category])
         after_category = cast(dict[str, str], after[category])
@@ -567,6 +612,14 @@ def test_crash_snapshot_includes_uningested_published_final(
         with service._sessions() as session:
             generation = session.get(ImageGenerationRow, generation_id)
             assert generation is not None
+            candidate_indices = set(
+                session.scalars(
+                    select(ImageCandidateRow.candidate_index).where(
+                        ImageCandidateRow.image_generation_id == generation_id
+                    )
+                )
+            )
+        assert published_slot not in candidate_indices
         final = resolve_flow_final_path(
             work_root=work_root,
             campaign_id=generation.campaign_id,
@@ -580,6 +633,48 @@ def test_crash_snapshot_includes_uningested_published_final(
         all_artifacts = cast(dict[str, str], snapshot["artifactFacts"])
         assert canonical_finals[relative] == hashlib.sha256(final.read_bytes()).hexdigest()
         assert all_artifacts[relative] == canonical_finals[relative]
+        slot_evidence = {
+            cast(int, slot["slotIndex"]): slot
+            for slot in cast(tuple[dict[str, object], ...], snapshot["slotEvidence"])
+        }
+        assert slot_evidence[published_slot]["imageCandidateId"] is None
+        assert slot_evidence[published_slot]["canonicalFinalPath"] == relative
+    finally:
+        service.close()
+
+
+def test_staging_evidence_cannot_move_to_another_slots_final(tmp_path: Path) -> None:
+    """A matching hash at slot 1 cannot satisfy slot 0's staged checkpoint."""
+    service, _clock, _scenario, generation_id, _job_id, work_root = _create_crash_service(
+        tmp_path,
+        "after_slot_0_download_checkpoint",
+    )
+    try:
+        with pytest.raises(SimulatedWorkerCrash):
+            service.worker_once("task-12-cross-slot-worker", lease_seconds=1)
+        before = _durable_snapshot(service, generation_id, work_root)
+        substituted = deepcopy(before)
+        staging = cast(dict[str, str], substituted["stagingArtifactFacts"])
+        staging_path, staging_sha256 = next(iter(staging.items()))
+        del staging[staging_path]
+        del cast(dict[str, str], substituted["artifactFacts"])[staging_path]
+
+        with service._sessions() as session:
+            generation = session.get(ImageGenerationRow, generation_id)
+            assert generation is not None
+        wrong_final = resolve_flow_final_path(
+            work_root=work_root,
+            campaign_id=generation.campaign_id,
+            scene_variant_id=generation.scene_variant_id,
+            generation_number=generation.generation_number,
+            candidate_index=1,
+            image_format="png",
+        ).relative_to(work_root).as_posix()
+        cast(dict[str, str], substituted["canonicalFinalFacts"])[wrong_final] = staging_sha256
+        cast(dict[str, str], substituted["artifactFacts"])[wrong_final] = staging_sha256
+
+        with pytest.raises(AssertionError, match="slot 0"):
+            _assert_preserved_evidence(before, substituted, work_root)
     finally:
         service.close()
 
@@ -715,29 +810,61 @@ def test_seeded_sensitive_corpus_does_not_spread_to_public_or_operational_bounda
 
 
 def _mask_pixel_coordinates(
-    bounds: tuple[tuple[int, int, int, int], ...],
+    bounds: tuple[tuple[float, float, float, float], ...],
 ) -> set[tuple[int, int]]:
     return {
         (x, y)
         for left, top, width, height in bounds
-        for x in range(left, left + width)
-        for y in range(top, top + height)
+        for x in range(math.ceil(left), math.floor(left + width))
+        for y in range(math.ceil(top), math.floor(top + height))
     }
 
 
 def _assert_exact_raster_masks(
     screenshot_png: bytes,
-    bounds: tuple[tuple[int, int, int, int], ...],
+    bounds: tuple[tuple[float, float, float, float], ...],
 ) -> None:
     with Image.open(BytesIO(screenshot_png)) as image:
-        pixels = image.convert("RGB")
-        actual = {
-            (x, y)
+        pixels = image.convert("RGBA")
+        mask_colored = {
+            (x, y): pixels.getpixel((x, y))
             for y in range(pixels.height)
             for x in range(pixels.width)
-            if pixels.getpixel((x, y)) == (255, 0, 255)
+            if pixels.getpixel((x, y))[:3] == (255, 0, 255)
         }
-    assert actual == _mask_pixel_coordinates(bounds), "raster mask pixels differ from semantic bounds"
+    assert all(pixel[3] == 255 for pixel in mask_colored.values()), (
+        "semantic mask pixels must be fully opaque"
+    )
+    opaque_magenta = set(mask_colored)
+    required_interior = _mask_pixel_coordinates(bounds)
+    permitted_outer = {
+        (x, y)
+        for left, top, width, height in bounds
+        for x in range(math.floor(left), math.ceil(left + width))
+        for y in range(math.floor(top), math.ceil(top + height))
+    }
+    assert required_interior <= opaque_magenta, "semantic bounds lack an opaque raster mask"
+    assert opaque_magenta <= permitted_outer, "raster mask pixels escape semantic bounds"
+
+
+def _assert_exact_semantic_bounds(
+    observed: tuple[tuple[float, float, float, float], ...],
+    expected: tuple[tuple[float, float, float, float], ...],
+) -> None:
+    assert observed == expected, "semantic mask locator bounds changed or were truncated"
+
+
+def test_raster_mask_verifier_rejects_transparent_magenta() -> None:
+    """Mask-colored RGB with zero alpha is not evidence of an opaque privacy mask."""
+    image = Image.new("RGBA", (4, 4), color=(255, 255, 255, 255))
+    for x in range(1, 3):
+        for y in range(1, 3):
+            image.putpixel((x, y), (255, 0, 255, 0))
+    payload = BytesIO()
+    image.save(payload, format="PNG")
+
+    with pytest.raises(AssertionError, match="opaque"):
+        _assert_exact_raster_masks(payload.getvalue(), ((1, 1, 2, 2),))
 
 
 def test_seeded_browser_corpus_is_covered_by_exact_semantic_raster_masks(
@@ -759,6 +886,12 @@ def test_seeded_browser_corpus_is_covered_by_exact_semantic_raster_masks(
     }
     assert all(value in " | ".join(seeded_regions.values()) for value in DENY_VALUES)
     expected_labels = tuple(seeded_regions)
+    expected_bounds = (
+        (20.25, 20.5, 319.5, 31.25),
+        (20.5, 70.25, 319.25, 31.5),
+        (20.75, 120.5, 319.0, 31.25),
+        (20.25, 170.75, 319.5, 31.0),
+    )
     for index, (label, value) in enumerate(seeded_regions.items()):
         locator = flow_generation_page.get_by_label(label, exact=True)
         if label == "Prompt":
@@ -784,12 +917,16 @@ def test_seeded_browser_corpus_is_covered_by_exact_semantic_raster_masks(
                     zIndex: '1000'
                 });
             }""",
-            {"left": 20, "top": 20 + index * 50, "width": 320, "height": 32},
+            {
+                "left": expected_bounds[index][0],
+                "top": expected_bounds[index][1],
+                "width": expected_bounds[index][2],
+                "height": expected_bounds[index][3],
+            },
         )
 
-    expected_bounds = tuple((20, 20 + index * 50, 320, 32) for index in range(4))
     unmasked = flow_generation_page.screenshot(type="png", animations="disabled")
-    observed: list[tuple[str | None, tuple[int, int, int, int]]] = []
+    observed: list[tuple[str | None, tuple[float, float, float, float]]] = []
     real_screenshot = Page.screenshot
 
     def record_semantic_masks(page: Page, **kwargs: Any) -> bytes:
@@ -798,10 +935,10 @@ def test_seeded_browser_corpus_is_covered_by_exact_semantic_raster_masks(
             box = mask.bounding_box()
             assert box is not None
             bounds = (
-                int(box["x"]),
-                int(box["y"]),
-                int(box["width"]),
-                int(box["height"]),
+                box["x"],
+                box["y"],
+                box["width"],
+                box["height"],
             )
             observed.append(
                 (
@@ -816,10 +953,14 @@ def test_seeded_browser_corpus_is_covered_by_exact_semantic_raster_masks(
     screenshot_bytes = (work_root / evidence.relative_path).read_bytes()
 
     assert tuple(label for label, _bounds in observed) == expected_labels
-    assert tuple(bounds for _label, bounds in observed) == expected_bounds
+    observed_bounds = tuple(bounds for _label, bounds in observed)
+    _assert_exact_semantic_bounds(observed_bounds, expected_bounds)
     _assert_exact_raster_masks(screenshot_bytes, expected_bounds)
-    with pytest.raises(AssertionError, match="raster mask pixels"):
+    with pytest.raises(AssertionError, match="opaque raster mask"):
         _assert_exact_raster_masks(unmasked, expected_bounds)
+    shifted = ((20.5, *expected_bounds[0][1:]), *expected_bounds[1:])
+    with pytest.raises(AssertionError, match="changed or were truncated"):
+        _assert_exact_semantic_bounds(shifted, expected_bounds)
 
 
 def test_seeded_browser_corpus_is_absent_from_expanded_trace_and_result(
@@ -969,15 +1110,64 @@ def _called_symbols(tree: ast.Module) -> set[str]:
     }
 
 
-def _open_mode(call: ast.Call, called: str) -> str | None:
+_MISSING = object()
+
+
+def _constant_value(node: ast.AST, constants: dict[str, object]) -> object:
+    if isinstance(node, ast.Constant):
+        return node.value
+    if isinstance(node, ast.Name):
+        return constants.get(node.id, _MISSING)
+    if isinstance(node, ast.Dict):
+        result: dict[str, object] = {}
+        for key_node, value_node in zip(node.keys, node.values, strict=True):
+            if key_node is None:
+                return _MISSING
+            key = _constant_value(key_node, constants)
+            value = _constant_value(value_node, constants)
+            if not isinstance(key, str) or value is _MISSING:
+                return _MISSING
+            result[key] = value
+        return result
+    return _MISSING
+
+
+def _constant_bindings(tree: ast.Module) -> dict[str, object]:
+    constants: dict[str, object] = {}
+    assignments = [node for node in ast.walk(tree) if isinstance(node, (ast.Assign, ast.AnnAssign))]
+    for _ in range(len(assignments) + 1):
+        changed = False
+        for assignment in assignments:
+            targets = assignment.targets if isinstance(assignment, ast.Assign) else [assignment.target]
+            value = assignment.value
+            if value is None:
+                continue
+            resolved = _constant_value(value, constants)
+            if resolved is _MISSING:
+                continue
+            for target in targets:
+                if isinstance(target, ast.Name) and constants.get(target.id, _MISSING) != resolved:
+                    constants[target.id] = resolved
+                    changed = True
+        if not changed:
+            break
+    return constants
+
+
+def _open_mode(
+    call: ast.Call,
+    called: str,
+    constants: dict[str, object],
+) -> str | None:
     if called.endswith("os.open"):
         return None
-    position = 0 if "." in called and called.rsplit(".", 1)[-1] == "open" else 1
+    position = 1 if called in {"open", "builtins.open", "io.open"} else 0
     mode_node: ast.AST | None = call.args[position] if len(call.args) > position else None
     for keyword in call.keywords:
         if keyword.arg == "mode":
             mode_node = keyword.value
-    return mode_node.value if isinstance(mode_node, ast.Constant) and isinstance(mode_node.value, str) else None
+    mode = _constant_value(mode_node, constants) if mode_node is not None else _MISSING
+    return mode if isinstance(mode, str) else None
 
 
 def _flag_symbols(node: ast.AST, aliases: dict[str, str]) -> set[str]:
@@ -992,6 +1182,7 @@ def _flag_symbols(node: ast.AST, aliases: dict[str, str]) -> set[str]:
 
 def _overwrite_findings(tree: ast.Module) -> set[str]:
     aliases = _symbol_aliases(tree)
+    constants = _constant_bindings(tree)
     findings: set[str] = set()
     for call in (node for node in ast.walk(tree) if isinstance(node, ast.Call)):
         called = _dotted_name(call.func, aliases)
@@ -1009,7 +1200,7 @@ def _overwrite_findings(tree: ast.Module) -> set[str]:
         if path_replace or tail in {"write_bytes", "write_text", "copyfile", "copy2"}:
             findings.add(called)
         if tail == "open":
-            mode = _open_mode(call, called)
+            mode = _open_mode(call, called, constants)
             if mode is not None and "x" not in mode and (
                 mode.startswith(("w", "a")) or "+" in mode
             ):
@@ -1027,6 +1218,7 @@ def _overwrite_findings(tree: ast.Module) -> set[str]:
 
 def _unsafe_locator_findings(tree: ast.Module) -> set[str]:
     aliases = _symbol_aliases(tree)
+    constants = _constant_bindings(tree)
     findings: set[str] = set()
     for call in (node for node in ast.walk(tree) if isinstance(node, ast.Call)):
         called = _dotted_name(call.func, aliases)
@@ -1035,14 +1227,23 @@ def _unsafe_locator_findings(tree: ast.Module) -> set[str]:
         tail = called.rsplit(".", 1)[-1]
         if tail == "nth":
             findings.add(called)
-        if tail == "click" and (call.args or call.keywords):
-            findings.add(called)
+        if tail == "click":
+            coordinate_keywords = {
+                keyword.arg for keyword in call.keywords if keyword.arg in {"position", "x", "y"}
+            }
+            positional_coordinates = any(
+                isinstance(value := _constant_value(argument, constants), dict)
+                and {"x", "y"} <= set(value)
+                for argument in call.args
+            )
+            if coordinate_keywords or positional_coordinates:
+                findings.add(called)
         if tail in {"locator", "get_by_text", "get_by_role", "get_by_label"}:
-            strings = [
-                value.value.casefold()
-                for value in (*call.args, *(keyword.value for keyword in call.keywords))
-                if isinstance(value, ast.Constant) and isinstance(value.value, str)
-            ]
+            strings: list[str] = []
+            for argument in (*call.args, *(keyword.value for keyword in call.keywords)):
+                value = _constant_value(argument, constants)
+                if isinstance(value, str):
+                    strings.append(value.casefold())
             if any(value.startswith("xpath=") or "nth-child" in value for value in strings):
                 findings.add(called)
     return findings
@@ -1059,7 +1260,7 @@ def _sensitive_browser_reads(tree: ast.Module) -> set[str]:
         if tail in {"cookies", "storage_state"}:
             findings.add(called)
         if tail in {"read_bytes", "read_text", "open"}:
-            sources = [ast.unparse(call.func), *(ast.unparse(argument) for argument in call.args[:1])]
+            sources = [called, *(ast.unparse(argument) for argument in call.args[:1])]
             if any(
                 token in source.casefold()
                 for source in sources
@@ -1086,19 +1287,23 @@ def _is_target_injection_name(name: str) -> bool:
 
 def _job_submit_injection_findings(tree: ast.Module) -> set[str]:
     aliases = _symbol_aliases(tree)
+    constants = _constant_bindings(tree)
     findings: set[str] = set()
     for call in (node for node in ast.walk(tree) if isinstance(node, ast.Call)):
         called = _dotted_name(call.func, aliases)
-        if called is None or called.rsplit(".", 1)[-1] != "JobSubmit":
+        if called is None or called.rsplit(".", 1)[-1] not in {
+            "JobSubmit",
+            "ImageGenerateRequest",
+        }:
             continue
         for keyword in call.keywords:
             if keyword.arg is not None and _is_target_injection_name(keyword.arg):
                 findings.add(keyword.arg)
-            if keyword.arg == "input" and isinstance(keyword.value, ast.Dict):
-                for key in keyword.value.keys:
-                    if isinstance(key, ast.Constant) and isinstance(key.value, str):
-                        if _is_target_injection_name(key.value):
-                            findings.add(key.value)
+            payload = _constant_value(keyword.value, constants)
+            if keyword.arg in {"input", None} and isinstance(payload, dict):
+                findings.update(
+                    key for key in payload if _is_target_injection_name(key)
+                )
     return findings
 
 
@@ -1185,6 +1390,19 @@ def unsafe(context, profile_path):
     }
 
 
+def test_sensitive_read_guard_resolves_profile_path_alias() -> None:
+    aliased_profile_read = ast.parse(
+        """
+def unsafe(profile_path):
+    opaque = profile_path
+    return opaque.read_bytes()
+"""
+    )
+    assert _sensitive_browser_reads(aliased_profile_read) == {
+        "profile_path.read_bytes"
+    }
+
+
 def test_structural_boundaries_prohibit_unsafe_selectors_overwrite_and_targets(
     tmp_path: Path,
 ) -> None:
@@ -1221,7 +1439,12 @@ def test_structural_boundaries_prohibit_unsafe_selectors_overwrite_and_targets(
     request_fields = set(ImageGenerateRequest.model_json_schema()["properties"])
     job_fields = set(JobSubmit.model_json_schema()["properties"])
     assert not any(_is_target_injection_name(field) for field in request_fields | job_fields)
-    assert _job_submit_injection_findings(_module_tree(SOURCE_ROOT / "images" / "service.py")) == set()
+    for constructor_owner in (
+        SOURCE_ROOT / "images" / "service.py",
+        SOURCE_ROOT / "images" / "flow_handler.py",
+        SOURCE_ROOT / "cli.py",
+    ):
+        assert _job_submit_injection_findings(_module_tree(constructor_owner)) == set()
 
     help_result = CliRunner().invoke(app, ["image", "generate", "--help"])
     assert help_result.exit_code == 0
@@ -1278,7 +1501,6 @@ def unsafe():
 """
     )
     assert _job_submit_injection_findings(aliased_job_target) == {"flowUrl"}
-
     unsafe_environment_target = ast.parse(
         """
 def unsafe(environment):
@@ -1287,4 +1509,56 @@ def unsafe(environment):
     )
     assert _environment_target_findings(unsafe_environment_target) == {
         "AURALY_FLOW_TARGET_URL"
+    }
+
+
+def test_overwrite_guard_resolves_aliased_builtin_open_mode() -> None:
+    aliased_builtin = ast.parse(
+        """
+from builtins import open as create_file
+WRITE_MODE = 'wb'
+def unsafe(path):
+    create_file(path, WRITE_MODE)
+"""
+    )
+    assert _overwrite_findings(aliased_builtin) == {"builtins.open:wb"}
+
+
+def test_locator_guard_resolves_propagated_selector_constant() -> None:
+    propagated_locator = ast.parse(
+        """
+def unsafe(page):
+    selector = 'xpath=//button'
+    return page.locator(selector)
+"""
+    )
+    assert _unsafe_locator_findings(propagated_locator) == {"page.locator"}
+
+
+def test_locator_guard_allows_semantic_click_timeout() -> None:
+    semantic_click_timeout = ast.parse(
+        """
+def safe(control):
+    control.click(timeout=1000)
+"""
+    )
+    assert _unsafe_locator_findings(semantic_click_timeout) == set()
+
+
+def test_target_guard_resolves_variable_held_job_and_request_payloads() -> None:
+    variable_held_targets = ast.parse(
+        """
+from auraly_pipeline.images.domain import ImageGenerateRequest as Request
+from auraly_pipeline.jobs.domain import JobSubmit as Submit
+FLOW_KEY = 'flowUrl'
+job_payload = {FLOW_KEY: 'https://attacker.invalid'}
+request_payload = {'target': 'https://attacker.invalid'}
+def unsafe():
+    Submit(job_type='image.generate', input=job_payload)
+    Request(**request_payload)
+"""
+    )
+    assert _job_submit_injection_findings(variable_held_targets) == {
+        "flowUrl",
+        "target",
     }
