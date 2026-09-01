@@ -1029,6 +1029,8 @@ def _symbol_aliases(tree: ast.Module) -> dict[str, str]:
             if value is None:
                 continue
             resolved = _dotted_name(value, aliases)
+            if resolved is None and isinstance(value, ast.BinOp) and isinstance(value.op, ast.Div):
+                resolved = _dotted_name(value.left, aliases)
             if resolved is None:
                 continue
             for target in targets:
@@ -1118,6 +1120,20 @@ def _constant_value(node: ast.AST, constants: dict[str, object]) -> object:
         return node.value
     if isinstance(node, ast.Name):
         return constants.get(node.id, _MISSING)
+    if isinstance(node, ast.Subscript):
+        mapping = _constant_value(node.value, constants)
+        key = _constant_value(node.slice, constants)
+        if isinstance(mapping, dict) and isinstance(key, str):
+            return mapping.get(key, _MISSING)
+        return _MISSING
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Mult):
+        left = _constant_value(node.left, constants)
+        right = _constant_value(node.right, constants)
+        if isinstance(left, str) and isinstance(right, int):
+            return left * right
+        if isinstance(left, int) and isinstance(right, str):
+            return right * left
+        return _MISSING
     if isinstance(node, ast.Dict):
         result: dict[str, object] = {}
         for key_node, value_node in zip(node.keys, node.values, strict=True):
@@ -1149,6 +1165,14 @@ def _constant_bindings(tree: ast.Module) -> dict[str, object]:
                 if isinstance(target, ast.Name) and constants.get(target.id, _MISSING) != resolved:
                     constants[target.id] = resolved
                     changed = True
+                elif isinstance(target, ast.Subscript) and isinstance(target.value, ast.Name):
+                    current = constants.get(target.value.id)
+                    key = _constant_value(target.slice, constants)
+                    if isinstance(current, dict) and isinstance(key, str):
+                        updated = {**current, key: resolved}
+                        if updated != current:
+                            constants[target.value.id] = updated
+                            changed = True
         if not changed:
             break
     return constants
@@ -1161,7 +1185,11 @@ def _open_mode(
 ) -> str | None:
     if called.endswith("os.open"):
         return None
-    position = 1 if called in {"open", "builtins.open", "io.open"} else 0
+    position = (
+        1
+        if called in {"open", "builtins.open", "io.open"} or called.endswith("Path.open")
+        else 0
+    )
     mode_node: ast.AST | None = call.args[position] if len(call.args) > position else None
     for keyword in call.keywords:
         if keyword.arg == "mode":
@@ -1236,7 +1264,8 @@ def _unsafe_locator_findings(tree: ast.Module) -> set[str]:
                 and {"x", "y"} <= set(value)
                 for argument in call.args
             )
-            if coordinate_keywords or positional_coordinates:
+            mouse_coordinates = called.endswith(".mouse.click") and len(call.args) >= 2
+            if coordinate_keywords or positional_coordinates or mouse_coordinates:
                 findings.add(called)
         if tail in {"locator", "get_by_text", "get_by_role", "get_by_label"}:
             strings: list[str] = []
@@ -1562,3 +1591,62 @@ def unsafe():
         "flowUrl",
         "target",
     }
+
+
+def test_locator_guard_rejects_mouse_coordinate_click() -> None:
+    mouse_coordinates = ast.parse(
+        """
+def unsafe(page):
+    page.mouse.click(100, 200, delay=50)
+"""
+    )
+    assert _unsafe_locator_findings(mouse_coordinates) == {"page.mouse.click"}
+
+
+def test_locator_guard_resolves_mapping_held_xpath() -> None:
+    mapped_locator = ast.parse(
+        """
+def unsafe(page):
+    selectors = {'g': 'xpath=//button'}
+    return page.locator(selectors['g'])
+"""
+    )
+    assert _unsafe_locator_findings(mapped_locator) == {"page.locator"}
+
+
+def test_overwrite_guard_rejects_unbound_path_open() -> None:
+    unbound_open = ast.parse(
+        """
+from pathlib import Path
+WRITE_MODE = 'wb'
+def unsafe(path):
+    Path.open(path, WRITE_MODE)
+"""
+    )
+    assert _overwrite_findings(unbound_open) == {"pathlib.Path.open:wb"}
+
+
+def test_sensitive_read_guard_resolves_derived_profile_path() -> None:
+    derived_profile = ast.parse(
+        """
+def unsafe(profile_path):
+    opaque = profile_path / 'Default'
+    return opaque.read_bytes()
+"""
+    )
+    assert _sensitive_browser_reads(derived_profile) == {
+        "profile_path.read_bytes"
+    }
+
+
+def test_target_guard_resolves_mapping_mutation_before_job_submit() -> None:
+    mutated_payload = ast.parse(
+        """
+from auraly_pipeline.jobs.domain import JobSubmit
+payload = {'imageRequestFingerprint': '0' * 64}
+payload['flowUrl'] = 'https://attacker.invalid'
+def unsafe():
+    JobSubmit(job_type='image.generate', input=payload)
+"""
+    )
+    assert _job_submit_injection_findings(mutated_payload) == {"flowUrl"}
