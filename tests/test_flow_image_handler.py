@@ -4,6 +4,7 @@ import hashlib
 import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
+from typing import Any
 from uuid import uuid4
 
 from playwright.sync_api import sync_playwright
@@ -267,6 +268,7 @@ def test_flow_integrity_matrix_rejects_before_runtime_construction(
                 == submission.generation.image_generation_id
             )
         )
+        assert run is not None
         slots = list(
             session.scalars(
                 select(FlowCandidateSlotRow).where(
@@ -274,7 +276,7 @@ def test_flow_integrity_matrix_rejects_before_runtime_construction(
                 )
             )
         )
-        assert job is not None and run is not None and len(slots) == 2
+        assert job is not None and len(slots) == 2
         if corruption == "job_fingerprint":
             job.request_fingerprint = "0" * 64
         elif corruption == "scene_ownership":
@@ -335,20 +337,22 @@ def test_flow_integrity_matrix_rejects_before_runtime_construction(
         session.commit()
     calls = 0
 
-    def factory(*_args: object) -> object:
+    def factory(*_args: object) -> FlowGenerationRuntime:
         nonlocal calls
         calls += 1
         raise AssertionError("integrity rejection must precede browser construction")
 
+    execution_campaign_id = (
+        other_campaign_id if corruption == "scene_ownership" else campaign.campaign_id
+    )
+    assert execution_campaign_id is not None
     result = FlowImageGenerateHandler(
         images._sessions, work_root=work_root, _runtime_factory=factory
     ).execute(
         JobExecutionContext(
             job_id=submission.job.job_id,
             job_type="image.generate",
-            campaign_id=(
-                other_campaign_id if corruption == "scene_ownership" else campaign.campaign_id
-            ),
+            campaign_id=execution_campaign_id,
             input=submission.job.input,
             attempt_number=1,
         )
@@ -500,7 +504,7 @@ def test_download_intent_slot_is_rejected_before_runtime_construction(tmp_path: 
         session.commit()
     calls = 0
 
-    def factory(*_args: object) -> object:
+    def factory(*_args: object) -> FlowGenerationRuntime:
         nonlocal calls
         calls += 1
         raise AssertionError("must not construct runtime")
@@ -581,16 +585,19 @@ def test_checkpoint_database_lock_returns_flow_safe_blocked_result(
             armed = False
             raise OperationalError(
                 statement,
-                parameters,
+                None,
                 sqlite3.OperationalError("database is locked"),
             )
+
+    def runtime_factory(_context: object) -> Any:
+        return LockedCheckpointRuntime()
 
     event.listen(images._engine, "before_cursor_execute", lock_checkpoint_write)
     try:
         result = FlowImageGenerateHandler(
             images._sessions,
             work_root=work_root,
-            _runtime_factory=lambda _context: LockedCheckpointRuntime(),  # type: ignore[arg-type]
+            _runtime_factory=runtime_factory,
         ).execute(
             JobExecutionContext(
                 job_id=submission.job.job_id,
@@ -612,6 +619,7 @@ def test_checkpoint_database_lock_returns_flow_safe_blocked_result(
                 == submission.generation.image_generation_id
             )
         )
+        assert run is not None
         slots = list(
             session.scalars(
                 select(FlowCandidateSlotRow).where(
@@ -619,7 +627,6 @@ def test_checkpoint_database_lock_returns_flow_safe_blocked_result(
                 )
             )
         )
-        assert run is not None
         assert run.stage == "blocked"
         assert run.last_failure_code == "flow_recovery_blocked"
         assert run.dispatch_intent_at is None
@@ -677,10 +684,13 @@ def test_stale_checkpoint_conflict_does_not_regress_advanced_run(tmp_path: Path)
                 FlowGenerationObservation(reference_verified=True, prompt_verified=True)
             )
 
+    def runtime_factory(_context: object) -> Any:
+        return RacingCheckpointRuntime()
+
     result = FlowImageGenerateHandler(
         images._sessions,
         work_root=work_root,
-        _runtime_factory=lambda _context: RacingCheckpointRuntime(),  # type: ignore[arg-type]
+        _runtime_factory=runtime_factory,
     ).execute(
         JobExecutionContext(
             job_id=submission.job.job_id,
@@ -741,11 +751,13 @@ def test_completion_database_lock_returns_blocked_without_corrupting_committed_s
     expected_hashes: list[str] = []
     with images._sessions() as session:
         generation = session.get(ImageGenerationRow, submission.generation.image_generation_id)
+        assert generation is not None
         run = session.scalar(
             select(FlowGenerationRunRow).where(
                 FlowGenerationRunRow.image_generation_id == generation.id
             )
         )
+        assert run is not None
         slots = list(
             session.scalars(
                 select(FlowCandidateSlotRow)
@@ -753,7 +765,7 @@ def test_completion_database_lock_returns_blocked_without_corrupting_committed_s
                 .order_by(FlowCandidateSlotRow.slot_index)
             )
         )
-        assert generation is not None and run is not None and len(slots) == 2
+        assert len(slots) == 2
         generation.provider_state = "generating"
         run.stage = "downloading"
         for index, slot in enumerate(slots):
@@ -818,7 +830,7 @@ def test_completion_database_lock_returns_blocked_without_corrupting_committed_s
             armed = False
             raise OperationalError(
                 statement,
-                parameters,
+                None,
                 sqlite3.OperationalError("database is locked"),
             )
 

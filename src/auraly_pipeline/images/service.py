@@ -16,9 +16,11 @@ from auraly_pipeline.campaigns.db_models import CampaignRow, SceneVariantRow
 from auraly_pipeline.campaigns.persistence import create_sqlite_engine, migrate_database
 from auraly_pipeline.config_paths import configured_work_root
 from auraly_pipeline.flow.artifacts import (
+    FlowArtifactConflictError,
     FlowArtifactFacts,
     FlowArtifactInvalidError,
     inspect_flow_artifact,
+    publish_flow_artifact_exclusive,
     resolve_flow_final_path,
 )
 from auraly_pipeline.flow.config import (
@@ -451,6 +453,7 @@ class ImageService:
             IntegrityError,
             OSError,
             ValueError,
+            FlowArtifactConflictError,
             FlowArtifactInvalidError,
             JobTransitionError,
         ):
@@ -485,6 +488,7 @@ class ImageService:
             IntegrityError,
             OSError,
             ValueError,
+            FlowArtifactConflictError,
             FlowArtifactInvalidError,
             JobTransitionError,
         ):
@@ -881,12 +885,21 @@ class ImageService:
                 elif slot.state == "downloaded":
                     facts = self._recovery_downloaded_facts(generation, slot)
                     downloaded.append((slot, facts))
-                else:
+                elif slot.state not in {"observed", "download_intent_recorded"}:
                     raise ImageRecoveryBlockedError
             for slot, facts in downloaded:
                 self._ingest_recovered_slot(generation, run.id, slot.slot_index, facts)
-            self._complete_recovered_generation(generation.id, run.id)
-            return "staged_artifact_reconciled"
+            with self._sessions() as session:
+                slots = list(
+                    session.scalars(
+                        select(FlowCandidateSlotRow)
+                        .where(FlowCandidateSlotRow.flow_generation_run_id == run.id)
+                        .order_by(FlowCandidateSlotRow.slot_index)
+                    )
+                )
+            if [slot.state for slot in slots] == ["ingested", "ingested"]:
+                self._complete_recovered_generation(generation.id, run.id)
+                return "staged_artifact_reconciled"
 
         if run.dispatch_intent_at is None:
             if run.dispatch_confirmed_at is not None or any(
@@ -1027,11 +1040,13 @@ class ImageService:
             raise ImageRecoveryBlockedError
         staging = (self._work_root / slot.staging_path).resolve(strict=False)
         staging.relative_to(self._work_root)
+        staged: FlowArtifactFacts | None = None
         if staging.exists():
             staged = inspect_flow_artifact(staging)
             if staged.sha256 != slot.staged_sha256:
                 raise ImageRecoveryBlockedError
         matching: list[FlowArtifactFacts] = []
+        existing_final_count = 0
         for image_format in ("png", "jpeg", "webp"):
             final = resolve_flow_final_path(
                 work_root=self._work_root,
@@ -1042,12 +1057,32 @@ class ImageService:
                 image_format=image_format,
             )
             if final.exists():
+                existing_final_count += 1
                 facts = inspect_flow_artifact(final)
                 if facts.sha256 == slot.staged_sha256:
                     matching.append(facts)
-        if len(matching) != 1:
+        if len(matching) == 1:
+            if staged is not None and staged != matching[0]:
+                raise ImageRecoveryBlockedError
+            return matching[0]
+        if len(matching) > 1 or existing_final_count or staged is None:
             raise ImageRecoveryBlockedError
-        return matching[0]
+        final = resolve_flow_final_path(
+            work_root=self._work_root,
+            campaign_id=generation.campaign_id,
+            scene_variant_id=generation.scene_variant_id,
+            generation_number=generation.generation_number,
+            candidate_index=slot.slot_index,
+            image_format=staged.format,
+        )
+        published = publish_flow_artifact_exclusive(
+            staging,
+            final,
+            trusted_root=self._work_root,
+        )
+        if published != staged:
+            raise ImageRecoveryBlockedError
+        return published
 
     def _ingest_recovered_slot(
         self,

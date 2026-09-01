@@ -266,6 +266,13 @@ class FlowGenerationCheckpointSink:
     ) -> None:
         with _checkpoint_session(self._sessions) as session:
             now = self._clock()
+            generation_id: str | None = None
+            if confirmed:
+                current = session.get(FlowGenerationRunRow, self._run_id)
+                if current is None or current.stage not in expected:
+                    session.rollback()
+                    raise FlowCheckpointConflictError()
+                generation_id = current.image_generation_id
             values: dict[str, object] = {"stage": target, "updated_at": now}
             if workspace is not None:
                 values["provider_workspace_path"] = workspace.workspace_path
@@ -289,6 +296,21 @@ class FlowGenerationCheckpointSink:
             if changed != 1:
                 session.rollback()
                 raise FlowCheckpointConflictError()
+            if confirmed:
+                generation_changed = _rowcount(
+                    session.execute(
+                        update(ImageGenerationRow)
+                        .where(
+                            ImageGenerationRow.id == generation_id,
+                            ImageGenerationRow.provider_state == "generating",
+                            ImageGenerationRow.dispatched_at.is_(None),
+                        )
+                        .values(dispatched_at=now, updated_at=now)
+                    )
+                )
+                if generation_changed != 1:
+                    session.rollback()
+                    raise FlowCheckpointConflictError()
             session.commit()
         self._reload_run(target)
         self._run_stage = target
@@ -605,7 +627,6 @@ class FlowImageGenerateHandler:
             }:
                 raise FlowArtifactConflictError()
             generation.provider_state = "generating"
-            generation.dispatched_at = generation.dispatched_at or self._clock()
             generation.updated_at = self._clock()
             session.commit()
 
