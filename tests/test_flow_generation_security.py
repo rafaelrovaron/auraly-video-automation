@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 import hashlib
 import inspect
+from io import BytesIO
 import json
 from pathlib import Path
 import sqlite3
@@ -18,7 +19,6 @@ import pytest
 from sqlalchemy import select
 from typer.testing import CliRunner
 
-from auraly_pipeline import cli as cli_module
 from auraly_pipeline.campaigns.domain import CampaignCreate
 from auraly_pipeline.campaigns.service import CampaignService
 from auraly_pipeline.cli import app
@@ -48,6 +48,7 @@ from auraly_pipeline.images.domain import ImageGenerateRequest
 from auraly_pipeline.images.flow_handler import FlowImageGenerateHandler
 from auraly_pipeline.images.service import ImageRecoveryBlockedError, ImageService
 from auraly_pipeline.jobs.db_models import JobRow
+from auraly_pipeline.jobs.domain import JobSubmit
 from auraly_pipeline.jobs.handlers import JobExecutionContext, SimulatedWorkerCrash
 from tests.test_campaign_domain import valid_campaign_data
 from tests.test_flow_generation import _task9_runtime
@@ -393,13 +394,26 @@ def _durable_snapshot(
                 .order_by(ImageCandidateRow.candidate_index)
             )
         )
-        final_facts = {
-            candidate.source_path: candidate.sha256 for candidate in candidates
-        }
-        evidence_facts = {
+        artifact_facts = {
             path.relative_to(work_root).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
-            for path in work_root.rglob("*.png")
-            if "inspection" in path.parts
+            for path in sorted(work_root.rglob("*"))
+            if path.is_file()
+        }
+        canonical_final_facts = {
+            relative: sha256
+            for relative, sha256 in artifact_facts.items()
+            if Path(relative).name.startswith("candidate-")
+            and Path(relative).suffix in {".png", ".jpeg", ".webp"}
+        }
+        staging_artifact_facts = {
+            relative: sha256
+            for relative, sha256 in artifact_facts.items()
+            if ".staging" in Path(relative).parts or Path(relative).suffix == ".part"
+        }
+        grid_evidence_facts = {
+            relative: sha256
+            for relative, sha256 in artifact_facts.items()
+            if "inspection" in Path(relative).parts
         }
         return {
             "runStage": run.stage,
@@ -411,8 +425,13 @@ def _durable_snapshot(
                 (candidate.id, candidate.source_path, candidate.sha256)
                 for candidate in candidates
             ),
-            "finalFacts": final_facts,
-            "evidenceFacts": evidence_facts,
+            "candidateFinalFacts": {
+                candidate.source_path: candidate.sha256 for candidate in candidates
+            },
+            "canonicalFinalFacts": canonical_final_facts,
+            "stagingArtifactFacts": staging_artifact_facts,
+            "gridEvidenceFacts": grid_evidence_facts,
+            "artifactFacts": artifact_facts,
         }
 
 
@@ -428,14 +447,24 @@ def _assert_preserved_evidence(
     for index, fingerprint in enumerate(before_fingerprints):
         if fingerprint is not None:
             assert after_fingerprints[index] == fingerprint
-    for source_path, sha256 in cast(dict[str, str], before["finalFacts"]).items():
-        final = work_root / source_path
-        assert final.is_file()
-        assert hashlib.sha256(final.read_bytes()).hexdigest() == sha256
-    for source_path, sha256 in cast(dict[str, str], before["evidenceFacts"]).items():
-        evidence = work_root / source_path
-        assert evidence.is_file()
-        assert hashlib.sha256(evidence.read_bytes()).hexdigest() == sha256
+    before_artifacts = cast(dict[str, str], before["artifactFacts"])
+    after_artifacts = cast(dict[str, str], after["artifactFacts"])
+    before_staging = cast(dict[str, str], before["stagingArtifactFacts"])
+    after_finals = cast(dict[str, str], after["canonicalFinalFacts"])
+    for source_path, sha256 in before_artifacts.items():
+        if source_path in after_artifacts:
+            assert after_artifacts[source_path] == sha256
+            continue
+        assert source_path in before_staging
+        assert sha256 in after_finals.values()
+    for category in ("canonicalFinalFacts", "gridEvidenceFacts"):
+        before_category = cast(dict[str, str], before[category])
+        after_category = cast(dict[str, str], after[category])
+        for source_path, sha256 in before_category.items():
+            assert after_category[source_path] == sha256
+            artifact = work_root / source_path
+            assert artifact.is_file()
+            assert hashlib.sha256(artifact.read_bytes()).hexdigest() == sha256
     if before["gridPath"] is not None:
         assert after["gridPath"] == before["gridPath"]
         assert after["gridSha"] == before["gridSha"]
@@ -513,6 +542,44 @@ def test_complete_crash_matrix_recovers_without_redispatch_or_overwrite(
                     image_format=candidate.format,
                 )
                 assert (work_root / candidate.source_path).resolve() == expected.resolve()
+    finally:
+        service.close()
+
+
+@pytest.mark.parametrize(
+    ("crash_point", "published_slot"),
+    (("after_slot_0_final_publish", 0), ("after_slot_1_final_publish", 1)),
+)
+def test_crash_snapshot_includes_uningested_published_final(
+    tmp_path: Path,
+    crash_point: str,
+    published_slot: int,
+) -> None:
+    """A final published before candidate ingestion is still durable evidence."""
+    service, _clock, _scenario, generation_id, _job_id, work_root = _create_crash_service(
+        tmp_path,
+        crash_point,
+    )
+    try:
+        with pytest.raises(SimulatedWorkerCrash):
+            service.worker_once("task-12-published-final-worker", lease_seconds=1)
+        snapshot = _durable_snapshot(service, generation_id, work_root)
+        with service._sessions() as session:
+            generation = session.get(ImageGenerationRow, generation_id)
+            assert generation is not None
+        final = resolve_flow_final_path(
+            work_root=work_root,
+            campaign_id=generation.campaign_id,
+            scene_variant_id=generation.scene_variant_id,
+            generation_number=generation.generation_number,
+            candidate_index=published_slot,
+            image_format="png",
+        )
+        relative = final.relative_to(work_root).as_posix()
+        canonical_finals = cast(dict[str, str], snapshot["canonicalFinalFacts"])
+        all_artifacts = cast(dict[str, str], snapshot["artifactFacts"])
+        assert canonical_finals[relative] == hashlib.sha256(final.read_bytes()).hexdigest()
+        assert all_artifacts[relative] == canonical_finals[relative]
     finally:
         service.close()
 
@@ -647,19 +714,112 @@ def test_seeded_sensitive_corpus_does_not_spread_to_public_or_operational_bounda
         assert encoded not in logs
 
 
-def test_seeded_browser_corpus_is_absent_from_masked_grid(
-    tmp_path: Path,
-    flow_generation_page: Any,
+def _mask_pixel_coordinates(
+    bounds: tuple[tuple[int, int, int, int], ...],
+) -> set[tuple[int, int]]:
+    return {
+        (x, y)
+        for left, top, width, height in bounds
+        for x in range(left, left + width)
+        for y in range(top, top + height)
+    }
+
+
+def _assert_exact_raster_masks(
+    screenshot_png: bytes,
+    bounds: tuple[tuple[int, int, int, int], ...],
 ) -> None:
-    """The complete seeded corpus is absent from the published masked screenshot bytes."""
+    with Image.open(BytesIO(screenshot_png)) as image:
+        pixels = image.convert("RGB")
+        actual = {
+            (x, y)
+            for y in range(pixels.height)
+            for x in range(pixels.width)
+            if pixels.getpixel((x, y)) == (255, 0, 255)
+        }
+    assert actual == _mask_pixel_coordinates(bounds), "raster mask pixels differ from semantic bounds"
+
+
+def test_seeded_browser_corpus_is_covered_by_exact_semantic_raster_masks(
+    tmp_path: Path,
+    flow_generation_page: Page,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """All four private semantic regions are fully covered by the published raster masks."""
     work_root = tmp_path / "work"
     runtime = _task9_runtime("grid-two.html", flow_generation_page, work_root)
-    flow_generation_page.get_by_label("Prompt", exact=True).fill(" | ".join(DENY_VALUES))
+    seeded_regions = {
+        "Account identity": "person@example.com | AUTHORIZATION_SECRET | COOKIE_SECRET",
+        "Prompt": "PRIVATE PROMPT phrase | SIGNED_QUERY_SECRET | FRAGMENT_SECRET",
+        "Reference preview": "reference preview containing private source imagery",
+        "Upload filename": (
+            r"reference-secret.png | C:\Users\Private\reference-secret.png"
+            " | /home/private/reference-secret.png"
+        ),
+    }
+    assert all(value in " | ".join(seeded_regions.values()) for value in DENY_VALUES)
+    expected_labels = tuple(seeded_regions)
+    for index, (label, value) in enumerate(seeded_regions.items()):
+        locator = flow_generation_page.get_by_label(label, exact=True)
+        if label == "Prompt":
+            locator.fill(value)
+        elif label != "Reference preview":
+            locator.evaluate("(element, text) => { element.textContent = text; }", value)
+        locator.evaluate(
+            """(element, layout) => {
+                Object.assign(element.style, {
+                    position: 'fixed',
+                    left: `${layout.left}px`,
+                    top: `${layout.top}px`,
+                    width: `${layout.width}px`,
+                    height: `${layout.height}px`,
+                    margin: '0',
+                    padding: '0',
+                    border: '0',
+                    boxSizing: 'border-box',
+                    display: 'block',
+                    overflow: 'hidden',
+                    background: '#ffffff',
+                    color: '#000000',
+                    zIndex: '1000'
+                });
+            }""",
+            {"left": 20, "top": 20 + index * 50, "width": 320, "height": 32},
+        )
+
+    expected_bounds = tuple((20, 20 + index * 50, 320, 32) for index in range(4))
+    unmasked = flow_generation_page.screenshot(type="png", animations="disabled")
+    observed: list[tuple[str | None, tuple[int, int, int, int]]] = []
+    real_screenshot = Page.screenshot
+
+    def record_semantic_masks(page: Page, **kwargs: Any) -> bytes:
+        masks = tuple(kwargs.get("mask", ()))
+        for mask in masks:
+            box = mask.bounding_box()
+            assert box is not None
+            bounds = (
+                int(box["x"]),
+                int(box["y"]),
+                int(box["width"]),
+                int(box["height"]),
+            )
+            observed.append(
+                (
+                    mask.get_attribute("aria-label"),
+                    bounds,
+                )
+            )
+        return real_screenshot(page, **kwargs)
+
+    monkeypatch.setattr(Page, "screenshot", record_semantic_masks)
     evidence = runtime.capture_grid_evidence()
     screenshot_bytes = (work_root / evidence.relative_path).read_bytes()
 
-    for forbidden in DENY_VALUES:
-        assert forbidden.encode("utf-8") not in screenshot_bytes
+    assert tuple(label for label, _bounds in observed) == expected_labels
+    assert tuple(bounds for _label, bounds in observed) == expected_bounds
+    _assert_exact_raster_masks(screenshot_bytes, expected_bounds)
+    with pytest.raises(AssertionError, match="raster mask pixels"):
+        _assert_exact_raster_masks(unmasked, expected_bounds)
 
 
 def test_seeded_browser_corpus_is_absent_from_expanded_trace_and_result(
@@ -701,111 +861,346 @@ def _imported_modules(tree: ast.Module) -> set[str]:
     return modules
 
 
-def _function_nodes(tree: ast.Module, predicate: Any) -> list[ast.FunctionDef]:
-    return [
-        node
+def _dotted_name(node: ast.AST, aliases: dict[str, str]) -> str | None:
+    if isinstance(node, ast.Name):
+        return aliases.get(node.id, node.id)
+    if isinstance(node, ast.Attribute):
+        parent = _dotted_name(node.value, aliases)
+        return f"{parent}.{node.attr}" if parent else node.attr
+    return None
+
+
+def _symbol_aliases(tree: ast.Module) -> dict[str, str]:
+    aliases: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for imported in node.names:
+                aliases[imported.asname or imported.name.split(".")[0]] = imported.name
+        elif isinstance(node, ast.ImportFrom) and node.module is not None:
+            for imported in node.names:
+                aliases[imported.asname or imported.name] = f"{node.module}.{imported.name}"
+    assignments = [node for node in ast.walk(tree) if isinstance(node, (ast.Assign, ast.AnnAssign))]
+    for _ in range(len(assignments) + 1):
+        changed = False
+        for assignment in assignments:
+            targets = assignment.targets if isinstance(assignment, ast.Assign) else [assignment.target]
+            value = assignment.value
+            if value is None:
+                continue
+            resolved = _dotted_name(value, aliases)
+            if resolved is None:
+                continue
+            for target in targets:
+                if isinstance(target, ast.Name) and aliases.get(target.id) != resolved:
+                    aliases[target.id] = resolved
+                    changed = True
+        if not changed:
+            break
+    return aliases
+
+
+def _function_records(tree: ast.Module) -> dict[str, tuple[str | None, ast.FunctionDef]]:
+    records: dict[str, tuple[str | None, ast.FunctionDef]] = {}
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            if isinstance(node, ast.FunctionDef):
+                records[node.name] = (None, node)
+        elif isinstance(node, ast.ClassDef):
+            for child in node.body:
+                if isinstance(child, ast.FunctionDef):
+                    records[f"{node.name}.{child.name}"] = (node.name, child)
+    return records
+
+
+def _reachable_recovery_forbidden_calls(
+    tree: ast.Module,
+    *,
+    all_functions_are_roots: bool = False,
+) -> set[str]:
+    """Follow local recovery helpers and report any Generate-capable callsite."""
+    aliases = _symbol_aliases(tree)
+    records = _function_records(tree)
+    roots = {
+        key
+        for key, (_class_name, function) in records.items()
+        if all_functions_are_roots
+        or any(token in function.name for token in ("recover", "reconcile", "resolve_no_dispatch"))
+    }
+    pending = list(roots)
+    visited: set[str] = set()
+    forbidden: set[str] = set()
+    while pending:
+        key = pending.pop()
+        if key in visited:
+            continue
+        visited.add(key)
+        class_name, function = records[key]
+        for call in (node for node in ast.walk(function) if isinstance(node, ast.Call)):
+            called = _dotted_name(call.func, aliases)
+            if called is None:
+                continue
+            tail = called.rsplit(".", 1)[-1]
+            if tail in {
+                "click",
+                "resolve_generate_control",
+                "prepare_and_dispatch",
+                "_fresh_generate_control_after_intent",
+            }:
+                forbidden.add(called)
+            local: str | None = None
+            if called.startswith("self.") and class_name is not None:
+                local = f"{class_name}.{called.removeprefix('self.')}"
+            elif called in records:
+                local = called
+            elif class_name is not None and f"{class_name}.{called}" in records:
+                local = f"{class_name}.{called}"
+            if local in records and local not in visited:
+                pending.append(local)
+    return forbidden
+
+
+def _called_symbols(tree: ast.Module) -> set[str]:
+    aliases = _symbol_aliases(tree)
+    return {
+        called
         for node in ast.walk(tree)
-        if isinstance(node, ast.FunctionDef) and predicate(node.name)
-    ]
+        if isinstance(node, ast.Call)
+        and (called := _dotted_name(node.func, aliases)) is not None
+    }
+
+
+def _open_mode(call: ast.Call, called: str) -> str | None:
+    if called.endswith("os.open"):
+        return None
+    position = 0 if "." in called and called.rsplit(".", 1)[-1] == "open" else 1
+    mode_node: ast.AST | None = call.args[position] if len(call.args) > position else None
+    for keyword in call.keywords:
+        if keyword.arg == "mode":
+            mode_node = keyword.value
+    return mode_node.value if isinstance(mode_node, ast.Constant) and isinstance(mode_node.value, str) else None
+
+
+def _flag_symbols(node: ast.AST, aliases: dict[str, str]) -> set[str]:
+    symbols: set[str] = set()
+    for child in ast.walk(node):
+        if isinstance(child, (ast.Name, ast.Attribute)):
+            name = _dotted_name(child, aliases)
+            if name is not None:
+                symbols.add(name.rsplit(".", 1)[-1])
+    return symbols
+
+
+def _overwrite_findings(tree: ast.Module) -> set[str]:
+    aliases = _symbol_aliases(tree)
+    findings: set[str] = set()
+    for call in (node for node in ast.walk(tree) if isinstance(node, ast.Call)):
+        called = _dotted_name(call.func, aliases)
+        if called is None:
+            continue
+        tail = called.rsplit(".", 1)[-1]
+        receiver = called.rsplit(".", 1)[0].casefold() if "." in called else ""
+        path_replace = tail == "replace" and (
+            called.endswith("os.replace")
+            or any(
+                token in receiver
+                for token in ("path", "artifact", "staging", "final", "destination")
+            )
+        )
+        if path_replace or tail in {"write_bytes", "write_text", "copyfile", "copy2"}:
+            findings.add(called)
+        if tail == "open":
+            mode = _open_mode(call, called)
+            if mode is not None and "x" not in mode and (
+                mode.startswith(("w", "a")) or "+" in mode
+            ):
+                findings.add(f"{called}:{mode}")
+            if called.endswith("os.open"):
+                flags_node = call.args[1] if len(call.args) > 1 else next(
+                    (keyword.value for keyword in call.keywords if keyword.arg == "flags"),
+                    None,
+                )
+                flags = _flag_symbols(flags_node, aliases) if flags_node is not None else set()
+                if "O_TRUNC" in flags or ("O_CREAT" in flags and "O_EXCL" not in flags):
+                    findings.add(f"{called}:{','.join(sorted(flags))}")
+    return findings
+
+
+def _unsafe_locator_findings(tree: ast.Module) -> set[str]:
+    aliases = _symbol_aliases(tree)
+    findings: set[str] = set()
+    for call in (node for node in ast.walk(tree) if isinstance(node, ast.Call)):
+        called = _dotted_name(call.func, aliases)
+        if called is None:
+            continue
+        tail = called.rsplit(".", 1)[-1]
+        if tail == "nth":
+            findings.add(called)
+        if tail == "click" and (call.args or call.keywords):
+            findings.add(called)
+        if tail in {"locator", "get_by_text", "get_by_role", "get_by_label"}:
+            strings = [
+                value.value.casefold()
+                for value in (*call.args, *(keyword.value for keyword in call.keywords))
+                if isinstance(value, ast.Constant) and isinstance(value.value, str)
+            ]
+            if any(value.startswith("xpath=") or "nth-child" in value for value in strings):
+                findings.add(called)
+    return findings
+
+
+def _sensitive_browser_reads(tree: ast.Module) -> set[str]:
+    aliases = _symbol_aliases(tree)
+    findings: set[str] = set()
+    for call in (node for node in ast.walk(tree) if isinstance(node, ast.Call)):
+        called = _dotted_name(call.func, aliases)
+        if called is None:
+            continue
+        tail = called.rsplit(".", 1)[-1]
+        if tail in {"cookies", "storage_state"}:
+            findings.add(called)
+        if tail in {"read_bytes", "read_text", "open"}:
+            sources = [ast.unparse(call.func), *(ast.unparse(argument) for argument in call.args[:1])]
+            if any(
+                token in source.casefold()
+                for source in sources
+                for token in ("profile", "user_data", "cookie", "storage_state")
+            ):
+                findings.add(called)
+    return findings
+
+
+_TARGET_INJECTION_TOKENS = (
+    "flowurl",
+    "targeturl",
+    "runtimetarget",
+    "locator_target",
+    "target",
+    "factory",
+)
+
+
+def _is_target_injection_name(name: str) -> bool:
+    normalized = name.replace("-", "").replace("_", "").casefold()
+    return any(token.replace("_", "") in normalized for token in _TARGET_INJECTION_TOKENS)
+
+
+def _job_submit_injection_findings(tree: ast.Module) -> set[str]:
+    aliases = _symbol_aliases(tree)
+    findings: set[str] = set()
+    for call in (node for node in ast.walk(tree) if isinstance(node, ast.Call)):
+        called = _dotted_name(call.func, aliases)
+        if called is None or called.rsplit(".", 1)[-1] != "JobSubmit":
+            continue
+        for keyword in call.keywords:
+            if keyword.arg is not None and _is_target_injection_name(keyword.arg):
+                findings.add(keyword.arg)
+            if keyword.arg == "input" and isinstance(keyword.value, ast.Dict):
+                for key in keyword.value.keys:
+                    if isinstance(key, ast.Constant) and isinstance(key.value, str):
+                        if _is_target_injection_name(key.value):
+                            findings.add(key.value)
+    return findings
+
+
+def _environment_target_findings(tree: ast.Module) -> set[str]:
+    """Find environment-backed browser target keys at actual lookup callsites."""
+    findings: set[str] = set()
+    for node in ast.walk(tree):
+        candidates: list[ast.AST] = []
+        if isinstance(node, ast.Call):
+            candidates.extend(node.args)
+            candidates.extend(keyword.value for keyword in node.keywords)
+        elif isinstance(node, ast.Subscript):
+            candidates.append(node.slice)
+        for candidate in candidates:
+            if isinstance(candidate, ast.Constant) and isinstance(candidate.value, str):
+                normalized = candidate.value.replace("_", "").casefold()
+                if "flow" in normalized and ("url" in normalized or "target" in normalized):
+                    findings.add(candidate.value)
+    return findings
 
 
 def test_structural_boundaries_isolate_browser_and_recovery_mutation() -> None:
-    """Browser authority stays in Flow and recovery has no Generate-capable call path."""
+    """Browser authority and Generate mutation remain unreachable from all recovery owners."""
     for relative in ("images/service.py", "images/repository.py"):
         imports = _imported_modules(_module_tree(SOURCE_ROOT / relative))
         assert not any(module == "playwright" or module.startswith("playwright.") for module in imports)
 
     for path in sorted((SOURCE_ROOT / "flow").glob("generation*.py")):
-        source = path.read_text(encoding="utf-8").casefold()
-        for forbidden in (
-            "storage_state",
-            ".cookies(",
-            "profile_dir.read_",
-            "user_data_dir.read_",
-        ):
-            assert forbidden not in source
+        assert _sensitive_browser_reads(_module_tree(path)) == set()
+    assert _environment_target_findings(_module_tree(SOURCE_ROOT / "flow" / "config.py")) == set()
 
-    recovery_sources = (
-        SOURCE_ROOT / "flow" / "generation.py",
-        SOURCE_ROOT / "images" / "service.py",
+    recovery_owners = (
+        (SOURCE_ROOT / "flow" / "generation.py", False),
+        (SOURCE_ROOT / "images" / "service.py", False),
+        (SOURCE_ROOT / "images" / "flow_handler.py", False),
+        (SOURCE_ROOT / "images" / "repository.py", True),
     )
-    for path in recovery_sources:
-        tree = _module_tree(path)
-        functions = _function_nodes(
-            tree,
-            lambda name: "recover" in name or "reconcile" in name or "resolve_no_dispatch" in name,
-        )
-        for function in functions:
-            called_attributes = {
-                node.func.attr
-                for node in ast.walk(function)
-                if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
-            }
-            called_names = {
-                node.func.id
-                for node in ast.walk(function)
-                if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
-            }
-            assert "click" not in called_attributes
-            assert "resolve_generate_control" not in called_names
+    for path, all_functions_are_roots in recovery_owners:
+        assert _reachable_recovery_forbidden_calls(
+            _module_tree(path),
+            all_functions_are_roots=all_functions_are_roots,
+        ) == set()
 
     worker_tree = _module_tree(SOURCE_ROOT / "images" / "flow_handler.py")
-    worker_calls = {
-        node.func.attr if isinstance(node.func, ast.Attribute) else node.func.id
-        for node in ast.walk(worker_tree)
-        if isinstance(node, ast.Call) and isinstance(node.func, (ast.Attribute, ast.Name))
-    }
+    worker_calls = {symbol.rsplit(".", 1)[-1] for symbol in _called_symbols(worker_tree)}
     assert {"record_download_baseline", "wait_for_download"}.isdisjoint(worker_calls)
 
+    aliased_unsafe_recovery = ast.parse(
+        """
+from provider import resolve_generate_control as locate_generate
+def helper(page):
+    control = locate_generate(page)
+    control.click()
+def recover_generation(page):
+    delegated = helper
+    delegated(page)
+"""
+    )
+    assert _reachable_recovery_forbidden_calls(aliased_unsafe_recovery) == {
+        "control.click",
+        "provider.resolve_generate_control",
+    }
+    aliased_legacy_worker = ast.parse(
+        """
+from auraly_pipeline.image_generation import wait_for_download as await_legacy
+legacy = await_legacy
+def execute():
+    legacy()
+"""
+    )
+    assert "wait_for_download" in {
+        symbol.rsplit(".", 1)[-1] for symbol in _called_symbols(aliased_legacy_worker)
+    }
+    unsafe_sensitive_reads = ast.parse(
+        """
+def unsafe(context, profile_path):
+    context.storage_state()
+    profile_path.read_bytes()
+"""
+    )
+    assert _sensitive_browser_reads(unsafe_sensitive_reads) == {
+        "context.storage_state",
+        "profile_path.read_bytes",
+    }
 
-def test_structural_boundaries_prohibit_unsafe_selectors_overwrite_and_targets() -> None:
-    """No source seam can add overwrite, coordinate, positional, or arbitrary target behavior."""
+
+def test_structural_boundaries_prohibit_unsafe_selectors_overwrite_and_targets(
+    tmp_path: Path,
+) -> None:
+    """Callsites and persisted schemas reject overwrite, blind selectors, and target injection."""
     guarded = (
         SOURCE_ROOT / "flow" / "generation.py",
         SOURCE_ROOT / "flow" / "generation_locators.py",
         SOURCE_ROOT / "flow" / "artifacts.py",
         SOURCE_ROOT / "images" / "flow_handler.py",
+        SOURCE_ROOT / "images" / "service.py",
+        SOURCE_ROOT / "images" / "repository.py",
     )
     for path in guarded:
         tree = _module_tree(path)
-        strings = {
-            node.value.casefold()
-            for node in ast.walk(tree)
-            if isinstance(node, ast.Constant) and isinstance(node.value, str)
-        }
-        assert not any(
-            token in value
-            for value in strings
-            for token in ("xpath=", "nth-child", ".nth(")
-        )
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.Call):
-                continue
-            if (
-                isinstance(node.func, ast.Attribute)
-                and isinstance(node.func.value, ast.Name)
-                and node.func.value.id == "os"
-                and node.func.attr == "replace"
-            ):
-                pytest.fail(f"os.replace is forbidden in {path}")
-            if isinstance(node.func, ast.Attribute) and node.func.attr == "nth":
-                pytest.fail(f"blind nth selection is forbidden in {path}")
-            if isinstance(node.func, ast.Attribute) and node.func.attr == "click":
-                assert not node.args and not node.keywords
-            mode: str | None = None
-            if isinstance(node.func, ast.Attribute) and node.func.attr == "open" and node.args:
-                if isinstance(node.args[0], ast.Constant) and isinstance(node.args[0].value, str):
-                    mode = node.args[0].value
-            elif isinstance(node.func, ast.Name) and node.func.id == "open" and len(node.args) > 1:
-                if isinstance(node.args[1], ast.Constant) and isinstance(node.args[1].value, str):
-                    mode = node.args[1].value
-            if mode is not None:
-                assert "x" in mode or not (mode.startswith(("w", "a")) or "+" in mode)
-
-    config_source = (SOURCE_ROOT / "flow" / "config.py").read_text(encoding="utf-8")
-    assert "AURALY_FLOW_URL" not in config_source
-    cli_source = Path(cli_module.__file__).read_text(encoding="utf-8")
-    assert "--flow-url" not in cli_source
+        assert _overwrite_findings(tree) == set()
+        assert _unsafe_locator_findings(tree) == set()
 
     for callable_object in (
         ImageService.for_database,
@@ -823,15 +1218,73 @@ def test_structural_boundaries_prohibit_unsafe_selectors_overwrite_and_targets()
             } or parameter.name.endswith("_target"):
                 assert parameter.name.startswith("_")
 
-    cli_tree = _module_tree(Path(cli_module.__file__))
-    public_generation_commands = _function_nodes(
-        cli_tree,
-        lambda name: name.startswith("image_") and name.endswith("_command"),
+    request_fields = set(ImageGenerateRequest.model_json_schema()["properties"])
+    job_fields = set(JobSubmit.model_json_schema()["properties"])
+    assert not any(_is_target_injection_name(field) for field in request_fields | job_fields)
+    assert _job_submit_injection_findings(_module_tree(SOURCE_ROOT / "images" / "service.py")) == set()
+
+    help_result = CliRunner().invoke(app, ["image", "generate", "--help"])
+    assert help_result.exit_code == 0
+    normalized_help = help_result.stdout.casefold().replace("_", "-")
+    assert all(
+        option not in normalized_help
+        for option in ("--flow-url", "--target", "--runtime-factory", "--locator-target")
     )
-    for command in public_generation_commands:
-        parameter_names = {argument.arg for argument in command.args.args}
-        assert not any(
-            token in name
-            for name in parameter_names
-            for token in ("target", "runtime_factory", "flow_url")
-        )
+
+    database, work_root, _generation_id, job_id = _create_sensitive_generation(tmp_path)
+    service = ImageService.for_database(database, work_root=work_root)
+    try:
+        job_input = service._jobs.get_job(job_id).input
+        assert set(job_input) == {"imageRequestFingerprint"}
+        fingerprint = job_input["imageRequestFingerprint"]
+        assert isinstance(fingerprint, str) and len(fingerprint) == 64
+        int(fingerprint, 16)
+    finally:
+        service.close()
+
+    aliased_overwrite = ast.parse(
+        """
+import os as disk
+from pathlib import Path as ArtifactPath
+def unsafe(path: ArtifactPath):
+    path.write_bytes(b'replaced')
+    path.open(mode='wb')
+    disk.open(path, disk.O_WRONLY | disk.O_CREAT | disk.O_TRUNC)
+    disk.replace(path, path)
+"""
+    )
+    overwrite_findings = _overwrite_findings(aliased_overwrite)
+    assert any(finding.endswith("write_bytes") for finding in overwrite_findings)
+    assert any(finding.endswith("open:wb") for finding in overwrite_findings)
+    assert any("O_TRUNC" in finding for finding in overwrite_findings)
+    assert "os.replace" in overwrite_findings
+
+    unsafe_locators = ast.parse(
+        """
+def unsafe(page):
+    candidate = page.locator('xpath=//button').nth(0)
+    candidate.click(position={'x': 1, 'y': 2})
+"""
+    )
+    locator_findings = _unsafe_locator_findings(unsafe_locators)
+    assert {"page.locator", "candidate.click"}.issubset(locator_findings)
+    assert any(finding.endswith("nth") for finding in locator_findings)
+
+    aliased_job_target = ast.parse(
+        """
+from auraly_pipeline.jobs.domain import JobSubmit as Submit
+def unsafe():
+    return Submit(job_type='image.generate', input={'flowUrl': 'https://attacker.invalid'})
+"""
+    )
+    assert _job_submit_injection_findings(aliased_job_target) == {"flowUrl"}
+
+    unsafe_environment_target = ast.parse(
+        """
+def unsafe(environment):
+    return environment['AURALY_FLOW_TARGET_URL']
+"""
+    )
+    assert _environment_target_findings(unsafe_environment_target) == {
+        "AURALY_FLOW_TARGET_URL"
+    }
