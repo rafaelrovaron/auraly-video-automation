@@ -46,6 +46,7 @@ Provider verification is never inferred from mocks, local tests, or a commit nam
 | 3C — ElevenLabs Provider Canary | pending | pending | pending |
 | 4A — Image Domain & Persistence | yes | yes | not applicable |
 | 4B — Google Flow Browser Runtime | yes | yes | not established by Goal 4B |
+| 4C — Flow Generation, Download & Recovery | yes | yes | not established by Goal 4C |
 
 ## Resulting sequence
 
@@ -57,7 +58,7 @@ Goal 3   Voice Master                                 IMPLEMENTED / LOCAL_VERIFI
 Goal 3C  ElevenLabs Provider Canary                   PENDING
 Goal 4A  Image Domain & Persistence                   IMPLEMENTED / LOCAL_VERIFIED / PROVIDER N/A
 Goal 4B  Google Flow Browser Runtime                 IMPLEMENTED / LOCAL_VERIFIED / PROVIDER NOT ESTABLISHED
-Goal 4C  Flow Generation, Download & Recovery        PENDING
+Goal 4C  Flow Generation, Download & Recovery        IMPLEMENTED / LOCAL_VERIFIED / PROVIDER NOT ESTABLISHED
 Goal 4D  Image QC, Review & Provider Canary          PENDING
 Goal 5A  HeyGen Preflight & Asset Upload
 Goal 5B  Avatar Look & Avatar III Verification
@@ -460,6 +461,16 @@ No real generation is required.
 
 ## Goal 4C — Flow Generation, Download & Recovery
 
+### Status
+
+```text
+IMPLEMENTED       YES
+LOCAL_VERIFIED    YES
+PROVIDER_VERIFIED NOT ESTABLISHED
+
+BROWSER_PREFLIGHT_VERIFIED NOT RUN / NOT ESTABLISHED
+```
+
 ### Objective
 
 Connect the durable image domain to the verified browser runtime for resumable generation and
@@ -475,8 +486,9 @@ download.
   ingestion;
 - restart/resume and ambiguous post-dispatch recovery.
 
-P0 does not require downloading every visible candidate. Every intentionally downloaded
-candidate must be preserved, get its own `ImageCandidate`, and never overwrite another.
+The implemented P0 contract is fixed at exactly two intentionally selected semantic candidates,
+each downloaded as 2K. P0 does not require downloading every visible candidate. Every intentional
+download is preserved in its own `ImageCandidate` and never overwrites another.
 
 ### Explicitly excluded
 
@@ -490,14 +502,38 @@ Goals 4A–4B and approved Goal 4C design/plan.
 
 ### Exit criteria
 
-- upload/prompt/dispatch verification is evidence-backed;
-- a crash after dispatch cannot authorize blind second generation;
-- downloads correlate deterministically and ingest non-destructively;
-- restart recovers or stops for intervention without losing generation evidence.
+- upload/prompt/dispatch verification is evidence-backed and explicit provider authorization is
+  immutable/audited;
+- one Job owns one durable Flow run and exactly two durable candidate slots;
+- a crash after dispatch intent cannot authorize a blind second generation;
+- the exact semantic 2K action is the only operation inside its Playwright `expect_download`
+  scope, and both downloads ingest non-destructively;
+- restart recovery follows persisted evidence or stops for intervention without losing prior
+  generation/download evidence;
+- manual no-dispatch resolution requires an allowlisted operator and sanitized reason, preserves
+  prior attempt evidence, and cannot rewrite a confirmed dispatch.
 
 ### Verification
 
-Run the common baseline plus focused fake/local Flow generation, download, and recovery tests.
+The Task 14 independent review covered `1772957..d103366` and reported 2 Critical, 3 High, and 3
+Medium findings. All eight were accepted and fixed; the final scoped re-review of `5493121..03cc130`
+left no Critical/High finding open. The final technical chain ends with:
+
+```text
+d103366  ci: verify Flow generation recovery
+5493121  fix: enforce reviewed Goal 4C invariants
+03cc130  fix: align public Flow CLI contract
+```
+
+The fresh complete local gate on technical HEAD `03cc130` passed 13/13 steps with 1,110 tests
+approved and 17 skipped. Task 13 preserves Linux full and extends Windows focused with local-only
+Flow persistence, browser, synthetic-download, recovery, and security coverage. Those workflows
+contain no Google/provider route; Task 14 still requires both jobs to pass on the exact final
+documentation SHA after push, so this document does not pre-claim that result.
+
+No live Google Flow preflight or generation was executed, no provider credit was consumed, and no
+provider/browser canary was established. Goal 4D remains pending and owns image QC/review hardening
+plus the explicitly approved real Flow canary.
 
 ---
 

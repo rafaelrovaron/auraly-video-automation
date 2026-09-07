@@ -22,33 +22,36 @@ Pipeline local, determinística, retomável e auditável para produção em mass
 - CLI JSON `job submit/get/list/worker-once/cancel/resume/recover` e handlers fake determinísticos;
 - Voice Master persistente com API oficial ElevenLabs, processamento/QC local, aprovação humana,
   budget gate, reconciliação e proteção contra geração paga duplicada;
-- contratos Google Flow v1.1 e schema de manifesto;
-- trusted project/download roots, validação canônica de contexto e paths;
-- correlação segura de downloads, partial-download handling, finalização não destrutiva,
-  manifests e diagnósticos sanitizados.
+- contratos Google Flow v1.1, schema de manifesto e fronteira browser do Goal 4B;
+- trusted roots, validação canônica de contexto e paths, lock global do browser, locators
+  semânticos e diagnósticos sanitizados;
 - Goal 4A: `ImageGeneration` e `ImageCandidate` persistentes, migrations, invariantes de
   histórico/review e serviço de aplicação;
 - submissão atômica de `ImageGeneration` e `Job` vinculado, com idempotência, concorrência e
   recuperação local;
 - handler local determinístico `image.generate`, que cria exatamente duas candidatas PNG sem
   browser ou provider;
-- CLI JSON `image generate/regenerate/generation/candidate`, incluindo approve, reject e replace.
+- CLI JSON `image generate/regenerate/generation/candidate`, incluindo approve, reject e replace;
+- Goal 4C: execução explicitamente autorizada de `image.generate` por Google Flow/Playwright,
+  com um run durável, exatamente dois slots semânticos, dois downloads 2K correlacionados às
+  ações exatas e ingestão exclusiva sem overwrite;
+- recuperação orientada por evidências, checkpoints transacionais e resolução auditada de
+  não-dispatch, sem retry cego após uma intenção de Generate ambígua.
 
-### Parcialmente implementado
+### Limites ainda pendentes
 
-Os helpers legados `image-*` preparam e finalizam mecanicamente artefatos de imagem. O runtime
-Playwright que abre o Flow, verifica a UI, gera/preserva candidatas, seleciona o download 2K e
-captura trace ainda não foi implementado nem validado. Os contratos registram explicitamente
-`browserRuntimeStatus=not_implemented` e `imageQcStatus=not_implemented`; eles não afirmam que
-uma imagem foi gerada automaticamente ou que o QC 2K foi concluído.
+O Goal 4C implementa o caminho mecânico de geração, correlação, download e recuperação, mas não
+executou uma operação ao vivo no Google Flow. QC semântico/técnico completo, review integrado e
+o canário real pertencem ao Goal 4D. Portanto, a existência do runtime não prova que uma imagem
+real foi gerada no provider nem autoriza inferir aprovação visual.
 
 ### Planejado
 
-Runtime Google Flow, HeyGen MCP/OAuth, edição final,
-canário end-to-end e API/UI local estão sequenciados em `docs/GOAL-ROADMAP.md`. Captions, B-roll,
-música e render editorial também permanecem planejados; a integração oficial ElevenLabs, o
-processamento de Voice Master e transcript/QC já pertencem ao Goal 3 implementado. Nenhuma
-capacidade futura deve ser inferida apenas por constar no PRD.
+Image QC/review e canário Google Flow, HeyGen MCP/OAuth, edição final, canário end-to-end e API/UI
+local estão sequenciados em `docs/GOAL-ROADMAP.md`. Captions, B-roll, música e render editorial
+também permanecem planejados; a integração oficial ElevenLabs, o processamento de Voice Master e
+transcript/QC já pertencem ao Goal 3 implementado. Nenhuma capacidade futura deve ser inferida
+apenas por constar no PRD.
 
 ### Estado de verificação dos milestones
 
@@ -71,6 +74,25 @@ evidência independente de CI para o fechamento. Sua verificação de provider �
 implementação usa somente o handler local determinístico e não executa browser, Google Flow ou
 qualquer chamada de provider.
 
+Goal 4B — Google Flow Browser Runtime está `IMPLEMENTED` e `LOCAL_VERIFIED`, sem preflight ao vivo.
+Goal 4C — Flow Generation, Download & Recovery também está `IMPLEMENTED` e `LOCAL_VERIFIED`. A
+revisão independente do intervalo completo encontrou 2 achados Critical, 3 High e 3 Medium; todos
+foram aceitos e corrigidos, com re-review final sem Critical/High pendente. A verificação local
+completa do HEAD técnico `03cc130` passou com 1.110 testes aprovados, 17 ignorados e 13/13 etapas do
+harness. O workflow determinístico mantém Linux full e Windows focused, ambos sem rota ao Google;
+a evidência remota deve ser vinculada ao SHA final da documentação depois do push, sem antecipar o
+resultado neste documento.
+
+```text
+Goal 4C — Flow Generation, Download & Recovery
+
+IMPLEMENTED       YES
+LOCAL_VERIFIED    YES
+PROVIDER_VERIFIED NOT ESTABLISHED
+
+BROWSER_PREFLIGHT_VERIFIED NOT RUN / NOT ESTABLISHED
+```
+
 ## Arquitetura oficial de geração de imagens
 
 O único caminho suportado é:
@@ -86,17 +108,18 @@ Prompt criado pela IA/Hermes
 → approve/reject/regenerate
 ```
 
-A IA/Hermes cria os prompts e toma decisões criativas. A aplicação executará o workflow de
-forma mecânica, auditável e retomável. O browser usará perfil Chromium persistente dedicado,
-concorrência 1, seletores verificáveis por roles/labels/texto/DOM, screenshots e trace em
-falhas relevantes. Se a UI não puder ser confirmada, o worker deverá parar com segurança,
-sem cliques cegos por coordenadas. A grade visível terá evidência por screenshot; toda candidata
+A IA/Hermes cria os prompts e toma decisões criativas. A aplicação executa o trecho implementado
+do workflow de forma mecânica, auditável e retomável. O browser usa perfil Chromium persistente
+dedicado, concorrência 1, seletores verificáveis por roles/labels/texto/DOM, screenshots e trace em
+falhas relevantes. Se a UI não puder ser confirmada, o worker para com segurança, sem cliques
+cegos por coordenadas. A grade visível tem evidência por screenshot; toda candidata
 intencionalmente baixada e toda versão baixada rejeitada serão preservadas sem overwrite. Baixar
 toda candidata visível não é requisito P0.
 
 Google Flow + Playwright é o único provider/browser workflow ativo. Não há provider alternativo
-de geração de imagens. A dependência Playwright Python está declarada, mas o browser runtime
-continua planejado no PRD e não deve ser confundido com funcionalidade pronta.
+de geração de imagens. O runtime e a recuperação do Goal 4C estão implementados e verificados por
+fixtures locais determinísticas; QC/review completo e prova contra o provider real continuam
+pendentes no Goal 4D.
 
 ## Documentação da automação em massa
 
@@ -397,16 +420,15 @@ no commit `1a96525`. Nem execução local nem CI estabelece `PROVIDER_VERIFIED`.
 A sequência imediata é:
 
 ```text
-roadmap/process alignment
-→ Verification Harness (implemented)
-→ Goal 4B design
+Goal 4C IMPLEMENTED / LOCAL_VERIFIED
+→ Goal 4D Image QC, Review & Provider Canary (pending)
 ```
 
 Goal 4 foi decomposto em `4A Image Domain & Persistence`, `4B Google Flow Browser Runtime`,
 `4C Flow Generation, Download & Recovery` e `4D Image QC, Review & Provider Canary`. Goals 4A e
-4B estão `IMPLEMENTED` e `LOCAL_VERIFIED`; 4C e 4D permanecem planejados. Specs e planos futuros
-vivem respectivamente em `docs/superpowers/specs/` e `docs/superpowers/plans/`; qualquer canário
-real continua exigindo aprovação explícita.
+4B–4C estão `IMPLEMENTED` e `LOCAL_VERIFIED`; 4D permanece pendente. Specs e planos vivem
+respectivamente em `docs/superpowers/specs/` e `docs/superpowers/plans/`; qualquer canário real
+continua exigindo aprovação explícita.
 
 ### Goal 4B — Google Flow Browser Runtime
 
@@ -422,3 +444,33 @@ inspeciona candidatas, não executa QC, não integra `ImageGeneration` e não re
 provider. `PROVIDER_VERIFIED` não foi estabelecido; `BROWSER_PREFLIGHT_VERIFIED` permanece não
 executado/não estabelecido até um preflight ao vivo, explicitamente aprovado e acompanhado por um
 operador.
+
+### Goal 4C — Flow Generation, Download & Recovery
+
+O `image.generate` continua usando `local-fake` por padrão. O caminho público
+`playwright-python` exige autorização explícita e persistida, bytes da referência validados antes
+de abrir o browser e uma rota relativa de workspace Flow que satisfaça o contrato confiável. Um
+Job possui um `FlowGenerationRun` e exatamente dois `FlowCandidateSlot`; intenção e confirmação
+do Generate, identidades dos slots, evidência da grade, intenção/download 2K, ingestão e conclusão
+são checkpoints duráveis protegidos contra workers obsoletos.
+
+Cada download é correlacionado pelo escopo literal da ação semântica correspondente:
+
+```python
+with page.expect_download(...) as pending:
+    action.click()
+```
+
+O runtime seleciona exatamente duas candidatas semânticas, valida os bytes como PNG/JPEG/WebP com
+eixo máximo de pelo menos 2048 pixels e publica cada final de forma exclusiva. Recuperação usa
+evidências já persistidas e nunca clica em Generate; uma intenção ambígua somente avança com
+evidência positiva ou com `resolve-no-dispatch` explícito, auditado por operador e motivo.
+
+A faixa implementada e revisada é `1772957..03cc130`. A cadeia técnica de marcos termina em
+`d103366` (CI determinístico), `5493121` (correções dos achados aceitos) e `03cc130` (contrato
+público final da CLI). A revisão independente do intervalo integral foi seguida por correções com
+regressões e re-review sem Critical/High pendente.
+
+Nenhum comando de preflight ou geração ao vivo foi executado, nenhum crédito do Google Flow foi
+consumido e nenhum login/provider foi validado. O Goal 4D permanece pendente e é o único que poderá
+estabelecer QC/review completo e `PROVIDER_VERIFIED` para o ciclo de imagens.

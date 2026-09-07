@@ -1,7 +1,7 @@
 # Auraly Mass Video Pipeline — Memória do Projeto
 
 **Status:** documento vivo
-**Última consolidação:** 2026-08-15
+**Última consolidação:** 2026-09-07
 **Projeto:** `<AURALY_ROOT>/pipeline`
 **Responsável de produto:** Rafael Rovaron
 **Uso:** contexto permanente para humanos, agentes de IA e futuras sessões de implementação.
@@ -205,11 +205,17 @@ Decisões:
 - perfil Chromium persistente e isolado;
 - login manual inicial;
 - não usar o perfil pessoal principal do Chrome;
-- download sempre em 2K;
+- `local-fake` é o executor público padrão e persiste como `local_fake`; `playwright-python`
+  persiste como `playwright_python` e exige autorização explícita e durável;
+- cada geração Flow possui um Job, um run durável e exatamente dois slots de candidatas;
+- download sempre em 2K para exatamente duas candidatas semanticamente identificadas;
 - concorrência inicial igual a 1;
 - capturar screenshot/checkpoints;
 - gerar trace em falhas;
 - centralizar seletores em módulo versionado;
+- registrar intenção antes do Generate e nunca redisparar cegamente após estado ambíguo;
+- correlacionar cada download somente ao escopo Playwright da ação 2K semântica correspondente;
+- recuperar a partir de checkpoints/artefatos verificados ou bloquear para intervenção;
 - parar com `human_intervention_required` quando a UI mudar em vez de clicar por coordenadas incertas.
 
 Fluxo canônico:
@@ -235,6 +241,13 @@ Não precisa baixar todas as candidatas visíveis se isso tornar o browser frág
 intencionalmente baixada deve ser preservada sem overwrite, receber seu próprio registro e manter
 o histórico de aprovação/rejeição. Baixar todas as candidatas permanece enhancement, salvo se
 vier a ser mecanicamente necessário.
+
+Goal 4C implementou a parte mecânica até ingestão e recuperação. O runtime valida a referência em
+bytes antes de abrir o browser, verifica o prompt persistido, grava checkpoints por compare-and-set,
+publica artefatos de forma exclusiva e sanitiza dados operacionais. Recuperação não expõe ação de
+Generate; uma intenção ambígua requer evidência positiva ou resolução manual de não-dispatch com
+operador e motivo append-only. QC/review completo e o canário real continuam pertencendo ao Goal
+4D.
 
 ### 4.4 Entrega
 
@@ -297,6 +310,19 @@ persistido. Deve vincular Campaign, SceneVariant e Job e preservar generation nu
 do prompt, referência/hash, provider/executor, provider state, dispatch timestamp e timestamps de
 auditoria. Esta entidade permite distinguir uma geração iniciada de uma candidata baixada e evita
 regeneração cega após falha ambígua do browser.
+
+### FlowGenerationRun / FlowCandidateSlot
+
+- cada geração com executor persistido `playwright_python` possui um `FlowGenerationRun` e
+  exatamente dois `FlowCandidateSlot` persistidos atomicamente com a autorização e o Job;
+- o run preserva stage, tentativa de dispatch, timestamps de intenção/confirmação, identidade do
+  workspace e evidência sanitizada da grade;
+- cada slot preserva fingerprint semântico, intenção de download, staging/hash e vínculo ao
+  `ImageCandidate` final;
+- transições e ingestão usam compare-and-set/transações imediatas para impedir avanço por worker
+  obsoleto;
+- dispatch anterior somente pode ser reaberto por uma cadeia auditada, consecutiva e explícita de
+  resolução de não-dispatch.
 
 ### ImageCandidate
 
@@ -641,18 +667,29 @@ Implementado atualmente:
 - HyperFrames `0.7.104`, versão stable validada e fixada no lockfile, atrás de adapter;
 - Auto-Editor instalado e verificado.
 
-Parcialmente implementado para imagens:
+Implementado para imagens até o Goal 4C:
 
-- contratos e schema Google Flow v1.1;
-- preparação mecânica de requests e diretórios de inspeção;
-- trusted project root e trusted downloads root;
-- validação de paths/contexto, detecção de downloads e partial downloads;
-- finalização não destrutiva, manifests e erros públicos sanitizados.
+- contratos/schema Google Flow e `ImageGeneration`/`ImageCandidate` persistentes;
+- runtime Playwright headed com perfil dedicado, lock global, rota fixa e locators semânticos;
+- submissão pública `playwright-python`, persistida como `playwright_python`, somente com
+  autorização explícita, referência/hash e workspace relativo confiável; `local-fake`, persistido
+  como `local_fake`, permanece o padrão;
+- um Flow run durável e exatamente dois slots por geração, com checkpoints transacionais de
+  input, dispatch, observação, download, ingestão e conclusão;
+- referência capturada/decodificada em bytes antes do browser e prompt verificado por hash;
+- intenção de Generate persistida antes do único clique, com confirmação somente por evidência
+  semântica positiva;
+- exatamente duas candidatas 2K correlacionadas pelo escopo literal
+  `expect_download` da ação semântica correspondente;
+- staging e publicação final exclusivos, com contenção de trusted root, validação de bytes/hash e
+  nenhuma rota de overwrite;
+- recuperação orientada por evidências e resolução auditada de não-dispatch, sem Generate no
+  caminho de recovery;
+- screenshots/traces/resultados sanitizados e contratos públicos com códigos tipados.
 
-Ainda planejado/não validado: runtime Playwright que abre o Flow, usa o perfil Chromium
-dedicado, verifica seletores, gera candidatas, confirma o download 2K, produz trace e executa o
-gate de QC/review. A existência dos contratos não deve ser interpretada como automação Flow
-funcional.
+Ainda pendente no Goal 4D: QC técnico/semântico completo, integração final de review e o canário
+real do Google Flow. Nenhum preflight ou geração ao vivo foi executado no Goal 4C; a implementação
+local não estabelece `BROWSER_PREFLIGHT_VERIFIED` nem `PROVIDER_VERIFIED`.
 
 Configuração operacional da Campaign Foundation e da Persistent Job Orchestration:
 
@@ -677,7 +714,11 @@ Configuração operacional da Campaign Foundation e da Persistent Job Orchestrat
 - Goal 4A -- Image Domain & Persistence está `IMPLEMENTED` e `LOCAL_VERIFIED`: a Task 12 concluiu
   o harness determinístico completo no HEAD local de código `088d556`; os jobs Linux full e Windows
   focused do GitHub Actions foram aprovados no commit final `1a96525`, estabelecendo evidência
-  independente de CI. O próximo subgoal de imagem é Goal 4B -- Google Flow Browser Runtime.
+  independente de CI;
+- Goal 4B -- Google Flow Browser Runtime está `IMPLEMENTED` e `LOCAL_VERIFIED`, sem preflight ao
+  vivo;
+- Goal 4C -- Flow Generation, Download & Recovery está `IMPLEMENTED` e `LOCAL_VERIFIED`; o próximo
+  subgoal de imagem é Goal 4D -- Image QC, Review & Provider Canary.
 
 Terminologia obrigatória de milestone:
 
@@ -687,9 +728,10 @@ Terminologia obrigatória de milestone:
 - `PROVIDER_VERIFIED`: canário real explicitamente aprovado foi concluído com sucesso.
 
 O histórico de commits com `[verified]` não prova por si só verificação independente, CI ou
-provider. Estado atual: Goals 0–3 e Goal 4A estão `IMPLEMENTED` e `LOCAL_VERIFIED`; Goal 3 não está
-`PROVIDER_VERIFIED`; Goal 3C está `PENDING`; para Goal 4A, `PROVIDER_VERIFIED` é `N/A` e os jobs
-independentes de CI Linux full e Windows focused foram aprovados no commit `1a96525`.
+provider. Estado atual: Goals 0–3 e Goals 4A–4C estão `IMPLEMENTED` e `LOCAL_VERIFIED`; Goal 3 não
+está `PROVIDER_VERIFIED`; Goal 3C está `PENDING`; para Goal 4A, `PROVIDER_VERIFIED` é `N/A`; para
+Goals 4B–4C, `PROVIDER_VERIFIED` não foi estabelecido e `BROWSER_PREFLIGHT_VERIFIED` permanece
+`NOT RUN / NOT ESTABLISHED`.
 
 O README antigo descreve a pipeline principalmente como pós-produção de um MP4 do HeyGen. O novo escopo amplia a aplicação para geração em massa end-to-end. A implementação deve preservar compatibilidade com ingest/render existentes sempre que possível.
 
@@ -886,6 +928,42 @@ estabelece evidência independente de CI. Nenhuma delas estabelece `PROVIDER_VER
 - screenshots, traces e resultados são sanitizados e diagnósticos são append-only; browser e
   contexto são fechados antes do resultado. A CLI expõe contrato JSON estável de seis status e
   respectivos códigos de saída;
-- a cobertura determinística inclui Linux/Xvfb e Windows. Goal 4C (geração/download) e Goal 4D
-  (canário de provider/QC) continuam pendentes. Nenhum preflight ao vivo foi executado: isso não
-  estabelece `BROWSER_PREFLIGHT_VERIFIED`, nem `PROVIDER_VERIFIED`.
+- a cobertura determinística inclui Linux/Xvfb e Windows. Goal 4C (geração/download) foi
+  implementado separadamente; Goal 4D (canário de provider/QC) continua pendente. Nenhum preflight
+  ao vivo foi executado: isso não estabelece `BROWSER_PREFLIGHT_VERIFIED`, nem
+  `PROVIDER_VERIFIED`.
+
+### Goal 4C — Flow Generation, Download & Recovery (`IMPLEMENTED` / `LOCAL_VERIFIED`)
+
+```text
+IMPLEMENTED       YES
+LOCAL_VERIFIED    YES
+PROVIDER_VERIFIED NOT ESTABLISHED
+
+BROWSER_PREFLIGHT_VERIFIED NOT RUN / NOT ESTABLISHED
+```
+
+- `local-fake` continua sendo o default público e persiste como `local_fake`; o caminho público
+  `playwright-python` persiste como `playwright_python` e requer autorização explícita, ator
+  seguro, referência verificada e rota relativa de workspace validada pelo mesmo contrato do
+  runtime;
+- um `image.generate` Job possui um run durável e exatamente dois slots. Intent/confirmation do
+  Generate, fingerprints, evidência de grid, downloads, ingestão e conclusão são checkpoints
+  protegidos por compare-and-set;
+- cada candidata é reidentificada semanticamente e o seu único `action.click()` 2K fica dentro do
+  `page.expect_download(...)` correspondente; nenhum inventário genérico de Downloads, filename,
+  URL ou heurística temporal define identidade;
+- artefatos PNG/JPEG/WebP são decodificados, exigem eixo máximo de ao menos 2048 pixels e são
+  publicados por vínculo exclusivo sem overwrite, com proteção contra escape por link/junction;
+- recuperação é offline-first/evidence-driven e nunca oferece Generate. Estado ambíguo só avança
+  com evidência positiva ou `resolve-no-dispatch` explícito e auditado, preservando tentativas
+  anteriores;
+- a revisão independente do intervalo integral encontrou 2 Critical, 3 High e 3 Medium. Todos os
+  oito achados foram aceitos e corrigidos; o re-review final deixou zero Critical/High pendente;
+- a faixa implementada/revisada é `1772957..03cc130`. Os marcos técnicos finais são `d103366`
+  (CI determinístico), `5493121` (invariantes do review) e `03cc130` (contrato público da CLI);
+- o gate completo local do HEAD técnico `03cc130` passou 13/13 etapas, com 1.110 testes aprovados e
+  17 ignorados. Linux full e Windows focused possuem cobertura determinística local-only sem rota
+  ao Google; o resultado remoto somente pode ser atribuído ao SHA final depois do push;
+- nenhum preflight, login, navegação ou geração ao vivo ocorreu e nenhum crédito do Google Flow foi
+  consumido. Goal 4D permanece pendente e é responsável por QC/review completo e canário real.
