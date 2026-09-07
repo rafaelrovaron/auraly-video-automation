@@ -14,7 +14,7 @@ from pydantic import ValidationError
 from auraly_pipeline.campaigns.domain import CampaignCreate
 from auraly_pipeline.campaigns.persistence import default_database_path
 from auraly_pipeline.campaigns.service import CampaignError, CampaignService
-from auraly_pipeline.flow import FlowPreflightService
+from auraly_pipeline.flow import FlowPreflightService, FlowWorkspaceIdentity
 from auraly_pipeline.image_generation import (
     DEFAULT_RETRY_COUNT,
     DEFAULT_TIMEOUT_SECONDS,
@@ -414,7 +414,7 @@ def _image_generate(
     prompt_snapshot: str,
     reference_image_path: str | None,
     reference_image_sha256: str | None,
-    executor: Literal["local_fake", "playwright_python"],
+    executor: Literal["local-fake", "playwright-python"],
     provider_action_approved_by: str | None,
     confirm_provider_action: bool,
     provider_workspace_path: str | None,
@@ -424,6 +424,17 @@ def _image_generate(
 ) -> None:
     service: ImageService | None = None
     try:
+        domain_executor: Literal["local_fake", "playwright_python"] = (
+            "playwright_python" if executor == "playwright-python" else "local_fake"
+        )
+        workspace = None
+        if provider_workspace_path is not None:
+            workspace = FlowWorkspaceIdentity(
+                workspace_path=provider_workspace_path,
+                fingerprint=hashlib.sha256(
+                    provider_workspace_path.encode("utf-8")
+                ).hexdigest(),
+            )
         request = ImageGenerateRequest(
             campaign_id=campaign_id,
             scene_variant_id=scene_variant_id,
@@ -431,19 +442,17 @@ def _image_generate(
             prompt_snapshot=prompt_snapshot,
             reference_image_path=reference_image_path,
             reference_image_sha256=reference_image_sha256,
-            executor=executor,
+            executor=domain_executor,
             generation_contract_version=(
                 "flow-generation-v1"
-                if executor == "playwright_python"
+                if domain_executor == "playwright_python"
                 else "image-generation-v1"
             ),
             provider_action_confirmed=confirm_provider_action,
             provider_action_approved_by=provider_action_approved_by,
-            provider_workspace_path=provider_workspace_path,
+            provider_workspace_path=(None if workspace is None else workspace.workspace_path),
             provider_workspace_fingerprint=(
-                None
-                if provider_workspace_path is None
-                else hashlib.sha256(provider_workspace_path.encode("utf-8")).hexdigest()
+                None if workspace is None else workspace.fingerprint
             ),
         )
         service = _image_service(database, work_root)
@@ -470,8 +479,8 @@ def image_generate_command(
         str | None, typer.Option("--reference-image-sha256")
     ] = None,
     executor: Annotated[
-        Literal["local_fake", "playwright_python"], typer.Option("--executor")
-    ] = "local_fake",
+        Literal["local-fake", "playwright-python"], typer.Option("--executor")
+    ] = "local-fake",
     provider_action_approved_by: Annotated[
         str | None, typer.Option("--provider-action-approved-by")
     ] = None,
@@ -513,8 +522,8 @@ def image_regenerate_command(
         str | None, typer.Option("--reference-image-sha256")
     ] = None,
     executor: Annotated[
-        Literal["local_fake", "playwright_python"], typer.Option("--executor")
-    ] = "local_fake",
+        Literal["local-fake", "playwright-python"], typer.Option("--executor")
+    ] = "local-fake",
     provider_action_approved_by: Annotated[
         str | None, typer.Option("--provider-action-approved-by")
     ] = None,

@@ -141,6 +141,7 @@ def test_image_generate_and_generation_get_emit_structured_json(tmp_path: Path) 
     assert generated.exit_code == 0
     generated_payload = json.loads(generated.stdout)
     assert generated_payload["success"] is True
+    assert generated_payload["generation"]["executor"] == "local_fake"
     generation_id = generated_payload["generation"]["imageGenerationId"]
     assert generated_payload["generation"]["jobId"] == generated_payload["job"]["jobId"]
     assert generated_payload["generation"]["sceneVariantId"] == scenes[0]
@@ -204,7 +205,7 @@ def test_image_generate_cli_persists_explicit_flow_authorization_and_workspace(
             "--reference-image-sha256",
             hashlib.sha256(reference.read_bytes()).hexdigest(),
             "--executor",
-            "playwright_python",
+            "playwright-python",
             "--provider-action-approved-by",
             "operator-1",
             "--confirm-provider-action",
@@ -232,7 +233,19 @@ def test_image_generate_cli_persists_explicit_flow_authorization_and_workspace(
 
 @pytest.mark.parametrize(
     "workspace_path",
-    ("https://labs.google/fx/tools/flow/x", "../flow/x", "fx/tools/flow/x?token=y"),
+    (
+        "https://labs.google/fx/tools/flow/x",
+        "../flow/x",
+        "fx/tools/flow/x?token=y",
+        "fx/tools/flow/x#fragment",
+        "fx/tools/flow",
+        "/fx/tools/flow/x",
+        "fx/tools/flow/x/",
+        "fx/tools/flow//x",
+        "fx\\tools\\flow\\x",
+        "fx/tools/flow/UPPER",
+        "fx/tools/flow/noncanonical.name",
+    ),
 )
 def test_image_generate_cli_rejects_untrusted_flow_workspace_route(
     tmp_path: Path,
@@ -260,13 +273,66 @@ def test_image_generate_cli_rejects_untrusted_flow_workspace_route(
             "--reference-image-sha256",
             hashlib.sha256(reference.read_bytes()).hexdigest(),
             "--executor",
-            "playwright_python",
+            "playwright-python",
             "--provider-action-approved-by",
             "operator-1",
             "--confirm-provider-action",
             "--provider-workspace-path",
             workspace_path,
         ],
+    )
+
+    assert generated.exit_code != 0
+
+
+def test_image_generate_cli_rejects_private_underscore_executor_spelling(
+    tmp_path: Path,
+) -> None:
+    database, work_root, campaign_id, scenes = _database(tmp_path)
+    reference = work_root / "references" / "avatar.png"
+    reference.parent.mkdir(parents=True)
+    Image.new("RGB", (4, 4)).save(reference)
+
+    generated = runner.invoke(
+        app,
+        _generate_args(
+            database,
+            work_root,
+            campaign_id,
+            scenes[0],
+            idempotency_key="cli-internal-executor",
+        )
+        + [
+            "--reference-image-path",
+            "references/avatar.png",
+            "--reference-image-sha256",
+            hashlib.sha256(reference.read_bytes()).hexdigest(),
+            "--executor",
+            "playwright_python",
+            "--provider-action-approved-by",
+            "operator-1",
+            "--confirm-provider-action",
+            "--provider-workspace-path",
+            "fx/tools/flow/cli-workspace",
+        ],
+    )
+
+    assert generated.exit_code != 0
+
+
+def test_image_generate_cli_rejects_private_local_fake_spelling(tmp_path: Path) -> None:
+    database, work_root, campaign_id, scenes = _database(tmp_path)
+
+    generated = runner.invoke(
+        app,
+        _generate_args(
+            database,
+            work_root,
+            campaign_id,
+            scenes[0],
+            idempotency_key="cli-internal-local-fake",
+        )
+        + ["--executor", "local_fake"],
     )
 
     assert generated.exit_code != 0
