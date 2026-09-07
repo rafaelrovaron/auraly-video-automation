@@ -113,7 +113,7 @@ def _flow_service(
     campaigns.close()
     reference = work_root / "references" / "avatar.png"
     reference.parent.mkdir(parents=True)
-    reference.write_bytes(b"trusted-reference")
+    Image.new("RGB", (4, 4), color=(16, 32, 64)).save(reference)
     runtime = runtime or ReadOnlyRecoveryRuntime()
     service = ImageService.for_database(
         database,
@@ -502,7 +502,7 @@ def test_recover_generation_blocks_unsafe_or_ambiguous_evidence(
             event = session.scalar(
                 select(JobEventRow).where(
                     JobEventRow.job_id == job_id,
-                    JobEventRow.event_type == "job.authorized",
+                    JobEventRow.event_type == "job.provider_action_authorized",
                 )
             )
             assert event is not None
@@ -510,7 +510,7 @@ def test_recover_generation_blocks_unsafe_or_ambiguous_evidence(
                 JobEventRow(
                     id=str(uuid4()),
                     job_id=job_id,
-                    event_type="job.authorized",
+                    event_type="job.provider_action_authorized",
                     timestamp=event.timestamp,
                     metadata_json={"executor": "local_fake"},
                 )
@@ -1084,7 +1084,7 @@ def test_resolve_no_dispatch_rejects_unsafe_or_inconsistent_state(
             authorization = session.scalar(
                 select(JobEventRow).where(
                     JobEventRow.job_id == job_id,
-                    JobEventRow.event_type == "job.authorized",
+                    JobEventRow.event_type == "job.provider_action_authorized",
                 )
             )
             assert authorization is not None
@@ -1092,7 +1092,7 @@ def test_resolve_no_dispatch_rejects_unsafe_or_inconsistent_state(
                 JobEventRow(
                     id=str(uuid4()),
                     job_id=job_id,
-                    event_type="job.authorized",
+                    event_type="job.provider_action_authorized",
                     timestamp=authorization.timestamp,
                     metadata_json={"executor": "local_fake"},
                 )

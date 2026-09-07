@@ -233,6 +233,7 @@ class _CrashMatrixRuntime:
         local = publish_flow_grid_evidence(
             self._scenario.source_artifacts[0].read_bytes(),
             evidence_root=final.parent / "inspection",
+            trusted_root=self._context.work_root,
         )
         published = final.parent / "inspection" / local.relative_path
         return FlowGridEvidence(
@@ -323,7 +324,7 @@ def _create_crash_service(
     campaigns.close()
     reference = work_root / "references" / "avatar.png"
     reference.parent.mkdir(parents=True)
-    reference.write_bytes(b"trusted-reference")
+    Image.new("RGB", (4, 4), color=(16, 32, 64)).save(reference)
     clock = _MutableClock()
     scenario = _CrashScenario(crash_point, _source_artifacts(tmp_path))
     service = ImageService.for_database(
@@ -689,7 +690,7 @@ def _create_sensitive_generation(tmp_path: Path) -> tuple[Path, Path, str, str]:
     campaigns.close()
     reference = work_root / "references" / "reference-secret.png"
     reference.parent.mkdir(parents=True)
-    reference.write_bytes(b"trusted-reference")
+    Image.new("RGB", (4, 4), color=(16, 32, 64)).save(reference)
     service = ImageService.for_database(database, clock=lambda: NOW, work_root=work_root)
     submission = service.generate(
         ImageGenerateRequest(

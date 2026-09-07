@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import logging
 import sys
 from datetime import UTC, datetime
@@ -413,6 +414,10 @@ def _image_generate(
     prompt_snapshot: str,
     reference_image_path: str | None,
     reference_image_sha256: str | None,
+    executor: Literal["local_fake", "playwright_python"],
+    provider_action_approved_by: str | None,
+    confirm_provider_action: bool,
+    provider_workspace_path: str | None,
     database: Path,
     work_root: Path,
     regenerate: bool,
@@ -426,6 +431,20 @@ def _image_generate(
             prompt_snapshot=prompt_snapshot,
             reference_image_path=reference_image_path,
             reference_image_sha256=reference_image_sha256,
+            executor=executor,
+            generation_contract_version=(
+                "flow-generation-v1"
+                if executor == "playwright_python"
+                else "image-generation-v1"
+            ),
+            provider_action_confirmed=confirm_provider_action,
+            provider_action_approved_by=provider_action_approved_by,
+            provider_workspace_path=provider_workspace_path,
+            provider_workspace_fingerprint=(
+                None
+                if provider_workspace_path is None
+                else hashlib.sha256(provider_workspace_path.encode("utf-8")).hexdigest()
+            ),
         )
         service = _image_service(database, work_root)
         submission = service.regenerate(request) if regenerate else service.generate(request)
@@ -450,10 +469,22 @@ def image_generate_command(
     reference_image_sha256: Annotated[
         str | None, typer.Option("--reference-image-sha256")
     ] = None,
+    executor: Annotated[
+        Literal["local_fake", "playwright_python"], typer.Option("--executor")
+    ] = "local_fake",
+    provider_action_approved_by: Annotated[
+        str | None, typer.Option("--provider-action-approved-by")
+    ] = None,
+    confirm_provider_action: Annotated[
+        bool, typer.Option("--confirm-provider-action")
+    ] = False,
+    provider_workspace_path: Annotated[
+        str | None, typer.Option("--provider-workspace-path")
+    ] = None,
     database: Annotated[Path, typer.Option("--database")] = default_database_path(),
     work_root: Annotated[Path, typer.Option("--work-root")] = Path("work"),
 ) -> None:
-    """Queue one deterministic local-fake image generation without executing it."""
+    """Queue one validated image generation without executing provider work."""
     _image_generate(
         campaign_id=campaign_id,
         scene_variant_id=scene_variant_id,
@@ -461,6 +492,10 @@ def image_generate_command(
         prompt_snapshot=prompt_snapshot,
         reference_image_path=reference_image_path,
         reference_image_sha256=reference_image_sha256,
+        executor=executor,
+        provider_action_approved_by=provider_action_approved_by,
+        confirm_provider_action=confirm_provider_action,
+        provider_workspace_path=provider_workspace_path,
         database=database,
         work_root=work_root,
         regenerate=False,
@@ -477,6 +512,18 @@ def image_regenerate_command(
     reference_image_sha256: Annotated[
         str | None, typer.Option("--reference-image-sha256")
     ] = None,
+    executor: Annotated[
+        Literal["local_fake", "playwright_python"], typer.Option("--executor")
+    ] = "local_fake",
+    provider_action_approved_by: Annotated[
+        str | None, typer.Option("--provider-action-approved-by")
+    ] = None,
+    confirm_provider_action: Annotated[
+        bool, typer.Option("--confirm-provider-action")
+    ] = False,
+    provider_workspace_path: Annotated[
+        str | None, typer.Option("--provider-workspace-path")
+    ] = None,
     database: Annotated[Path, typer.Option("--database")] = default_database_path(),
     work_root: Annotated[Path, typer.Option("--work-root")] = Path("work"),
 ) -> None:
@@ -488,6 +535,10 @@ def image_regenerate_command(
         prompt_snapshot=prompt_snapshot,
         reference_image_path=reference_image_path,
         reference_image_sha256=reference_image_sha256,
+        executor=executor,
+        provider_action_approved_by=provider_action_approved_by,
+        confirm_provider_action=confirm_provider_action,
+        provider_workspace_path=provider_workspace_path,
         database=database,
         work_root=work_root,
         regenerate=True,

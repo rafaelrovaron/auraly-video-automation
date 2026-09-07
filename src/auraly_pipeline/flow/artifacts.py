@@ -5,6 +5,7 @@ from __future__ import annotations
 import errno
 import hashlib
 import importlib
+from io import BytesIO
 import os
 import re
 import stat
@@ -53,6 +54,16 @@ class FlowArtifactFacts:
 
 
 @dataclass(frozen=True)
+class FlowReferenceUpload:
+    """One validated immutable reference payload captured before browser startup."""
+
+    name: str
+    mime_type: str
+    payload: bytes
+    sha256: str
+
+
+@dataclass(frozen=True)
 class _FileIdentity:
     device: int
     inode: int
@@ -72,6 +83,17 @@ class _StagingCleanupBinding:
     descriptor: int
     parent_descriptor: int
     windows_delete_handle: bool
+
+
+@dataclass(frozen=True)
+class _PublicationDirectoryBinding:
+    source_descriptor: int
+    destination_descriptor: int
+    source_identity: _FileIdentity
+    destination_identity: _FileIdentity
+    staging_name: str
+    final_name: str
+    artifact_identity: _FileIdentity
 
 
 def allocate_flow_staging_path(
@@ -133,6 +155,78 @@ def inspect_flow_artifact(path: Path) -> FlowArtifactFacts:
     return _inspect_artifact(path).facts
 
 
+def capture_flow_reference(path: Path, expected_sha256: str) -> FlowReferenceUpload:
+    """Capture, decode, and authorize one regular reference file exactly once."""
+    if re.fullmatch(r"[0-9a-f]{64}", expected_sha256) is None:
+        raise FlowArtifactInvalidError("reference SHA-256 is invalid")
+    initial = _regular_file_stat(path)
+    if initial.st_size <= 0 or initial.st_size > _MAX_ARTIFACT_BYTES:
+        raise FlowArtifactInvalidError("reference size is outside the permitted range")
+    identity = _identity_from_stat(initial)
+    try:
+        descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_BINARY", 0))
+    except OSError as exc:
+        raise FlowArtifactInvalidError("unable to open reference") from exc
+    try:
+        opened = os.fstat(descriptor)
+        if not stat.S_ISREG(opened.st_mode) or _identity_from_stat(opened) != identity:
+            raise FlowArtifactInvalidError("reference identity changed while opening")
+        with os.fdopen(descriptor, "rb", closefd=False) as stream:
+            payload = stream.read(_MAX_ARTIFACT_BYTES + 1)
+        if len(payload) != initial.st_size or len(payload) > _MAX_ARTIFACT_BYTES:
+            raise FlowArtifactInvalidError("reference changed while reading")
+        final = _regular_file_stat(path)
+        if (
+            _identity_from_stat(final) != identity
+            or final.st_size != initial.st_size
+            or os.fstat(descriptor).st_size != initial.st_size
+        ):
+            raise FlowArtifactInvalidError("reference changed while reading")
+    except OSError as exc:
+        raise FlowArtifactInvalidError("reference capture failed") from exc
+    finally:
+        os.close(descriptor)
+
+    digest = hashlib.sha256(payload).hexdigest()
+    if digest != expected_sha256:
+        raise FlowArtifactInvalidError("reference SHA-256 does not match captured bytes")
+    payload_stream = BytesIO(payload)
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", Image.DecompressionBombWarning)
+            old_max_pixels = Image.MAX_IMAGE_PIXELS
+            Image.MAX_IMAGE_PIXELS = _MAX_ARTIFACT_PIXELS
+            try:
+                with Image.open(payload_stream) as image:
+                    image.verify()
+                    pillow_format = image.format
+                payload_stream.seek(0)
+                with Image.open(payload_stream) as image:
+                    image.load()
+                    if image.format != pillow_format or image.width <= 0 or image.height <= 0:
+                        raise FlowArtifactInvalidError("reference image is invalid")
+            finally:
+                Image.MAX_IMAGE_PIXELS = old_max_pixels
+    except (Image.DecompressionBombError, OSError, SyntaxError, UnidentifiedImageError) as exc:
+        raise FlowArtifactInvalidError("reference does not fully decode") from exc
+    except Image.DecompressionBombWarning as exc:
+        raise FlowArtifactInvalidError("reference exceeds the pixel limit") from exc
+    try:
+        image_format = _PILLOW_FORMATS[pillow_format or ""]
+        suffix = _FORMAT_SUFFIXES[image_format]
+    except KeyError as exc:
+        raise FlowArtifactInvalidError("reference format is unsupported") from exc
+    payload_stream.seek(0)
+    _validate_container(payload_stream, image_format, len(payload))
+    mime_type = "image/jpeg" if image_format == "jpeg" else f"image/{image_format}"
+    return FlowReferenceUpload(
+        name=f"reference{suffix}",
+        mime_type=mime_type,
+        payload=payload,
+        sha256=digest,
+    )
+
+
 def publish_flow_artifact_exclusive(
     staging_path: Path,
     final_path: Path,
@@ -156,22 +250,36 @@ def publish_flow_artifact_exclusive(
     if final.suffix.lower() != _FORMAT_SUFFIXES[staged.facts.format]:
         raise FlowArtifactInvalidError("final artifact suffix does not match staged bytes")
 
+    binding: _PublicationDirectoryBinding | None = None
     try:
         if _before_flow_artifact_link is not None:
             _before_flow_artifact_link()
         _assert_bound_artifact(staging, root, root_identity, staged.identity)
         _assert_root_identity(root, root_identity)
         _contained_path(final, root)
+        binding = _bind_publication_directories(staging, final, staged.identity)
         if _after_flow_artifact_revalidation_before_link is not None:
             _after_flow_artifact_revalidation_before_link()
-        os.link(staging, final)
+        _link_bound_publication(binding, staging, final)
     except FileExistsError:
+        if binding is not None:
+            _close_publication_binding(binding)
         return _recover_matching_final(staging, final, staged, root, root_identity)
     except FlowArtifactInvalidError as exc:
+        if binding is not None:
+            _close_publication_binding(binding)
         raise FlowArtifactConflictError("Flow artifact changed before publication") from exc
     except OSError as exc:
+        if binding is not None:
+            _close_publication_binding(binding)
         raise FlowArtifactConflictError("exclusive Flow artifact publication failed") from exc
+    except BaseException:
+        if binding is not None:
+            _close_publication_binding(binding)
+        raise
 
+    if binding is None:
+        raise AssertionError("publication binding was not established")
     try:
         _assert_bound_artifact(staging, root, root_identity, staged.identity)
         _assert_bound_artifact(final, root, root_identity, staged.identity)
@@ -187,6 +295,29 @@ def publish_flow_artifact_exclusive(
         _sync_file_and_directory(final)
         _assert_bound_artifact(final, root, root_identity, staged.identity)
         _assert_bound_artifact(staging, root, root_identity, staged.identity)
+    except (FlowArtifactConflictError, FlowArtifactInvalidError) as exc:
+        try:
+            _remove_escaped_bound_final(binding, staging, final)
+        finally:
+            _close_publication_binding(binding)
+        if isinstance(exc, FlowArtifactConflictError):
+            raise
+        raise FlowArtifactConflictError("Flow artifact changed during publication") from exc
+    except OSError as exc:
+        try:
+            _remove_escaped_bound_final(binding, staging, final)
+        finally:
+            _close_publication_binding(binding)
+        raise FlowArtifactConflictError("Flow artifact publication could not be finalized") from exc
+    except BaseException:
+        try:
+            _remove_escaped_bound_final(binding, staging, final)
+        finally:
+            _close_publication_binding(binding)
+        raise
+    _close_publication_binding(binding)
+
+    try:
         cleanup = _bind_staging_cleanup(staging, root, root_identity, staged.identity)
         _run_cleanup_race_hook(cleanup)
         _finalize_bound_staging_cleanup(cleanup, staging.parent)
@@ -200,6 +331,139 @@ def publish_flow_artifact_exclusive(
     except OSError as exc:
         raise FlowArtifactConflictError("Flow artifact publication could not be finalized") from exc
     return staged.facts
+
+
+def _remove_escaped_bound_final(
+    binding: _PublicationDirectoryBinding,
+    staging: Path,
+    final: Path,
+) -> None:
+    try:
+        current = (
+            not _path_is_link_or_junction(staging.parent)
+            and _directory_identity(staging.parent) == binding.source_identity
+            and not _path_is_link_or_junction(final.parent)
+            and _directory_identity(final.parent) == binding.destination_identity
+        )
+    except FlowArtifactInvalidError:
+        current = False
+    if current:
+        return
+    try:
+        if os.name == "nt":
+            metadata = _regular_file_stat(final)
+            if _identity_from_stat(metadata) != binding.artifact_identity:
+                raise FlowArtifactInvalidError("escaped final artifact identity changed")
+            final.unlink()
+        else:
+            metadata = os.stat(
+                binding.final_name,
+                dir_fd=binding.destination_descriptor,
+                follow_symlinks=False,
+            )
+            if not stat.S_ISREG(metadata.st_mode) or _identity_from_stat(metadata) != binding.artifact_identity:
+                raise FlowArtifactInvalidError("escaped final artifact identity changed")
+            os.unlink(binding.final_name, dir_fd=binding.destination_descriptor)
+    except FileNotFoundError:
+        return
+    except OSError as exc:
+        raise FlowArtifactConflictError("escaped Flow artifact could not be removed") from exc
+
+
+def _bind_publication_directories(
+    staging: Path,
+    final: Path,
+    artifact_identity: _FileIdentity,
+) -> _PublicationDirectoryBinding:
+    source_identity = _directory_identity(staging.parent)
+    destination_identity = _directory_identity(final.parent)
+    if os.name == "nt":
+        source_descriptor = _open_windows_parent_lock(staging.parent, source_identity)
+        try:
+            destination_descriptor = _open_windows_parent_lock(
+                final.parent,
+                destination_identity,
+            )
+        except BaseException:
+            os.close(source_descriptor)
+            raise
+    else:
+        if os.stat not in os.supports_dir_fd or os.link not in os.supports_dir_fd:
+            raise FlowArtifactInvalidError(
+                "platform cannot bind artifact publication to directory handles"
+            )
+        flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+        try:
+            source_descriptor = os.open(staging.parent, flags)
+            destination_descriptor = os.open(final.parent, flags)
+        except OSError as exc:
+            if "source_descriptor" in locals():
+                os.close(source_descriptor)
+            raise FlowArtifactInvalidError("unable to bind publication directories") from exc
+    binding = _PublicationDirectoryBinding(
+        source_descriptor=source_descriptor,
+        destination_descriptor=destination_descriptor,
+        source_identity=source_identity,
+        destination_identity=destination_identity,
+        staging_name=staging.name,
+        final_name=final.name,
+        artifact_identity=artifact_identity,
+    )
+    try:
+        _assert_publication_binding(binding)
+    except BaseException:
+        _close_publication_binding(binding)
+        raise
+    return binding
+
+
+def _assert_publication_binding(binding: _PublicationDirectoryBinding) -> None:
+    if (
+        _identity_from_stat(os.fstat(binding.source_descriptor)) != binding.source_identity
+        or _identity_from_stat(os.fstat(binding.destination_descriptor))
+        != binding.destination_identity
+    ):
+        raise FlowArtifactInvalidError("publication directory identity changed")
+    if os.name != "nt":
+        metadata = os.stat(
+            binding.staging_name,
+            dir_fd=binding.source_descriptor,
+            follow_symlinks=False,
+        )
+        if not stat.S_ISREG(metadata.st_mode) or _identity_from_stat(metadata) != binding.artifact_identity:
+            raise FlowArtifactInvalidError("staging artifact changed during publication binding")
+
+
+def _link_bound_publication(
+    binding: _PublicationDirectoryBinding,
+    staging: Path,
+    final: Path,
+) -> None:
+    _assert_publication_binding(binding)
+    if (
+        _path_is_link_or_junction(staging.parent)
+        or _directory_identity(staging.parent) != binding.source_identity
+        or _path_is_link_or_junction(final.parent)
+        or _directory_identity(final.parent) != binding.destination_identity
+    ):
+        raise FlowArtifactInvalidError("publication directory changed before link")
+    if os.name == "nt":
+        os.link(staging, final)
+        return
+    os.link(
+        binding.staging_name,
+        binding.final_name,
+        src_dir_fd=binding.source_descriptor,
+        dst_dir_fd=binding.destination_descriptor,
+        follow_symlinks=False,
+    )
+
+
+def _close_publication_binding(binding: _PublicationDirectoryBinding) -> None:
+    try:
+        os.close(binding.source_descriptor)
+    finally:
+        os.close(binding.destination_descriptor)
 
 
 def _recover_matching_final(

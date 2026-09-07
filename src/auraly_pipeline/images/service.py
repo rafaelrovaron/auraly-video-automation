@@ -19,6 +19,7 @@ from auraly_pipeline.flow.artifacts import (
     FlowArtifactConflictError,
     FlowArtifactFacts,
     FlowArtifactInvalidError,
+    capture_flow_reference,
     inspect_flow_artifact,
     publish_flow_artifact_exclusive,
     resolve_flow_final_path,
@@ -351,12 +352,13 @@ class ImageService:
                     JobEventRow(
                         id=str(uuid4()),
                         job_id=job.id,
-                        event_type="job.authorized",
+                        event_type="job.provider_action_authorized",
                         timestamp=timestamp,
                         metadata_json={
                             "executor": "playwright_python",
                             "approvedBy": request.provider_action_approved_by,
-                            "workspaceFingerprint": request.provider_workspace_fingerprint,
+                            "candidateCount": 2,
+                            "resolution": "2K",
                         },
                     )
                 )
@@ -684,7 +686,7 @@ class ImageService:
             session.scalars(
                 select(JobEventRow).where(
                     JobEventRow.job_id == job.id,
-                    JobEventRow.event_type == "job.authorized",
+                    JobEventRow.event_type == "job.provider_action_authorized",
                 )
             )
         )
@@ -694,7 +696,8 @@ class ImageService:
             != {
                 "executor": "playwright_python",
                 "approvedBy": run.provider_action_approved_by,
-                "workspaceFingerprint": run.provider_workspace_fingerprint,
+                "candidateCount": 2,
+                "resolution": "2K",
             }
             or authorizations[0].timestamp != run.provider_action_approved_at
         ):
@@ -728,10 +731,10 @@ class ImageService:
         self._validate_recovery_state_compatibility(generation, run, slots)
         if generation.reference_image_path is None or generation.reference_image_sha256 is None:
             raise ImageRecoveryBlockedError
-        reference = (self._work_root / generation.reference_image_path).resolve(strict=True)
-        reference.relative_to(self._work_root)
-        if hashlib.sha256(reference.read_bytes()).hexdigest() != generation.reference_image_sha256:
-            raise ImageRecoveryBlockedError
+        lexical_reference = self._work_root / generation.reference_image_path
+        resolved_reference = lexical_reference.resolve(strict=True)
+        resolved_reference.relative_to(self._work_root)
+        capture_flow_reference(lexical_reference, generation.reference_image_sha256)
         if (
             hashlib.sha256(generation.prompt_snapshot.encode("utf-8")).hexdigest()
             != generation.prompt_sha256

@@ -4,8 +4,10 @@ from datetime import UTC, datetime
 from dataclasses import fields
 import hashlib
 import json
+import os
 from pathlib import Path
 import struct
+import subprocess
 from typing import Any
 import zlib
 from zipfile import ZIP_DEFLATED, ZIP_STORED, ZipFile
@@ -24,6 +26,20 @@ from auraly_pipeline.flow.domain import (
     FlowPreflightResult,
     NonReadyFlowPreflightStatus,
 )
+
+
+def _replace_directory_with_link(link: Path, target: Path) -> None:
+    if os.name == "nt":
+        created = subprocess.run(
+            ["cmd", "/c", "mklink", "/J", str(link), str(target)],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if created.returncode != 0:
+            pytest.skip("junctions unavailable in this environment")
+    else:
+        link.symlink_to(target, target_is_directory=True)
 
 
 TIMESTAMP = datetime(2026, 8, 16, tzinfo=UTC)
@@ -1452,14 +1468,14 @@ def test_grid_evidence_publication_is_exclusive_sanitized_and_relative(
 ) -> None:
     publish = getattr(diagnostics_module, "publish_flow_grid_evidence")
 
-    published = publish(PNG_BYTES, evidence_root=tmp_path)
+    published = publish(PNG_BYTES, evidence_root=tmp_path, trusted_root=tmp_path)
 
     payload = (tmp_path / published.relative_path).read_bytes()
     assert [item.name for item in fields(published)] == ["relative_path", "sha256"]
     assert published.relative_path == "grid.png"
     assert published.sha256 == hashlib.sha256(payload).hexdigest()
     with pytest.raises(FlowDiagnosticSanitizationError):
-        publish(PNG_BYTES, evidence_root=tmp_path)
+        publish(PNG_BYTES, evidence_root=tmp_path, trusted_root=tmp_path)
     assert (tmp_path / "grid.png").read_bytes() == payload
 
 
@@ -1477,6 +1493,7 @@ def test_grid_evidence_rejects_unsanitized_or_invalid_bytes_without_publication(
         publish(
             screenshot_png,
             evidence_root=tmp_path,
+            trusted_root=tmp_path,
             deny_values=("PRIVATE PROMPT",),
         )
 
@@ -1488,19 +1505,66 @@ def test_grid_evidence_removes_visible_file_if_staging_cleanup_fails(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     publish = getattr(diagnostics_module, "publish_flow_grid_evidence")
-    real_unlink = diagnostics_module._unlink_if_present
+    real_unlink = diagnostics_module._unlink_bound_grid_file
 
-    def fail_stage_cleanup(path: Path) -> None:
+    def fail_stage_cleanup(binding: Any, path: Path) -> None:
         if path.suffix == ".stage":
             raise FlowDiagnosticSanitizationError()
-        real_unlink(path)
+        real_unlink(binding, path)
 
-    monkeypatch.setattr(diagnostics_module, "_unlink_if_present", fail_stage_cleanup)
+    monkeypatch.setattr(diagnostics_module, "_unlink_bound_grid_file", fail_stage_cleanup)
 
     with pytest.raises(FlowDiagnosticSanitizationError):
-        publish(PNG_BYTES, evidence_root=tmp_path)
+        publish(PNG_BYTES, evidence_root=tmp_path, trusted_root=tmp_path)
 
     assert not (tmp_path / "grid.png").exists()
+
+
+def test_grid_evidence_rejects_preexisting_link_outside_trusted_root(
+    tmp_path: Path,
+) -> None:
+    trusted_root = tmp_path / "trusted"
+    trusted_root.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    evidence_root = trusted_root / "evidence"
+    _replace_directory_with_link(evidence_root, outside)
+
+    with pytest.raises(FlowDiagnosticSanitizationError):
+        diagnostics_module.publish_flow_grid_evidence(
+            PNG_BYTES,
+            evidence_root=evidence_root,
+            trusted_root=trusted_root,
+        )
+
+    assert not (outside / "grid.png").exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX directory-handle race regression")
+def test_grid_evidence_directory_move_race_leaves_no_file_outside_trusted_root(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    trusted_root = tmp_path / "trusted"
+    trusted_root.mkdir()
+    evidence_root = trusted_root / "evidence"
+    outside = tmp_path / "outside-evidence"
+    real_link = diagnostics_module._link_bound_grid_file
+
+    def move_after_link(binding: Any, stage: Path, final: Path) -> None:
+        real_link(binding, stage, final)
+        evidence_root.rename(outside)
+
+    monkeypatch.setattr(diagnostics_module, "_link_bound_grid_file", move_after_link)
+
+    with pytest.raises(FlowDiagnosticSanitizationError):
+        diagnostics_module.publish_flow_grid_evidence(
+            PNG_BYTES,
+            evidence_root=evidence_root,
+            trusted_root=trusted_root,
+        )
+
+    assert not (outside / "grid.png").exists()
 
 
 def test_result_json_contains_only_allowlisted_public_fields_and_no_private_values(

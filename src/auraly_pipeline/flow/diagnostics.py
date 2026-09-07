@@ -13,6 +13,7 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 import re
 import secrets
 import shutil
+import stat
 import struct
 from typing import Any, Literal, cast
 from urllib.parse import urlsplit, urlunsplit
@@ -210,46 +211,251 @@ class FlowGridEvidence:
     sha256: str
 
 
+@dataclass(frozen=True)
+class _GridRootBinding:
+    descriptor: int
+    identity: tuple[int, int]
+    root: Path
+    trusted_root: Path
+    windows: bool
+
+
 def publish_flow_grid_evidence(
     screenshot_png: bytes,
     *,
     evidence_root: Path,
+    trusted_root: Path,
     deny_values: Sequence[str] = (),
 ) -> FlowGridEvidence:
     """Validate and exclusively publish an already-masked Playwright screenshot."""
     stage: Path | None = None
     final: Path | None = None
     final_created = False
+    binding: _GridRootBinding | None = None
     try:
         _validate_png_screenshot(screenshot_png, deny_values=deny_values)
-        root = evidence_root.resolve(strict=False)
-        root.mkdir(parents=True, exist_ok=True)
-        root = root.resolve(strict=True)
-        if not root.is_dir():
-            raise FlowDiagnosticSanitizationError()
+        root = _prepare_trusted_grid_root(evidence_root, trusted_root)
+        binding = _bind_grid_root(root, trusted_root)
         final = root / _GRID_EVIDENCE_NAME
         stage = root / f".{_GRID_EVIDENCE_NAME}.{secrets.token_hex(8)}.stage"
-        _write_sanitized_screenshot(stage, screenshot_png, deny_values=deny_values)
-        os.link(stage, final)
+        _write_bound_grid_file(
+            binding,
+            stage,
+            screenshot_png,
+            deny_values=deny_values,
+        )
+        _link_bound_grid_file(binding, stage, final)
         final_created = True
-        with final.open("r+b") as published_file:
-            payload = published_file.read(_MAX_SCREENSHOT_BYTES + 1)
-            if len(payload) > _MAX_SCREENSHOT_BYTES or published_file.read(1):
-                raise FlowDiagnosticSanitizationError()
-            os.fsync(published_file.fileno())
+        payload = _read_bound_grid_file(binding, final)
         _validate_png_screenshot(payload, deny_values=deny_values)
-        _sync_diagnostic_directory(root)
-        _unlink_if_present(stage)
+        _sync_bound_grid_root(binding)
+        _unlink_bound_grid_file(binding, stage)
+        _assert_grid_root_current(binding)
         return FlowGridEvidence(
             relative_path=_GRID_EVIDENCE_NAME,
             sha256=hashlib.sha256(payload).hexdigest(),
         )
     except FlowDiagnosticSanitizationError:
-        _cleanup_grid_evidence(stage, final, final_created=final_created)
+        _cleanup_grid_evidence(
+            stage,
+            final,
+            final_created=final_created,
+            binding=binding,
+        )
         raise
-    except (FileExistsError, OSError, TypeError, ValueError):
-        _cleanup_grid_evidence(stage, final, final_created=final_created)
+    except Exception:
+        _cleanup_grid_evidence(
+            stage,
+            final,
+            final_created=final_created,
+            binding=binding,
+        )
         raise FlowDiagnosticSanitizationError() from None
+    finally:
+        if binding is not None:
+            os.close(binding.descriptor)
+
+
+def _prepare_trusted_grid_root(evidence_root: Path, trusted_root: Path) -> Path:
+    try:
+        trusted = trusted_root.resolve(strict=True)
+        if _path_is_link_or_junction(trusted) or not trusted.is_dir():
+            raise FlowDiagnosticSanitizationError()
+        lexical = Path(os.path.abspath(evidence_root))
+        relative = lexical.relative_to(trusted)
+        current = trusted
+        for part in relative.parts:
+            current = current / part
+            if current.exists():
+                if _path_is_link_or_junction(current) or not current.is_dir():
+                    raise FlowDiagnosticSanitizationError()
+            else:
+                current.mkdir()
+            resolved = current.resolve(strict=True)
+            resolved.relative_to(trusted)
+            if resolved != current or _path_is_link_or_junction(current):
+                raise FlowDiagnosticSanitizationError()
+        root = lexical.resolve(strict=True)
+        root.relative_to(trusted)
+        if root != lexical or _path_is_link_or_junction(root) or not root.is_dir():
+            raise FlowDiagnosticSanitizationError()
+        return root
+    except (OSError, RuntimeError, ValueError):
+        raise FlowDiagnosticSanitizationError() from None
+
+
+def _path_is_link_or_junction(path: Path) -> bool:
+    try:
+        metadata = os.lstat(path)
+    except OSError:
+        return True
+    attributes = int(getattr(metadata, "st_file_attributes", 0))
+    reparse_point = int(getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400))
+    return stat.S_ISLNK(metadata.st_mode) or bool(attributes & reparse_point)
+
+
+def _bind_grid_root(root: Path, trusted_root: Path) -> _GridRootBinding:
+    current = _prepare_trusted_grid_root(root, trusted_root)
+    try:
+        metadata = os.stat(current, follow_symlinks=False)
+    except OSError:
+        raise FlowDiagnosticSanitizationError() from None
+    identity = (metadata.st_dev, metadata.st_ino)
+    if os.name == "nt":
+        from .artifacts import _FileIdentity, _open_windows_parent_lock
+
+        descriptor = _open_windows_parent_lock(current, _FileIdentity(*identity))
+        binding = _GridRootBinding(descriptor, identity, current, trusted_root, True)
+        _assert_grid_root_binding(binding)
+        return binding
+    if (
+        os.stat not in os.supports_dir_fd
+        or os.link not in os.supports_dir_fd
+        or os.open not in os.supports_dir_fd
+        or os.unlink not in os.supports_dir_fd
+    ):
+        raise FlowDiagnosticSanitizationError()
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(current, flags)
+    except OSError:
+        raise FlowDiagnosticSanitizationError() from None
+    binding = _GridRootBinding(descriptor, identity, current, trusted_root, False)
+    try:
+        _assert_grid_root_binding(binding)
+    except BaseException:
+        os.close(descriptor)
+        raise
+    return binding
+
+
+def _assert_grid_root_binding(binding: _GridRootBinding) -> None:
+    opened = os.fstat(binding.descriptor)
+    if (opened.st_dev, opened.st_ino) != binding.identity or not stat.S_ISDIR(opened.st_mode):
+        raise FlowDiagnosticSanitizationError()
+    if binding.windows:
+        _assert_grid_root_current(binding)
+
+
+def _assert_grid_root_current(binding: _GridRootBinding) -> None:
+    try:
+        current = _prepare_trusted_grid_root(binding.root, binding.trusted_root)
+        metadata = os.stat(current, follow_symlinks=False)
+    except (FlowDiagnosticSanitizationError, OSError):
+        raise FlowDiagnosticSanitizationError() from None
+    if current != binding.root or (metadata.st_dev, metadata.st_ino) != binding.identity:
+        raise FlowDiagnosticSanitizationError()
+
+
+def _write_bound_grid_file(
+    binding: _GridRootBinding,
+    path: Path,
+    payload: bytes,
+    *,
+    deny_values: Sequence[str],
+) -> None:
+    _validate_png_screenshot(payload, deny_values=deny_values)
+    _assert_grid_root_binding(binding)
+    if binding.windows:
+        _write_sanitized_screenshot(path, payload, deny_values=deny_values)
+        return
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(path.name, flags, 0o600, dir_fd=binding.descriptor)
+        try:
+            with os.fdopen(descriptor, "wb", closefd=False) as stream:
+                stream.write(payload)
+                stream.flush()
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+    except OSError:
+        raise FlowDiagnosticSanitizationError() from None
+
+
+def _link_bound_grid_file(
+    binding: _GridRootBinding,
+    stage: Path,
+    final: Path,
+) -> None:
+    _assert_grid_root_binding(binding)
+    if binding.windows:
+        os.link(stage, final)
+        return
+    staged = os.stat(stage.name, dir_fd=binding.descriptor, follow_symlinks=False)
+    if not stat.S_ISREG(staged.st_mode):
+        raise FlowDiagnosticSanitizationError()
+    os.link(
+        stage.name,
+        final.name,
+        src_dir_fd=binding.descriptor,
+        dst_dir_fd=binding.descriptor,
+        follow_symlinks=False,
+    )
+
+
+def _read_bound_grid_file(binding: _GridRootBinding, path: Path) -> bytes:
+    _assert_grid_root_binding(binding)
+    flags = os.O_RDWR | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = (
+            os.open(path, flags)
+            if binding.windows
+            else os.open(path.name, flags, dir_fd=binding.descriptor)
+        )
+        try:
+            with os.fdopen(descriptor, "rb", closefd=False) as stream:
+                payload = stream.read(_MAX_SCREENSHOT_BYTES + 1)
+                if len(payload) > _MAX_SCREENSHOT_BYTES or stream.read(1):
+                    raise FlowDiagnosticSanitizationError()
+            os.fsync(descriptor)
+            return payload
+        finally:
+            os.close(descriptor)
+    except FlowDiagnosticSanitizationError:
+        raise
+    except OSError:
+        raise FlowDiagnosticSanitizationError() from None
+
+
+def _unlink_bound_grid_file(binding: _GridRootBinding, path: Path) -> None:
+    _assert_grid_root_binding(binding)
+    try:
+        if binding.windows:
+            _unlink_if_present(path)
+        else:
+            os.unlink(path.name, dir_fd=binding.descriptor)
+    except FileNotFoundError:
+        return
+    except OSError:
+        raise FlowDiagnosticSanitizationError() from None
+
+
+def _sync_bound_grid_root(binding: _GridRootBinding) -> None:
+    try:
+        os.fsync(binding.descriptor)
+    except OSError:
+        pass
 
 
 def _cleanup_grid_evidence(
@@ -257,13 +463,17 @@ def _cleanup_grid_evidence(
     final: Path | None,
     *,
     final_created: bool,
+    binding: _GridRootBinding | None,
 ) -> None:
     cleanup_error: FlowDiagnosticSanitizationError | None = None
     for path in (final if final_created else None, stage):
         if path is None:
             continue
         try:
-            _unlink_if_present(path)
+            if binding is None:
+                _unlink_if_present(path)
+            else:
+                _unlink_bound_grid_file(binding, path)
         except FlowDiagnosticSanitizationError as error:
             cleanup_error = error
     if cleanup_error is not None:

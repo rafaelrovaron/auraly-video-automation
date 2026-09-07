@@ -16,7 +16,11 @@ from PIL import Image
 from playwright.sync_api import Locator, Page, sync_playwright
 import pytest
 
-from auraly_pipeline.flow.artifacts import FlowArtifactInvalidError
+from auraly_pipeline.flow.artifacts import (
+    FlowArtifactInvalidError,
+    FlowReferenceUpload,
+    capture_flow_reference,
+)
 from auraly_pipeline.flow.config import FlowGenerationConfig
 from auraly_pipeline.flow.config import FlowRuntimeConfig
 from auraly_pipeline.flow.domain import FlowUnexpectedStateError
@@ -83,7 +87,7 @@ def _runtime_for_fixture(
     page: Page,
     *,
     upload_completes: bool = True,
-    set_input_files: Callable[[Locator, Path], None] | None = None,
+    set_input_files: Callable[[Locator, FlowReferenceUpload], None] | None = None,
     close_error: BaseException | None = None,
     generation_timeout_seconds: int = 1,
 ) -> FlowGenerationRuntime:
@@ -130,8 +134,7 @@ def _workspace() -> FlowWorkspaceIdentity:
 def _prepared_request(reference_png: Path) -> FlowGenerationRequest:
     prompt = "private prompt"
     return FlowGenerationRequest(
-        reference_path=reference_png,
-        reference_sha256=_sha256(reference_png),
+        reference=capture_flow_reference(reference_png, _sha256(reference_png)),
         prompt_snapshot=prompt,
         prompt_sha256=_sha256_text(prompt),
         workspace=_workspace(),
@@ -256,13 +259,7 @@ def provide_flow_generation_page() -> Iterator[Page]:
 @pytest.fixture(name="reference_png")
 def provide_reference_png(tmp_path: Path) -> Path:
     path = tmp_path / "private-reference-name.png"
-    path.write_bytes(
-        bytes.fromhex(
-            "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489"
-            "0000000d49444154789c6360f8cff0000004010100f51edb560000000049454e44"
-            "ae426082"
-        )
-    )
+    Image.new("RGB", (4, 4), color=(16, 32, 64)).save(path, format="PNG")
     return path
 
 
@@ -376,8 +373,8 @@ def test_prepare_rejects_route_change_after_upload(
     flow_generation_page: Page,
     reference_png: Path,
 ) -> None:
-    def upload_then_redirect(locator: Locator, path: Path) -> None:
-        locator.set_input_files(path)
+    def upload_then_redirect(locator: Locator, reference: FlowReferenceUpload) -> None:
+        generation_module._playwright_set_input_files(locator, reference)
         flow_generation_page.goto("data:text/html,redirected")
 
     runtime = _runtime_for_fixture(
@@ -426,7 +423,7 @@ def test_prepare_sanitizes_injected_file_input_error_and_metadata(
     dom = "<main data-private='DOM_PRIVATE_VALUE'>"
     token_url = "https://labs.google/fx/tools/flow?token=PRIVATE_TOKEN_VALUE"
 
-    def fail_upload(_locator: Locator, _path: Path) -> None:
+    def fail_upload(_locator: Locator, _reference: FlowReferenceUpload) -> None:
         raise RuntimeError(f"{prompt} {reference_png} {auth} {dom} {token_url}")
 
     runtime = _runtime_for_fixture(
@@ -446,6 +443,30 @@ def test_prepare_sanitizes_injected_file_input_error_and_metadata(
     serialized = json.dumps(raised.value.__dict__, sort_keys=True) + str(raised.value)
     for forbidden in (prompt, str(reference_png), auth, dom, token_url, "PRIVATE_TOKEN_VALUE"):
         assert forbidden not in serialized
+
+
+@pytest.mark.parametrize("interruption", (KeyboardInterrupt(), SystemExit(9)))
+def test_prepare_does_not_translate_process_interruptions(
+    flow_generation_page: Page,
+    reference_png: Path,
+    interruption: BaseException,
+) -> None:
+    def interrupt_upload(_locator: Locator, _reference: FlowReferenceUpload) -> None:
+        raise interruption
+
+    runtime = _runtime_for_fixture(
+        "ready.html",
+        flow_generation_page,
+        set_input_files=interrupt_upload,
+    )
+
+    with pytest.raises(type(interruption)):
+        runtime.prepare_inputs(
+            reference_path=reference_png,
+            reference_sha256=_sha256(reference_png),
+            prompt_snapshot="private prompt",
+            prompt_sha256=_sha256_text("private prompt"),
+        )
 
 
 def _make_generate_show_generating(page: Page) -> None:
@@ -736,8 +757,7 @@ def test_dispatch_rejects_workspace_identity_mismatch_before_click(
     with pytest.raises(FlowGenerationRuntimeError) as raised:
         runtime.prepare_and_dispatch(
             FlowGenerationRequest(
-                reference_path=request.reference_path,
-                reference_sha256=request.reference_sha256,
+                reference=request.reference,
                 prompt_snapshot=request.prompt_snapshot,
                 prompt_sha256=request.prompt_sha256,
                 workspace=wrong_workspace,
@@ -1192,10 +1212,11 @@ def test_grid_sanitizer_failure_does_not_advance_observation_checkpoint(
 
     monkeypatch.setattr(generation_module, "publish_flow_grid_evidence", reject_grid)
 
-    with pytest.raises(FlowGenerationRuntimeError) as raised:
+    from auraly_pipeline.flow.domain import FlowDiagnosticSanitizationError
+
+    with pytest.raises(FlowDiagnosticSanitizationError):
         runtime.observe_candidates(checkpoint_sink)
 
-    assert raised.value.failed_step == "capture_grid_evidence"
     assert checkpoint_sink.run_state == "dispatch_confirmed"
 
 

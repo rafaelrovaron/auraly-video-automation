@@ -154,12 +154,12 @@ class FlowBrowserSession:
         if self._context is not None:
             try:
                 self._context.close()
-            except BaseException:
+            except Exception:
                 close_failed = True
         if self._playwright is not None and self._manager is not None:
             try:
                 self._manager.__exit__(None, None, None)
-            except BaseException:
+            except Exception:
                 close_failed = True
         return close_failed
 
@@ -303,7 +303,7 @@ class FlowBrowserSession:
             return
         try:
             context.tracing.stop()
-        except BaseException:
+        except Exception:
             return
 
 

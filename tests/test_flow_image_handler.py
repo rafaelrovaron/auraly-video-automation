@@ -26,15 +26,27 @@ from auraly_pipeline.jobs.handlers import JobExecutionContext
 from tests.test_campaign_domain import valid_campaign_data
 from tests.test_flow_generation import LOCAL_TARGET, _fixture_url
 from auraly_pipeline.flow.config import FlowGenerationConfig
+from auraly_pipeline.flow.domain import (
+    FlowAuthenticationTimeoutError,
+    FlowDiagnosticSanitizationError,
+    FlowRuntimeBusyError,
+)
 from auraly_pipeline.flow.artifacts import inspect_flow_artifact, resolve_flow_final_path
 from auraly_pipeline.flow.generation import FlowGenerationRuntime
-from auraly_pipeline.flow.generation_domain import FlowGenerationObservation
+from auraly_pipeline.flow.generation_domain import (
+    FlowGenerationObservation,
+    FlowGenerationRuntimeError,
+)
 from auraly_pipeline.images.db_models import ImageCandidateRow, FlowGenerationRunRow
 from auraly_pipeline.images.db_models import FlowCandidateSlotRow, ImageGenerationRow
 from auraly_pipeline.images.domain import ImageCandidate
 from auraly_pipeline.images import domain as image_domain
 from auraly_pipeline.images.repository import ImageRepository
 from auraly_pipeline.jobs.db_models import JobEventRow, JobRow
+
+
+def _write_reference(path: Path) -> None:
+    Image.new("RGB", (4, 4), color=(16, 32, 64)).save(path, format="PNG")
 
 
 def test_run_checkpoint_conflict_uses_typed_flow_error(tmp_path: Path) -> None:
@@ -46,7 +58,7 @@ def test_run_checkpoint_conflict_uses_typed_flow_error(tmp_path: Path) -> None:
     campaigns.close()
     reference = work_root / "references" / "avatar.png"
     reference.parent.mkdir(parents=True)
-    reference.write_bytes(b"reference")
+    _write_reference(reference)
     workspace_path = "fx/tools/flow/local-workspace"
     images = ImageService.for_database(database, work_root=work_root)
     submission = images.generate(
@@ -97,7 +109,7 @@ def test_playwright_image_submission_creates_authorized_durable_flow_run(tmp_pat
     campaign_service.close()
     reference = work_root / "references" / "avatar.png"
     reference.parent.mkdir(parents=True)
-    reference.write_bytes(b"reference-image")
+    _write_reference(reference)
     images = ImageService.for_database(database, work_root=work_root)
 
     submission = images.generate(
@@ -122,10 +134,30 @@ def test_playwright_image_submission_creates_authorized_durable_flow_run(tmp_pat
     assert submission.generation.executor == "playwright_python"
     assert submission.generation.provider_state == "queued"
     assert submission.job.retry_safety == "reconcile_before_retry"
+    with images._sessions() as session:
+        events = list(
+            session.scalars(
+                select(JobEventRow).where(
+                    JobEventRow.job_id == submission.job.job_id,
+                    JobEventRow.event_type == "job.provider_action_authorized",
+                )
+            )
+        )
+        assert len(events) == 1
+        assert events[0].metadata_json == {
+            "approvedBy": "creative-operator",
+            "candidateCount": 2,
+            "executor": "playwright_python",
+            "resolution": "2K",
+        }
     images.close()
 
 
-def test_invalid_flow_reference_is_terminal_before_runtime_construction(tmp_path: Path) -> None:
+@pytest.mark.parametrize("corruption", ("missing", "invalid_format"))
+def test_invalid_flow_reference_is_terminal_before_runtime_construction(
+    tmp_path: Path,
+    corruption: str,
+) -> None:
     """A tampered persistent reference never gets as far as the browser boundary."""
     database = tmp_path / "invalid-flow-reference.db"
     work_root = tmp_path / "work"
@@ -136,7 +168,10 @@ def test_invalid_flow_reference_is_terminal_before_runtime_construction(tmp_path
     campaign_service.close()
     reference = work_root / "references" / "avatar.png"
     reference.parent.mkdir(parents=True)
-    reference.write_bytes(b"reference-image")
+    if corruption == "invalid_format":
+        reference.write_bytes(b"not an image")
+    else:
+        _write_reference(reference)
     images = ImageService.for_database(database, work_root=work_root)
     submission = images.generate(
         ImageGenerateRequest(
@@ -156,7 +191,8 @@ def test_invalid_flow_reference_is_terminal_before_runtime_construction(tmp_path
             ).hexdigest(),
         )
     )
-    reference.unlink()
+    if corruption == "missing":
+        reference.unlink()
     runtime_calls = 0
 
     def runtime_factory(*_args: object) -> object:
@@ -186,6 +222,85 @@ def test_invalid_flow_reference_is_terminal_before_runtime_construction(tmp_path
 
 
 @pytest.mark.parametrize(
+    ("runtime_error", "expected_code"),
+    (
+        (FlowRuntimeBusyError(), "flow_runtime_busy"),
+        (FlowAuthenticationTimeoutError(), "flow_authentication_required"),
+        (FlowDiagnosticSanitizationError(), "flow_diagnostic_sanitization_failed"),
+        (
+            FlowGenerationRuntimeError(failed_step="upload_reference"),
+            "flow_input_verification_failed",
+        ),
+        (
+            FlowGenerationRuntimeError(failed_step="close_browser"),
+            "flow_browser_close_failed",
+        ),
+    ),
+)
+def test_flow_handler_upload_request_keeps_exact_bytes_and_maps_runtime_failures(
+    tmp_path: Path,
+    runtime_error: BaseException,
+    expected_code: str,
+) -> None:
+    database = tmp_path / "reference-toctou.db"
+    work_root = tmp_path / "work"
+    campaigns = CampaignService.for_database(database)
+    campaign = campaigns.create_campaign(CampaignCreate.model_validate(valid_campaign_data()))
+    campaigns.close()
+    reference = work_root / "references" / "avatar.png"
+    reference.parent.mkdir(parents=True)
+    _write_reference(reference)
+    authorized_bytes = reference.read_bytes()
+    workspace_path = "fx/tools/flow/reference-toctou"
+    images = ImageService.for_database(database, work_root=work_root)
+    submission = images.generate(
+        ImageGenerateRequest(
+            campaign_id=campaign.campaign_id,
+            scene_variant_id=campaign.scene_variants[0].scene_variant_id,
+            idempotency_key="reference-toctou",
+            prompt_snapshot="prompt",
+            reference_image_path="references/avatar.png",
+            reference_image_sha256=hashlib.sha256(authorized_bytes).hexdigest(),
+            executor="playwright_python",
+            generation_contract_version="flow-generation-v1",
+            provider_action_confirmed=True,
+            provider_action_approved_by="operator",
+            provider_workspace_path=workspace_path,
+            provider_workspace_fingerprint=hashlib.sha256(workspace_path.encode()).hexdigest(),
+        )
+    )
+
+    class InspectingRuntime:
+        def prepare_and_dispatch(self, request: object, _sink: object) -> None:
+            upload = getattr(request, "reference")
+            assert upload.payload == authorized_bytes
+            assert upload.sha256 == hashlib.sha256(authorized_bytes).hexdigest()
+            raise runtime_error
+
+    def runtime_factory(_context: object) -> Any:
+        Image.new("RGB", (4, 4), color=(255, 0, 0)).save(reference)
+        return InspectingRuntime()
+
+    result = FlowImageGenerateHandler(
+        images._sessions,
+        work_root=work_root,
+        _runtime_factory=runtime_factory,  # type: ignore[arg-type]
+    ).execute(
+        JobExecutionContext(
+            job_id=submission.job.job_id,
+            job_type="image.generate",
+            campaign_id=campaign.campaign_id,
+            input=submission.job.input,
+            attempt_number=1,
+        )
+    )
+
+    assert result.outcome == "blocked"
+    assert result.error_code == expected_code
+    images.close()
+
+
+@pytest.mark.parametrize(
     "corruption",
     [
         "job_fingerprint",
@@ -198,6 +313,9 @@ def test_invalid_flow_reference_is_terminal_before_runtime_construction(tmp_path
         "run_contract",
         "missing_slot",
         "extra_slot",
+        "prepared_dispatch_intent",
+        "slot_chronology",
+        "unaudited_retry",
         "completed_missing_artifact",
     ],
 )
@@ -219,7 +337,7 @@ def test_flow_integrity_matrix_rejects_before_runtime_construction(
     campaigns.close()
     reference = work_root / "references" / "avatar.png"
     reference.parent.mkdir(parents=True)
-    reference.write_bytes(b"reference-image")
+    _write_reference(reference)
     workspace_path = "fx/tools/flow/local-workspace"
     images = ImageService.for_database(database, work_root=work_root)
     request_data = {
@@ -287,7 +405,7 @@ def test_flow_integrity_matrix_rejects_before_runtime_construction(
             authorization = session.scalar(
                 select(JobEventRow).where(
                     JobEventRow.job_id == job.id,
-                    JobEventRow.event_type == "job.authorized",
+                    JobEventRow.event_type == "job.provider_action_authorized",
                 )
             )
             assert authorization is not None
@@ -295,7 +413,7 @@ def test_flow_integrity_matrix_rejects_before_runtime_construction(
                 JobEventRow(
                     id=str(uuid4()),
                     job_id=job.id,
-                    event_type="job.authorized",
+                    event_type="job.provider_action_authorized",
                     timestamp=authorization.timestamp,
                     metadata_json={"executor": "local_fake"},
                 )
@@ -326,6 +444,14 @@ def test_flow_integrity_matrix_rejects_before_runtime_construction(
                     updated_at=run.updated_at,
                 )
             )
+        elif corruption == "prepared_dispatch_intent":
+            session.execute(text("PRAGMA ignore_check_constraints = ON"))
+            run.dispatch_intent_at = run.created_at
+        elif corruption == "slot_chronology":
+            slots[0].state = "observed"
+            slots[0].provider_slot_fingerprint = "slot-a"
+        elif corruption == "unaudited_retry":
+            run.dispatch_attempt_number = 2
         elif corruption == "completed_missing_artifact":
             session.execute(text("PRAGMA ignore_check_constraints = ON"))
             run.stage = "completed"
@@ -363,6 +489,66 @@ def test_flow_integrity_matrix_rejects_before_runtime_construction(
     images.close()
 
 
+def test_dispatch_intent_cas_rejects_preexisting_checkpoint_timestamps(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "dispatch-intent-cas.db"
+    work_root = tmp_path / "work"
+    campaigns = CampaignService.for_database(database)
+    campaign = campaigns.create_campaign(CampaignCreate.model_validate(valid_campaign_data()))
+    campaigns.close()
+    reference = work_root / "references" / "avatar.png"
+    reference.parent.mkdir(parents=True)
+    Image.new("RGB", (4, 4)).save(reference)
+    workspace_path = "fx/tools/flow/local-workspace"
+    images = ImageService.for_database(database, work_root=work_root)
+    submission = images.generate(
+        ImageGenerateRequest(
+            campaign_id=campaign.campaign_id,
+            scene_variant_id=campaign.scene_variants[0].scene_variant_id,
+            idempotency_key="dispatch-intent-cas",
+            prompt_snapshot="prompt",
+            reference_image_path="references/avatar.png",
+            reference_image_sha256=hashlib.sha256(reference.read_bytes()).hexdigest(),
+            executor="playwright_python",
+            generation_contract_version="flow-generation-v1",
+            provider_action_confirmed=True,
+            provider_action_approved_by="operator",
+            provider_workspace_path=workspace_path,
+            provider_workspace_fingerprint=hashlib.sha256(workspace_path.encode()).hexdigest(),
+        )
+    )
+    with images._sessions() as session:
+        run = session.scalar(
+            select(FlowGenerationRunRow).where(
+                FlowGenerationRunRow.image_generation_id
+                == submission.generation.image_generation_id
+            )
+        )
+        assert run is not None
+        session.execute(text("PRAGMA ignore_check_constraints = ON"))
+        run.stage = "inputs_verified"
+        run.dispatch_intent_at = run.created_at
+        session.commit()
+        run_id = run.id
+
+    sink = FlowGenerationCheckpointSink(
+        images._sessions,
+        run_id=run_id,
+        clock=lambda: submission.generation.created_at,
+    )
+    from auraly_pipeline.flow.generation_domain import FlowWorkspaceIdentity
+
+    with pytest.raises(FlowCheckpointConflictError):
+        sink.record_dispatch_intent(
+            FlowWorkspaceIdentity(
+                workspace_path=workspace_path,
+                fingerprint=hashlib.sha256(workspace_path.encode()).hexdigest(),
+            )
+        )
+    images.close()
+
+
 def test_local_playwright_flow_job_ingests_two_2k_candidates(tmp_path: Path) -> None:
     """The durable Flow handler observes and downloads only the two bound local slots."""
     database = tmp_path / "local-flow.db"
@@ -372,7 +558,7 @@ def test_local_playwright_flow_job_ingests_two_2k_candidates(tmp_path: Path) -> 
     campaigns.close()
     reference = work_root / "references" / "avatar.png"
     reference.parent.mkdir(parents=True)
-    reference.write_bytes(b"reference-image")
+    _write_reference(reference)
     workspace_path = "fx/tools/flow/local-workspace"
     workspace_hash = hashlib.sha256(workspace_path.encode()).hexdigest()
     images = ImageService.for_database(database, work_root=work_root)
@@ -400,10 +586,16 @@ def test_local_playwright_flow_job_ingests_two_2k_candidates(tmp_path: Path) -> 
             )
         )
         assert run is not None
+        generation = session.get(
+            ImageGenerationRow,
+            submission.generation.image_generation_id,
+        )
+        assert generation is not None
         now = run.created_at
         run.stage = "dispatch_confirmed"
         run.dispatch_intent_at = now
         run.dispatch_confirmed_at = now
+        generation.dispatched_at = now
         session.commit()
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(headless=False)
@@ -474,7 +666,7 @@ def test_download_intent_slot_is_rejected_before_runtime_construction(tmp_path: 
     campaigns.close()
     reference = work_root / "references" / "avatar.png"
     reference.parent.mkdir(parents=True)
-    reference.write_bytes(b"reference")
+    _write_reference(reference)
     workspace_path = "fx/tools/flow/local-workspace"
     images = ImageService.for_database(database, work_root=work_root)
     submission = images.generate(
@@ -538,7 +730,7 @@ def test_checkpoint_database_lock_returns_flow_safe_blocked_result(
     campaigns.close()
     reference = work_root / "references" / "avatar.png"
     reference.parent.mkdir(parents=True)
-    reference.write_bytes(b"reference")
+    _write_reference(reference)
     workspace_path = "fx/tools/flow/local-workspace"
     images = ImageService.for_database(database, work_root=work_root)
     submission = images.generate(
@@ -648,7 +840,7 @@ def test_stale_checkpoint_conflict_does_not_regress_advanced_run(tmp_path: Path)
     campaigns.close()
     reference = work_root / "references" / "avatar.png"
     reference.parent.mkdir(parents=True)
-    reference.write_bytes(b"reference")
+    _write_reference(reference)
     workspace_path = "fx/tools/flow/local-workspace"
     images = ImageService.for_database(database, work_root=work_root)
     submission = images.generate(
@@ -729,7 +921,7 @@ def test_completion_database_lock_returns_blocked_without_corrupting_committed_s
     campaigns.close()
     reference = work_root / "references" / "avatar.png"
     reference.parent.mkdir(parents=True)
-    reference.write_bytes(b"reference")
+    _write_reference(reference)
     workspace_path = "fx/tools/flow/local-workspace"
     images = ImageService.for_database(database, work_root=work_root)
     submission = images.generate(
@@ -768,6 +960,14 @@ def test_completion_database_lock_returns_blocked_without_corrupting_committed_s
         assert len(slots) == 2
         generation.provider_state = "generating"
         run.stage = "downloading"
+        run.dispatch_intent_at = run.created_at
+        run.dispatch_confirmed_at = run.created_at
+        generation.dispatched_at = run.created_at
+        evidence = work_root / "evidence" / "grid.png"
+        evidence.parent.mkdir(parents=True)
+        evidence.write_bytes(b"sanitized-grid-evidence")
+        run.grid_evidence_path = evidence.relative_to(work_root).as_posix()
+        run.grid_evidence_sha256 = hashlib.sha256(evidence.read_bytes()).hexdigest()
         for index, slot in enumerate(slots):
             final = resolve_flow_final_path(
                 work_root=work_root,
@@ -797,6 +997,12 @@ def test_completion_database_lock_returns_blocked_without_corrupting_committed_s
             )
             ImageRepository.create_candidate_in_session(session, candidate)
             slot.state = "ingested"
+            slot.provider_slot_fingerprint = hashlib.sha256(
+                f"slot-{index}".encode()
+            ).hexdigest()
+            slot.download_intent_at = run.created_at
+            slot.staging_path = final.relative_to(work_root).as_posix()
+            slot.staged_sha256 = facts.sha256
             slot.image_candidate_id = candidate.image_candidate_id
         session.commit()
     armed = False

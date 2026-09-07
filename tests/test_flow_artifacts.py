@@ -16,6 +16,7 @@ import pytest
 from auraly_pipeline.flow.artifacts import (
     FlowArtifactConflictError,
     FlowArtifactInvalidError,
+    capture_flow_reference,
     allocate_flow_staging_path,
     inspect_flow_artifact,
     publish_flow_artifact_exclusive,
@@ -82,6 +83,41 @@ def test_candidate_staging_and_final_paths_are_canonical_and_distinct(tmp_path: 
     assert staging.suffix == ".part"
     assert staging != final
     assert staging.is_file()
+
+
+@pytest.mark.parametrize(
+    ("image_format", "suffix", "mime_type"),
+    (
+        ("PNG", ".png", "image/png"),
+        ("JPEG", ".jpeg", "image/jpeg"),
+        ("WEBP", ".webp", "image/webp"),
+    ),
+)
+def test_reference_capture_decodes_supported_format_and_freezes_authorized_bytes(
+    tmp_path: Path,
+    image_format: str,
+    suffix: str,
+    mime_type: str,
+) -> None:
+    reference = tmp_path / f"private-name{suffix}"
+    _write_image(reference, image_format, axis=4)
+    payload = reference.read_bytes()
+
+    captured = capture_flow_reference(reference, hashlib.sha256(payload).hexdigest())
+    _write_image(reference, image_format, axis=5)
+
+    assert captured.payload == payload
+    assert captured.sha256 == hashlib.sha256(payload).hexdigest()
+    assert captured.name == f"reference{suffix}"
+    assert captured.mime_type == mime_type
+
+
+def test_reference_capture_rejects_hash_authorized_non_image(tmp_path: Path) -> None:
+    reference = tmp_path / "reference.png"
+    reference.write_bytes(b"not an image")
+
+    with pytest.raises(FlowArtifactInvalidError):
+        capture_flow_reference(reference, hashlib.sha256(reference.read_bytes()).hexdigest())
 
 
 @pytest.mark.parametrize("candidate_index", [-1, 2])
@@ -604,10 +640,12 @@ def test_parent_link_substitution_before_link_is_detected_and_preserves_residue(
     assert not (outside / final.name).exists()
 
 
-def test_parent_link_substitution_after_revalidation_fails_closed_after_escaped_link(
+def test_parent_link_substitution_after_revalidation_never_publishes_outside_trusted_root(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    staging, final = _valid_staging_and_final(tmp_path)
+    trusted_root = tmp_path / "trusted"
+    trusted_root.mkdir()
+    staging, final = _valid_staging_and_final(trusted_root)
     original_parent = final.parent
     preserved_parent = tmp_path / "preserved-generation"
     outside = tmp_path / "outside"
@@ -628,11 +666,34 @@ def test_parent_link_substitution_after_revalidation_fails_closed_after_escaped_
         raising=False,
     )
     with pytest.raises(FlowArtifactConflictError):
-        publish_flow_artifact_exclusive(staging, final, trusted_root=tmp_path)
+        publish_flow_artifact_exclusive(staging, final, trusted_root=trusted_root)
 
-    assert (preserved_parent / ".staging" / staging.name).exists()
-    assert (outside / ".staging" / staging.name).exists()
-    assert (outside / final.name).exists()
+    assert staging.exists() or (preserved_parent / ".staging" / staging.name).exists()
+    assert not (outside / final.name).exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX post-link directory move regression")
+def test_post_link_directory_move_removes_final_link_outside_trusted_root(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    trusted_root = tmp_path / "trusted"
+    trusted_root.mkdir()
+    staging, final = _valid_staging_and_final(trusted_root)
+    escaped_parent = tmp_path / "escaped-generation"
+    import auraly_pipeline.flow.artifacts as artifacts
+
+    def move_parent_before_sync(_path: Path) -> None:
+        final.parent.rename(escaped_parent)
+        raise OSError("injected post-link directory move")
+
+    monkeypatch.setattr(artifacts, "_sync_file_and_directory", move_parent_before_sync)
+
+    with pytest.raises(FlowArtifactConflictError):
+        publish_flow_artifact_exclusive(staging, final, trusted_root=trusted_root)
+
+    assert not (escaped_parent / final.name).exists()
+    assert (escaped_parent / ".staging" / staging.name).exists()
 
 
 def test_crash_after_link_before_final_sync_preserves_both_names(

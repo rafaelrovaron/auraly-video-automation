@@ -6,6 +6,8 @@ from pathlib import Path
 
 from sqlalchemy import select
 from typer.testing import CliRunner
+import pytest
+from PIL import Image
 
 from auraly_pipeline.campaigns.domain import CampaignCreate
 from auraly_pipeline.campaigns.service import CampaignService
@@ -79,7 +81,7 @@ def _blocked_flow_generation(
     database, work_root, campaign_id, scenes = _database(tmp_path)
     reference = work_root / "references" / "avatar.png"
     reference.parent.mkdir(parents=True)
-    reference.write_bytes(b"trusted-reference")
+    Image.new("RGB", (4, 4), color=(16, 32, 64)).save(reference)
     workspace_path = "fx/tools/flow/cli-recovery"
     service = ImageService.for_database(database, work_root=work_root)
     submission = service.generate(
@@ -174,6 +176,100 @@ def test_image_generate_and_generation_get_emit_structured_json(tmp_path: Path) 
     )
     assert listed.exit_code == 0
     assert [item["generationNumber"] for item in json.loads(listed.stdout)["generations"]] == [1]
+
+
+def test_image_generate_cli_persists_explicit_flow_authorization_and_workspace(
+    tmp_path: Path,
+) -> None:
+    database, work_root, campaign_id, scenes = _database(tmp_path)
+    reference = work_root / "references" / "avatar.png"
+    reference.parent.mkdir(parents=True)
+    from PIL import Image
+
+    Image.new("RGB", (4, 4), color=(16, 32, 64)).save(reference)
+    workspace_path = "fx/tools/flow/cli-workspace"
+
+    generated = runner.invoke(
+        app,
+        _generate_args(
+            database,
+            work_root,
+            campaign_id,
+            scenes[0],
+            idempotency_key="image-cli-flow-generate",
+        )
+        + [
+            "--reference-image-path",
+            "references/avatar.png",
+            "--reference-image-sha256",
+            hashlib.sha256(reference.read_bytes()).hexdigest(),
+            "--executor",
+            "playwright_python",
+            "--provider-action-approved-by",
+            "operator-1",
+            "--confirm-provider-action",
+            "--provider-workspace-path",
+            workspace_path,
+        ],
+    )
+
+    assert generated.exit_code == 0, generated.stdout
+    generation_id = json.loads(generated.stdout)["generation"]["imageGenerationId"]
+    service = ImageService.for_database(database, work_root=work_root)
+    with service._sessions() as session:
+        run = session.scalar(
+            select(FlowGenerationRunRow).where(
+                FlowGenerationRunRow.image_generation_id == generation_id
+            )
+        )
+        assert run is not None
+        assert run.provider_workspace_path == workspace_path
+        assert run.provider_workspace_fingerprint == hashlib.sha256(
+            workspace_path.encode("utf-8")
+        ).hexdigest()
+    service.close()
+
+
+@pytest.mark.parametrize(
+    "workspace_path",
+    ("https://labs.google/fx/tools/flow/x", "../flow/x", "fx/tools/flow/x?token=y"),
+)
+def test_image_generate_cli_rejects_untrusted_flow_workspace_route(
+    tmp_path: Path,
+    workspace_path: str,
+) -> None:
+    database, work_root, campaign_id, scenes = _database(tmp_path)
+    reference = work_root / "references" / "avatar.png"
+    reference.parent.mkdir(parents=True)
+    from PIL import Image
+
+    Image.new("RGB", (4, 4)).save(reference)
+
+    generated = runner.invoke(
+        app,
+        _generate_args(
+            database,
+            work_root,
+            campaign_id,
+            scenes[0],
+            idempotency_key="image-cli-flow-invalid-workspace",
+        )
+        + [
+            "--reference-image-path",
+            "references/avatar.png",
+            "--reference-image-sha256",
+            hashlib.sha256(reference.read_bytes()).hexdigest(),
+            "--executor",
+            "playwright_python",
+            "--provider-action-approved-by",
+            "operator-1",
+            "--confirm-provider-action",
+            "--provider-workspace-path",
+            workspace_path,
+        ],
+    )
+
+    assert generated.exit_code != 0
 
 
 def test_image_candidate_review_commands_emit_sanitized_domain_error_json(tmp_path: Path) -> None:

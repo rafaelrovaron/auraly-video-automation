@@ -17,7 +17,9 @@ from .artifacts import (
     FlowArtifactConflictError,
     FlowArtifactFacts,
     FlowArtifactInvalidError,
+    FlowReferenceUpload,
     allocate_flow_staging_path,
+    capture_flow_reference,
     inspect_flow_artifact,
     publish_flow_artifact_exclusive,
     resolve_flow_final_path,
@@ -25,7 +27,12 @@ from .artifacts import (
 from .config import FlowGenerationConfig
 from .config import FlowRuntimeConfig
 from .diagnostics import FlowGridEvidence, publish_flow_grid_evidence
-from .domain import FlowUnexpectedStateError
+from .domain import (
+    FlowAuthenticationTimeoutError,
+    FlowDiagnosticSanitizationError,
+    FlowRuntimeBusyError,
+    FlowUnexpectedStateError,
+)
 from .generation_domain import (
     FlowCandidateObservation,
     FlowDispatchAmbiguousError,
@@ -68,6 +75,11 @@ _EVIDENCE_MASK_LABELS = (
     "Prompt",
     "Reference preview",
     "Upload filename",
+)
+_FLOW_RUNTIME_BOUNDARY_ERRORS = (
+    FlowRuntimeBusyError,
+    FlowAuthenticationTimeoutError,
+    FlowDiagnosticSanitizationError,
 )
 
 
@@ -113,15 +125,14 @@ class _AuthenticatedFlowSession(Protocol):
 
 
 _AuthenticatedSessionFactory = Callable[[], AbstractContextManager[_AuthenticatedFlowSession]]
-InputFileSetter = Callable[[Locator, Path], None]
+InputFileSetter = Callable[[Locator, FlowReferenceUpload], None]
 
 
 @dataclass(frozen=True)
 class FlowGenerationRequest:
     """Private worker input; its sensitive values never cross a checkpoint boundary."""
 
-    reference_path: Path
-    reference_sha256: str
+    reference: FlowReferenceUpload
     prompt_snapshot: str
     prompt_sha256: str
     workspace: FlowWorkspaceIdentity
@@ -204,7 +215,9 @@ class FlowGenerationRuntime:
                 return observations
         except FlowGenerationRuntimeError:
             raise
-        except BaseException:
+        except _FLOW_RUNTIME_BOUNDARY_ERRORS:
+            raise
+        except Exception:
             raise FlowGenerationRuntimeError(failed_step="observe_candidates") from None
 
     def capture_grid_evidence(self) -> FlowGridEvidence:
@@ -215,7 +228,9 @@ class FlowGenerationRuntime:
                 return self._capture_grid_evidence_in_session(session, expected=None)
         except FlowGenerationRuntimeError:
             raise
-        except BaseException:
+        except _FLOW_RUNTIME_BOUNDARY_ERRORS:
+            raise
+        except Exception:
             raise FlowGenerationRuntimeError(failed_step="capture_grid_evidence") from None
 
     def download_slot(
@@ -237,7 +252,7 @@ class FlowGenerationRuntime:
                         fingerprint,
                         _target=self._locator_target,
                     )
-                except BaseException:
+                except Exception:
                     raise FlowDownloadCorrelationError() from None
 
                 checkpoint_sink.record_download_intent(slot_index, fingerprint)
@@ -255,7 +270,7 @@ class FlowGenerationRuntime:
                 )
                 try:
                     download.save_as(staging_path)
-                except BaseException:
+                except Exception:
                     raise FlowDownloadCorrelationError() from None
                 if download.failure() is not None:
                     raise FlowDownloadCorrelationError()
@@ -291,7 +306,9 @@ class FlowGenerationRuntime:
             raise
         except FlowDownloadCorrelationError:
             raise
-        except BaseException:
+        except _FLOW_RUNTIME_BOUNDARY_ERRORS:
+            raise
+        except Exception:
             raise FlowDownloadCorrelationError() from None
 
     def prepare_inputs(
@@ -303,19 +320,24 @@ class FlowGenerationRuntime:
         prompt_sha256: str,
     ) -> FlowGenerationObservation:
         """Upload and read back private inputs without retaining their raw values."""
-        self._verify_reference_hash(reference_path, reference_sha256)
+        try:
+            reference = capture_flow_reference(reference_path, reference_sha256)
+        except FlowArtifactInvalidError:
+            raise FlowGenerationRuntimeError(failed_step="verify_reference") from None
         self._verify_prompt_hash(prompt_snapshot, prompt_sha256)
         try:
             with self._open_authenticated_session() as session:
                 return self._prepare_inputs_in_session(
                     session,
-                    reference_path=reference_path,
+                    reference=reference,
                     prompt_snapshot=prompt_snapshot,
                     prompt_sha256=prompt_sha256,
                 )
         except FlowGenerationRuntimeError:
             raise
-        except BaseException:
+        except _FLOW_RUNTIME_BOUNDARY_ERRORS:
+            raise
+        except Exception:
             raise FlowGenerationRuntimeError(failed_step="open_workspace") from None
 
     def prepare_and_dispatch(
@@ -324,7 +346,7 @@ class FlowGenerationRuntime:
         checkpoint_sink: FlowGenerationCheckpointSink,
     ) -> FlowGenerationObservation:
         """Persist verified inputs, then persist intent before one and only one click."""
-        self._verify_reference_hash(request.reference_path, request.reference_sha256)
+        self._verify_reference_hash(request.reference)
         self._verify_prompt_hash(request.prompt_snapshot, request.prompt_sha256)
         intent_started = False
         dispatch_confirmed = False
@@ -332,7 +354,7 @@ class FlowGenerationRuntime:
             with self._open_authenticated_session(workspace=request.workspace) as session:
                 observation = self._prepare_inputs_in_session(
                     session,
-                    reference_path=request.reference_path,
+                    reference=request.reference,
                     prompt_snapshot=request.prompt_snapshot,
                     prompt_sha256=request.prompt_sha256,
                     workspace=request.workspace,
@@ -360,7 +382,9 @@ class FlowGenerationRuntime:
             if intent_started and not dispatch_confirmed:
                 raise FlowDispatchAmbiguousError() from None
             raise
-        except BaseException:
+        except _FLOW_RUNTIME_BOUNDARY_ERRORS:
+            raise
+        except Exception:
             if intent_started and not dispatch_confirmed:
                 raise FlowDispatchAmbiguousError() from None
             raise FlowGenerationRuntimeError(failed_step="open_workspace") from None
@@ -377,7 +401,9 @@ class FlowGenerationRuntime:
                 return False
         except FlowDispatchAmbiguousError:
             return False
-        except BaseException:
+        except _FLOW_RUNTIME_BOUNDARY_ERRORS:
+            raise
+        except Exception:
             raise FlowDispatchAmbiguousError() from None
 
     def recover_dispatch(
@@ -416,7 +442,9 @@ class FlowGenerationRuntime:
                 return not expected_fingerprints or selected == expected_fingerprints
         except FlowDispatchAmbiguousError:
             raise
-        except BaseException:
+        except _FLOW_RUNTIME_BOUNDARY_ERRORS:
+            raise
+        except Exception:
             raise FlowDispatchAmbiguousError() from None
 
     def _await_stable_candidates(
@@ -478,7 +506,7 @@ class FlowGenerationRuntime:
             )
         except FlowGenerationRuntimeError:
             raise
-        except BaseException:
+        except Exception:
             raise FlowGenerationRuntimeError(failed_step="capture_grid_evidence") from None
 
         self._require_workspace_identity(session, context.workspace)
@@ -488,6 +516,7 @@ class FlowGenerationRuntime:
             local_evidence = publish_flow_grid_evidence(
                 screenshot_png,
                 evidence_root=inspection_root,
+                trusted_root=context.work_root,
             )
             final_path = inspection_root / local_evidence.relative_path
             relative_path = final_path.relative_to(
@@ -497,7 +526,9 @@ class FlowGenerationRuntime:
                 relative_path=relative_path,
                 sha256=local_evidence.sha256,
             )
-        except BaseException:
+        except FlowDiagnosticSanitizationError:
+            raise
+        except Exception:
             raise FlowGenerationRuntimeError(failed_step="capture_grid_evidence") from None
 
     def _require_evidence_candidates(
@@ -605,9 +636,15 @@ class FlowGenerationRuntime:
                 raise FlowGenerationRuntimeError(failed_step="open_workspace") from None
             except FlowGenerationRuntimeError:
                 raise
+            except (
+                FlowRuntimeBusyError,
+                FlowAuthenticationTimeoutError,
+                FlowDiagnosticSanitizationError,
+            ):
+                raise
             except (FlowArtifactConflictError, FlowArtifactInvalidError):
                 raise
-            except BaseException:
+            except Exception:
                 raise FlowGenerationRuntimeError(failed_step="open_workspace") from None
             return
 
@@ -628,22 +665,28 @@ class FlowGenerationRuntime:
             raise FlowGenerationRuntimeError(failed_step="open_workspace") from None
         except FlowGenerationRuntimeError:
             raise
+        except (
+            FlowRuntimeBusyError,
+            FlowAuthenticationTimeoutError,
+            FlowDiagnosticSanitizationError,
+        ):
+            raise
         except (FlowArtifactConflictError, FlowArtifactInvalidError):
             raise
-        except BaseException:
+        except Exception:
             raise FlowGenerationRuntimeError(failed_step="open_workspace") from None
         finally:
             if lock_acquired:
                 try:
                     lock.release()
-                except BaseException:
+                except Exception:
                     raise FlowGenerationRuntimeError(failed_step="close_browser") from None
 
     def _prepare_inputs_in_session(
         self,
         session: _AuthenticatedFlowSession,
         *,
-        reference_path: Path,
+        reference: FlowReferenceUpload,
         prompt_snapshot: str,
         prompt_sha256: str,
         workspace: FlowWorkspaceIdentity | None = None,
@@ -655,10 +698,10 @@ class FlowGenerationRuntime:
                 _target=self._locator_target,
             )
             upload_was_complete = self._upload_complete_present(session.page)
-            self._set_input_files(reference_input, reference_path)
+            self._set_input_files(reference_input, reference)
         except FlowGenerationRuntimeError:
             raise
-        except BaseException:
+        except Exception:
             raise FlowGenerationRuntimeError(
                 failed_step="upload_reference", failed_locator="REFERENCE_INPUT"
             ) from None
@@ -671,7 +714,7 @@ class FlowGenerationRuntime:
             prompt.fill(prompt_snapshot)
         except FlowGenerationRuntimeError:
             raise
-        except BaseException:
+        except Exception:
             raise FlowGenerationRuntimeError(
                 failed_step="fill_prompt", failed_locator="GENERATION_PROMPT"
             ) from None
@@ -679,7 +722,7 @@ class FlowGenerationRuntime:
         self._require_session_page(session, workspace)
         try:
             actual_prompt_hash = _sha256_text(prompt.input_value())
-        except BaseException:
+        except Exception:
             raise FlowGenerationRuntimeError(
                 failed_step="verify_prompt", failed_locator="GENERATION_PROMPT"
             ) from None
@@ -713,7 +756,7 @@ class FlowGenerationRuntime:
             return resolve_generate_control(session.page, _target=self._locator_target)
         except FlowGenerationRuntimeError:
             raise
-        except BaseException:
+        except Exception:
             raise FlowGenerationRuntimeError(
                 failed_step="dispatch_generate", failed_locator="GENERATE_CONTROL"
             ) from None
@@ -795,7 +838,7 @@ class FlowGenerationRuntime:
             session.require_current_flow_page()
         except FlowGenerationRuntimeError:
             raise
-        except BaseException:
+        except Exception:
             raise FlowGenerationRuntimeError(failed_step="open_workspace") from None
 
     def _require_session_page(
@@ -817,7 +860,7 @@ class FlowGenerationRuntime:
             actual = session.workspace_identity()
         except FlowGenerationRuntimeError:
             raise
-        except BaseException:
+        except Exception:
             raise FlowGenerationRuntimeError(failed_step="open_workspace") from None
         if actual != expected:
             raise FlowGenerationRuntimeError(failed_step="open_workspace")
@@ -831,14 +874,10 @@ class FlowGenerationRuntime:
         if callable(opener):
             opener(workspace)
 
-    def _verify_reference_hash(self, reference_path: Path, expected_hash: str) -> None:
-        if not _is_sha256(expected_hash):
+    def _verify_reference_hash(self, reference: FlowReferenceUpload) -> None:
+        if not _is_sha256(reference.sha256):
             raise FlowGenerationRuntimeError(failed_step="verify_reference")
-        try:
-            actual_hash = hashlib.sha256(reference_path.read_bytes()).hexdigest()
-        except OSError:
-            raise FlowGenerationRuntimeError(failed_step="verify_reference") from None
-        if actual_hash != expected_hash:
+        if hashlib.sha256(reference.payload).hexdigest() != reference.sha256:
             raise FlowGenerationRuntimeError(failed_step="verify_reference")
 
     @staticmethod
@@ -852,8 +891,14 @@ class FlowGenerationRuntime:
             raise RuntimeError("injected generation crash")
 
 
-def _playwright_set_input_files(locator: Locator, path: Path) -> None:
-    locator.set_input_files(path)
+def _playwright_set_input_files(locator: Locator, reference: FlowReferenceUpload) -> None:
+    locator.set_input_files(
+        {
+            "name": reference.name,
+            "mimeType": reference.mime_type,
+            "buffer": reference.payload,
+        }
+    )
 
 
 def _sha256_text(value: str) -> str:

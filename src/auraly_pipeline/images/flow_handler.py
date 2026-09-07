@@ -20,6 +20,7 @@ from auraly_pipeline.flow.artifacts import (
     FlowArtifactConflictError,
     FlowArtifactFacts,
     FlowArtifactInvalidError,
+    capture_flow_reference,
     inspect_flow_artifact,
     resolve_flow_final_path,
 )
@@ -31,6 +32,12 @@ from auraly_pipeline.flow.generation import (
     FlowGenerationArtifactContext,
     FlowGenerationRequest,
     FlowGenerationRuntime,
+)
+from auraly_pipeline.flow.domain import (
+    FlowAuthenticationTimeoutError,
+    FlowDiagnosticSanitizationError,
+    FlowRuntimeBusyError,
+    FlowUnexpectedStateError,
 )
 from auraly_pipeline.flow.generation_domain import (
     FlowCandidateObservation,
@@ -47,12 +54,22 @@ from auraly_pipeline.images.db_models import (
     ImageCandidateRow,
     ImageGenerationRow,
 )
-from auraly_pipeline.images.domain import ImageCandidate
+from auraly_pipeline.images.domain import (
+    FlowCandidateSlot,
+    FlowCandidateSlotState,
+    FlowGenerationRun,
+    FlowGenerationStage,
+    ImageCandidate,
+)
 from auraly_pipeline.images.repository import ImageRepository
 from auraly_pipeline.jobs.db_models import JobEventRow, JobRow
 from auraly_pipeline.jobs.domain import JobSubmit
 from auraly_pipeline.jobs.domain import JobExecutionOutcome, JobExecutionResult, RetrySafety
 from auraly_pipeline.jobs.handlers import JobExecutionContext
+from auraly_pipeline.metadata_security import (
+    validate_safe_error_message,
+    validate_safe_identifier,
+)
 
 
 def _utc_now() -> datetime:
@@ -289,6 +306,14 @@ class FlowGenerationCheckpointSink:
                     .where(
                         FlowGenerationRunRow.id == self._run_id,
                         FlowGenerationRunRow.stage.in_(expected),
+                        *(
+                            (
+                                FlowGenerationRunRow.dispatch_intent_at.is_(None),
+                                FlowGenerationRunRow.dispatch_confirmed_at.is_(None),
+                            )
+                            if target == "dispatch_intent_recorded"
+                            else ()
+                        ),
                     )
                     .values(**values)
                 )
@@ -350,13 +375,11 @@ class FlowImageGenerateHandler:
         _runtime_factory: Callable[
             [FlowGenerationArtifactContext], FlowGenerationRuntime
         ] = _build_flow_runtime,
-        _workspace_factory: Callable[[], FlowWorkspaceIdentity | None] | None = None,
     ) -> None:
         self._sessions = session_factory
         self._work_root = work_root.resolve()
         self._clock = clock or _utc_now
         self._runtime_factory = _runtime_factory
-        self._workspace_factory = _workspace_factory or (lambda: None)
 
     def execute(self, context: JobExecutionContext) -> JobExecutionResult:
         validated = self._validate(context)
@@ -386,8 +409,7 @@ class FlowImageGenerateHandler:
             if run.stage == "prepared":
                 runtime.prepare_and_dispatch(
                     FlowGenerationRequest(
-                        reference_path=reference,
-                        reference_sha256=generation.reference_image_sha256 or "",
+                        reference=reference,
                         prompt_snapshot=generation.prompt_snapshot,
                         prompt_sha256=generation.prompt_sha256,
                         workspace=workspace,
@@ -497,14 +519,56 @@ class FlowImageGenerateHandler:
                 expected_stage=sink.run_stage,
             )
             return self._blocked("flow_recovery_blocked")
-        except FlowGenerationRuntimeError:
-            self._set_run_failure(
+        except FlowRuntimeBusyError:
+            return self._block_runtime_failure(run.id, sink, "flow_runtime_busy")
+        except FlowAuthenticationTimeoutError:
+            return self._block_runtime_failure(
                 run.id,
-                "blocked",
-                "flow_ui_contract_failed",
-                expected_stage=sink.run_stage,
+                sink,
+                "flow_authentication_required",
             )
-            return self._blocked("flow_ui_contract_failed")
+        except FlowDiagnosticSanitizationError:
+            return self._block_runtime_failure(
+                run.id,
+                sink,
+                "flow_diagnostic_sanitization_failed",
+            )
+        except FlowUnexpectedStateError as error:
+            code = (
+                "flow_browser_close_failed"
+                if error.failed_step == "close_browser"
+                else "flow_ui_contract_failed"
+            )
+            return self._block_runtime_failure(run.id, sink, code)
+        except FlowGenerationRuntimeError as error:
+            if error.failed_step in {
+                "upload_reference",
+                "verify_reference",
+                "fill_prompt",
+                "verify_prompt",
+            }:
+                code = "flow_input_verification_failed"
+            elif error.failed_step == "capture_grid_evidence":
+                code = "flow_diagnostic_sanitization_failed"
+            elif error.failed_step == "close_browser":
+                code = "flow_browser_close_failed"
+            else:
+                code = "flow_ui_contract_failed"
+            return self._block_runtime_failure(run.id, sink, code)
+
+    def _block_runtime_failure(
+        self,
+        run_id: str,
+        sink: FlowGenerationCheckpointSink,
+        code: str,
+    ) -> JobExecutionResult:
+        self._set_run_failure(
+            run_id,
+            "blocked",
+            code,
+            expected_stage=sink.run_stage,
+        )
+        return self._blocked(code)
 
     def _validate(self, context: JobExecutionContext):
         with self._sessions() as session:
@@ -574,11 +638,19 @@ class FlowImageGenerateHandler:
                 return None
             if any(slot.state == "download_intent_recorded" for slot in slots):
                 return None
+            if not self._persisted_flow_state_is_valid(
+                session,
+                job=job,
+                generation=generation,
+                run=run,
+                slots=slots,
+            ):
+                return None
             authorizations = list(
                 session.scalars(
                     select(JobEventRow).where(
                         JobEventRow.job_id == job.id,
-                        JobEventRow.event_type == "job.authorized",
+                        JobEventRow.event_type == "job.provider_action_authorized",
                     )
                 )
             )
@@ -588,19 +660,20 @@ class FlowImageGenerateHandler:
                 != {
                     "executor": "playwright_python",
                     "approvedBy": run.provider_action_approved_by,
-                    "workspaceFingerprint": run.provider_workspace_fingerprint,
+                    "candidateCount": 2,
+                    "resolution": "2K",
                 }
                 or authorizations[0].timestamp != run.provider_action_approved_at
             ):
                 return None
             try:
-                reference = (self._work_root / generation.reference_image_path).resolve(strict=True)
-                reference.relative_to(self._work_root)
-                if (
-                    hashlib.sha256(reference.read_bytes()).hexdigest()
-                    != generation.reference_image_sha256
-                ):
-                    return None
+                lexical_reference_path = self._work_root / generation.reference_image_path
+                reference_path = lexical_reference_path.resolve(strict=True)
+                reference_path.relative_to(self._work_root)
+                reference = capture_flow_reference(
+                    lexical_reference_path,
+                    generation.reference_image_sha256,
+                )
                 expected_workspace_fingerprint = hashlib.sha256(
                     run.provider_workspace_path.encode("utf-8")
                 ).hexdigest()
@@ -614,9 +687,162 @@ class FlowImageGenerateHandler:
                         fingerprint=run.provider_workspace_fingerprint or "",
                     )
                 )
-            except (OSError, ValueError):
+            except (FlowArtifactInvalidError, OSError, ValueError):
                 return None
             return generation, run, slots, reference, workspace
+
+    @staticmethod
+    def _utc(value: datetime) -> datetime:
+        if value.tzinfo is None:
+            return value.replace(tzinfo=UTC)
+        return value.astimezone(UTC)
+
+    @classmethod
+    def _optional_utc(cls, value: datetime | None) -> datetime | None:
+        return None if value is None else cls._utc(value)
+
+    @classmethod
+    def _persisted_flow_state_is_valid(
+        cls,
+        session: Session,
+        *,
+        job: JobRow,
+        generation: ImageGenerationRow,
+        run: FlowGenerationRunRow,
+        slots: list[FlowCandidateSlotRow],
+    ) -> bool:
+        try:
+            FlowGenerationRun(
+                flow_generation_run_id=run.id,
+                image_generation_id=run.image_generation_id,
+                stage=cast(FlowGenerationStage, run.stage),
+                required_candidate_count=2,
+                required_resolution="2K",
+                provider_workspace_path=run.provider_workspace_path,
+                provider_workspace_fingerprint=run.provider_workspace_fingerprint,
+                dispatch_attempt_number=run.dispatch_attempt_number,
+                dispatch_intent_at=cls._optional_utc(run.dispatch_intent_at),
+                dispatch_confirmed_at=cls._optional_utc(run.dispatch_confirmed_at),
+                grid_evidence_path=run.grid_evidence_path,
+                grid_evidence_sha256=run.grid_evidence_sha256,
+                last_failure_code=run.last_failure_code,
+                provider_action_approved_by=run.provider_action_approved_by,
+                provider_action_approved_at=cls._utc(run.provider_action_approved_at),
+                created_at=cls._utc(run.created_at),
+                updated_at=cls._utc(run.updated_at),
+            )
+            for slot in slots:
+                FlowCandidateSlot(
+                    flow_candidate_slot_id=slot.id,
+                    flow_generation_run_id=slot.flow_generation_run_id,
+                    slot_index=slot.slot_index,
+                    provider_slot_fingerprint=slot.provider_slot_fingerprint,
+                    state=cast(FlowCandidateSlotState, slot.state),
+                    download_intent_at=cls._optional_utc(slot.download_intent_at),
+                    staging_path=slot.staging_path,
+                    staged_sha256=slot.staged_sha256,
+                    image_candidate_id=slot.image_candidate_id,
+                    created_at=cls._utc(slot.created_at),
+                    updated_at=cls._utc(slot.updated_at),
+                )
+        except (TypeError, ValueError):
+            return False
+
+        states = [slot.state for slot in slots]
+        if (
+            run.image_generation_id != generation.id
+            or any(slot.flow_generation_run_id != run.id for slot in slots)
+            or any(cls._utc(slot.created_at) != cls._utc(run.created_at) for slot in slots)
+        ):
+            return False
+        if (run.dispatch_confirmed_at is None) != (generation.dispatched_at is None):
+            return False
+        if run.dispatch_confirmed_at is not None and generation.dispatched_at is not None:
+            if cls._utc(run.dispatch_confirmed_at) != cls._utc(generation.dispatched_at):
+                return False
+        for slot in slots:
+            if slot.download_intent_at is not None and (
+                run.dispatch_confirmed_at is None
+                or cls._utc(slot.download_intent_at) < cls._utc(run.dispatch_confirmed_at)
+            ):
+                return False
+        if generation.completed_at is not None and run.stage != "completed":
+            return False
+        if run.stage in {"prepared", "inputs_verified", "dispatch_intent_recorded", "ambiguous"}:
+            if states != ["pending", "pending"] or run.grid_evidence_path is not None:
+                return False
+        elif run.stage == "dispatch_confirmed":
+            if states != ["pending", "pending"] or run.grid_evidence_path is not None:
+                return False
+        elif run.stage == "candidates_observed":
+            if states != ["observed", "observed"] or run.grid_evidence_path is None:
+                return False
+        elif run.stage == "downloading":
+            if (
+                any(state not in {"observed", "downloaded", "ingested"} for state in states)
+                or run.grid_evidence_path is None
+            ):
+                return False
+        elif run.stage == "completed":
+            if states != ["ingested", "ingested"] or run.grid_evidence_path is None:
+                return False
+
+        resolutions = list(
+            session.scalars(
+                select(JobEventRow)
+                .where(
+                    JobEventRow.job_id == job.id,
+                    JobEventRow.event_type == "job.flow_dispatch_resolved",
+                )
+                .order_by(JobEventRow.sequence)
+            )
+        )
+        if len(resolutions) != run.dispatch_attempt_number - 1:
+            return False
+        previous_resolution_at = cls._utc(run.created_at)
+        for previous_attempt, event in enumerate(resolutions, start=1):
+            metadata = event.metadata_json
+            if (
+                metadata.get("previousDispatchAttemptNumber") != previous_attempt
+                or metadata.get("nextDispatchAttemptNumber") != previous_attempt + 1
+                or not isinstance(metadata.get("previousDispatchIntentAt"), str)
+                or metadata.get("previousDispatchConfirmedAt") is not None
+                or not isinstance(metadata.get("resolvedBy"), str)
+                or not metadata.get("resolvedBy")
+                or not isinstance(metadata.get("reason"), str)
+                or not metadata.get("reason")
+                or set(metadata)
+                != {
+                    "previousDispatchAttemptNumber",
+                    "previousDispatchIntentAt",
+                    "previousDispatchConfirmedAt",
+                    "nextDispatchAttemptNumber",
+                    "resolvedBy",
+                    "reason",
+                }
+            ):
+                return False
+            try:
+                intent_at = datetime.fromisoformat(metadata["previousDispatchIntentAt"])
+                resolved_by = validate_safe_identifier(
+                    metadata["resolvedBy"],
+                    "resolved_by",
+                    max_length=120,
+                )
+                validate_safe_error_message(metadata["reason"], "reason")
+            except (TypeError, ValueError):
+                return False
+            event_at = cls._utc(event.timestamp)
+            if (
+                intent_at.tzinfo is None
+                or cls._utc(intent_at) < cls._utc(run.created_at)
+                or cls._utc(intent_at) > event_at
+                or event_at < previous_resolution_at
+                or resolved_by != metadata["resolvedBy"]
+            ):
+                return False
+            previous_resolution_at = event_at
+        return True
 
     def _mark_generating(self, generation_id: str) -> None:
         with _checkpoint_session(self._sessions) as session:
