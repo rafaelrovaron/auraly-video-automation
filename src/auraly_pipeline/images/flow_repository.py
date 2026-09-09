@@ -428,12 +428,14 @@ class FlowCheckpointRepository:
         job_id: str,
         slot_index: int,
         *,
+        validate: Callable[[Session], None],
         expected_fingerprint: str,
         relative_path: str,
         sha256: str,
         now: datetime,
     ) -> FlowCandidateSlotRow:
         def record(session: Session) -> FlowCandidateSlotRow:
+            validate(session)
             self._require_blocked_recovery(session, run_id, generation_id, job_id)
             return self._transition_slot_in_session(
                 session,
@@ -480,12 +482,14 @@ class FlowCheckpointRepository:
         job_id: str,
         slot_index: int,
         *,
+        validate: Callable[[Session], None],
         expected_slot_identities: Sequence[tuple[object, ...]],
         expected_staged_sha256: str,
         candidate: ImageCandidate,
         now: datetime,
     ) -> FlowCandidateSlotRow:
         def ingest(session: Session) -> FlowCandidateSlotRow:
+            validate(session)
             self._require_blocked_recovery(session, run_id, generation_id, job_id)
             if [self.slot_identity(slot) for slot in self._list_slots(session, run_id)] != list(
                 expected_slot_identities
@@ -574,10 +578,12 @@ class FlowCheckpointRepository:
         run_id: str,
         generation_id: str,
         *,
+        validate: Callable[[Session], None],
         expected_stages: frozenset[FlowGenerationStage],
         now: datetime,
     ) -> FlowGenerationRunRow:
         def reset(session: Session) -> FlowGenerationRunRow:
+            validate(session)
             run = session.get(FlowGenerationRunRow, run_id)
             generation = session.get(ImageGenerationRow, generation_id)
             slots = self._list_slots(session, run_id)
@@ -611,10 +617,12 @@ class FlowCheckpointRepository:
         run_id: str,
         generation_id: str,
         *,
+        validate: Callable[[Session], None],
         expected_slot_identities: Sequence[tuple[object, ...]],
         now: datetime,
     ) -> FlowGenerationRunRow:
         def promote(session: Session) -> FlowGenerationRunRow:
+            validate(session)
             run = session.get(FlowGenerationRunRow, run_id)
             generation = session.get(ImageGenerationRow, generation_id)
             slots = self._list_slots(session, run_id)
@@ -652,9 +660,11 @@ class FlowCheckpointRepository:
         run_id: str,
         generation_id: str,
         *,
+        validate: Callable[[Session], None],
         now: datetime,
     ) -> FlowGenerationRunRow:
         def complete(session: Session) -> FlowGenerationRunRow:
+            validate(session)
             run = session.get(FlowGenerationRunRow, run_id)
             generation = session.get(ImageGenerationRow, generation_id)
             slots = self._list_slots(session, run_id)

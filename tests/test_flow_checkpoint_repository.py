@@ -18,6 +18,7 @@ from auraly_pipeline.images.flow_repository import (
     FlowCheckpointConflictError,
     FlowCheckpointRepository,
 )
+from auraly_pipeline.images.repository import ImageRepository
 
 
 NOW = datetime(2026, 9, 8, 12, 0, tzinfo=UTC)
@@ -304,6 +305,42 @@ def test_dispatch_confirmation_updates_run_and_generation_atomically(
     assert datetime.fromisoformat(dispatched_at) == confirmed_at.replace(tzinfo=None)
 
 
+def test_dispatch_confirmation_rolls_back_run_when_generation_update_fails(
+    checkpoint_repository: tuple[Engine, FlowCheckpointRepository],
+) -> None:
+    engine, repository = checkpoint_repository
+    repository.transition_run(
+        RUN_ID,
+        expected_stage="prepared",
+        target_stage="inputs_verified",
+        now=NOW + timedelta(seconds=1),
+    )
+    intent_at = NOW + timedelta(seconds=2)
+    repository.transition_run(
+        RUN_ID,
+        expected_stage="inputs_verified",
+        target_stage="dispatch_intent_recorded",
+        now=intent_at,
+        updates={"dispatch_intent_at": intent_at},
+    )
+    with engine.begin() as connection:
+        connection.execute(
+            text("UPDATE image_generations SET provider_state = 'queued' WHERE id = :id"),
+            {"id": GENERATION_ID},
+        )
+
+    with pytest.raises(FlowCheckpointConflictError):
+        repository.confirm_dispatch(
+            RUN_ID,
+            expected_stage="dispatch_intent_recorded",
+            now=NOW + timedelta(seconds=3),
+        )
+
+    assert (persisted := repository.get_run(RUN_ID)) is not None
+    assert persisted.stage == "dispatch_intent_recorded"
+    assert persisted.dispatch_confirmed_at is None
+
+
 def _downloaded_slot(repository: FlowCheckpointRepository, index: int) -> None:
     run = repository.get_run(RUN_ID)
     assert run is not None
@@ -506,6 +543,37 @@ def test_candidate_ingestion_conflicts_leave_no_orphan(
             now=NOW + timedelta(seconds=5),
         )
     assert repository.get_candidate(candidate.image_candidate_id) is None
+
+
+def test_candidate_insert_is_rolled_back_if_slot_linking_fails(
+    checkpoint_repository: tuple[Engine, FlowCheckpointRepository],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _engine, repository = checkpoint_repository
+    _downloaded_slot(repository, 0)
+    candidate = _candidate(0)
+    create_candidate = ImageRepository.create_candidate_in_session
+
+    def fail_after_insert(session: Session, inserted: ImageCandidate) -> None:
+        create_candidate(session, inserted)
+        raise FlowCheckpointConflictError()
+
+    monkeypatch.setattr(ImageRepository, "create_candidate_in_session", fail_after_insert)
+
+    with pytest.raises(FlowCheckpointConflictError):
+        repository.ingest_candidate(
+            RUN_ID,
+            0,
+            expected_state="downloaded",
+            expected_staged_sha256=candidate.sha256,
+            candidate=candidate,
+            now=NOW + timedelta(seconds=5),
+        )
+
+    assert repository.get_candidate(candidate.image_candidate_id) is None
+    assert (slot := repository.get_slot(RUN_ID, 0)) is not None
+    assert slot.state == "downloaded"
+    assert slot.image_candidate_id is None
 
 
 def test_complete_requires_exactly_two_ingested_slots(

@@ -182,12 +182,14 @@ class _RecoveryDownloadCheckpointSink:
         run_id: str,
         generation_id: str,
         job_id: str,
+        validate: Callable[[Session], None],
         clock: Callable[[], datetime],
     ) -> None:
         self._repository = repository
         self._run_id = run_id
         self._generation_id = generation_id
         self._job_id = job_id
+        self._validate = validate
         self._clock = clock
 
     def candidate_fingerprint(self, slot_index: int) -> str:
@@ -217,6 +219,7 @@ class _RecoveryDownloadCheckpointSink:
                 self._generation_id,
                 self._job_id,
                 slot_index,
+                validate=self._validate,
                 expected_fingerprint=self.candidate_fingerprint(slot_index),
                 relative_path=relative_path,
                 sha256=sha256,
@@ -762,19 +765,6 @@ class ImageService:
             raise ImageRecoveryBlockedError
 
     @staticmethod
-    def _recovery_slot_identity(slot: FlowCandidateSlotRow) -> tuple[object, ...]:
-        return (
-            slot.id,
-            slot.slot_index,
-            slot.state,
-            slot.provider_slot_fingerprint,
-            slot.download_intent_at,
-            slot.staging_path,
-            slot.staged_sha256,
-            slot.image_candidate_id,
-        )
-
-    @staticmethod
     def _validate_recovery_state_compatibility(
         generation: ImageGenerationRow,
         run: FlowGenerationRunRow,
@@ -878,7 +868,7 @@ class ImageService:
 
         if any(slot.state == "downloaded" for slot in slots):
             expected_slot_identities = [
-                self._recovery_slot_identity(slot) for slot in slots
+                self._checkpoints.slot_identity(slot) for slot in slots
             ]
             downloaded: list[tuple[FlowCandidateSlotRow, FlowArtifactFacts]] = []
             for slot in slots:
@@ -897,7 +887,7 @@ class ImageService:
                     facts,
                     expected_slot_identities,
                 )
-                expected_slot_identities[slot.slot_index] = self._recovery_slot_identity(
+                expected_slot_identities[slot.slot_index] = self._checkpoints.slot_identity(
                     ingested
                 )
             with self._sessions() as session:
@@ -946,13 +936,16 @@ class ImageService:
         intent_slots = [slot for slot in slots if slot.state == "download_intent_recorded"]
         if intent_slots:
             expected_slot_identities = [
-                self._recovery_slot_identity(slot) for slot in slots
+                self._checkpoints.slot_identity(slot) for slot in slots
             ]
             sink = _RecoveryDownloadCheckpointSink(
                 self._checkpoints,
                 run_id=run.id,
                 generation_id=generation.id,
                 job_id=generation.job_id,
+                validate=lambda session: self._validate_recovery_run_identity(
+                    session, generation.id, run.id
+                ),
                 clock=lambda: self._utc(self._clock()),
             )
             for slot in intent_slots:
@@ -966,7 +959,7 @@ class ImageService:
                 if current_generation.id != generation.id or current_run.id != run.id:
                     raise ImageRecoveryBlockedError
                 expected_slot_identities = [
-                    self._recovery_slot_identity(current) for current in current_slots
+                    self._checkpoints.slot_identity(current) for current in current_slots
                 ]
                 ingested = self._ingest_recovered_slot(
                     generation,
@@ -975,7 +968,7 @@ class ImageService:
                     facts,
                     expected_slot_identities,
                 )
-                expected_slot_identities[slot.slot_index] = self._recovery_slot_identity(
+                expected_slot_identities[slot.slot_index] = self._checkpoints.slot_identity(
                     ingested
                 )
             with self._sessions() as session:
@@ -995,6 +988,9 @@ class ImageService:
             self._checkpoints.reset_pre_intent(
                 run_id,
                 generation_id,
+                validate=lambda session: self._validate_recovery_run_identity(
+                    session, generation_id, run_id
+                ),
                 expected_stages=frozenset({"prepared", "inputs_verified", "blocked"}),
                 now=self._utc(self._clock()),
             )
@@ -1011,8 +1007,11 @@ class ImageService:
             self._checkpoints.promote_recovered_dispatch(
                 run_id,
                 generation_id,
+                validate=lambda session: self._validate_recovery_run_identity(
+                    session, generation_id, run_id
+                ),
                 expected_slot_identities=[
-                    self._recovery_slot_identity(slot) for slot in slots
+                    self._checkpoints.slot_identity(slot) for slot in slots
                 ],
                 now=self._utc(self._clock()),
             )
@@ -1111,6 +1110,9 @@ class ImageService:
                 generation.id,
                 generation.job_id,
                 slot_index,
+                validate=lambda session: self._validate_recovery_run_identity(
+                    session, generation.id, run_id
+                ),
                 expected_slot_identities=expected_slot_identities,
                 expected_staged_sha256=facts.sha256,
                 candidate=candidate,
@@ -1174,6 +1176,9 @@ class ImageService:
             self._checkpoints.complete_recovered_generation(
                 run_id,
                 generation_id,
+                validate=lambda session: self._validate_recovery_run_identity(
+                    session, generation_id, run_id
+                ),
                 now=self._utc(self._clock()),
             )
         except FlowCheckpointConflictError:
