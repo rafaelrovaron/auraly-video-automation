@@ -154,7 +154,8 @@ def test_create_run_creates_exactly_two_pending_slots(tmp_path: Path) -> None:
         repository.create_run_in_session(session, _run(), [_slot(0), _slot(1)])
         session.commit()
 
-    assert repository.get_run(RUN_ID).stage == "prepared"
+    assert (run := repository.get_run(RUN_ID)) is not None
+    assert run.stage == "prepared"
     assert [(slot.slot_index, slot.state) for slot in repository.list_slots(RUN_ID)] == [
         (0, "pending"),
         (1, "pending"),
@@ -219,7 +220,8 @@ def test_run_transition_uses_expected_stage(
             target_stage="inputs_verified",
             now=NOW + timedelta(seconds=2),
         )
-    assert repository.get_run(RUN_ID).stage == "inputs_verified"
+    assert (persisted := repository.get_run(RUN_ID)) is not None
+    assert persisted.stage == "inputs_verified"
 
 
 def test_slot_transition_uses_expected_state_and_fingerprint(
@@ -247,7 +249,8 @@ def test_slot_transition_uses_expected_state_and_fingerprint(
             now=NOW + timedelta(seconds=2),
             updates={"download_intent_at": NOW + timedelta(seconds=2)},
         )
-    assert repository.get_slot(RUN_ID, 0).state == "observed"
+    assert (persisted := repository.get_slot(RUN_ID, 0)) is not None
+    assert persisted.state == "observed"
 
 
 def test_stale_slot_expected_state_is_rejected(
@@ -262,7 +265,8 @@ def test_stale_slot_expected_state_is_rejected(
             target_state="download_intent_recorded",
             now=NOW + timedelta(seconds=1),
         )
-    assert repository.get_slot(RUN_ID, 1).state == "pending"
+    assert (persisted := repository.get_slot(RUN_ID, 1)) is not None
+    assert persisted.state == "pending"
 
 
 def test_dispatch_confirmation_updates_run_and_generation_atomically(
@@ -290,7 +294,8 @@ def test_dispatch_confirmation_updates_run_and_generation_atomically(
         now=confirmed_at,
     )
 
-    assert repository.get_run(RUN_ID).dispatch_confirmed_at == confirmed_at.replace(tzinfo=None)
+    assert (persisted := repository.get_run(RUN_ID)) is not None
+    assert persisted.dispatch_confirmed_at == confirmed_at.replace(tzinfo=None)
     with engine.connect() as connection:
         dispatched_at = connection.execute(
             text("SELECT dispatched_at FROM image_generations WHERE id = :id"),
@@ -409,9 +414,11 @@ def test_download_intent_and_downloaded_facts_are_persisted(
         now=NOW + timedelta(seconds=5),
     )
     intended = repository.get_slot(RUN_ID, 0)
+    assert intended is not None
     assert intended.state == "download_intent_recorded"
     assert intended.download_intent_at == (NOW + timedelta(seconds=5)).replace(tzinfo=None)
-    assert repository.get_run(RUN_ID).stage == "downloading"
+    assert (persisted_run := repository.get_run(RUN_ID)) is not None
+    assert persisted_run.stage == "downloading"
 
     repository.record_downloaded(
         RUN_ID,
@@ -423,6 +430,7 @@ def test_download_intent_and_downloaded_facts_are_persisted(
         now=NOW + timedelta(seconds=6),
     )
     downloaded = repository.get_slot(RUN_ID, 0)
+    assert downloaded is not None
     assert (downloaded.state, downloaded.staging_path, downloaded.staged_sha256) == (
         "downloaded",
         "campaigns/campaign-1/images/.staging/candidate-0.part",
@@ -455,7 +463,8 @@ def test_candidate_ingestion_is_atomic_and_exact_replay_is_idempotent(
 
     assert ingested.state == replayed.state == "ingested"
     assert ingested.image_candidate_id == replayed.image_candidate_id == candidate.image_candidate_id
-    assert repository.get_candidate(candidate.image_candidate_id).sha256 == candidate.sha256
+    assert (persisted := repository.get_candidate(candidate.image_candidate_id)) is not None
+    assert persisted.sha256 == candidate.sha256
 
 
 @pytest.mark.parametrize("failure", ["cross-generation", "duplicate-conflict", "stale-state"])
@@ -537,7 +546,8 @@ def test_complete_requires_exactly_two_ingested_slots(
         expected_stage="downloading",
         now=NOW + timedelta(seconds=6),
     )
-    assert repository.get_run(RUN_ID).stage == "completed"
+    assert (persisted := repository.get_run(RUN_ID)) is not None
+    assert persisted.stage == "completed"
 
 
 def test_concurrent_run_compare_and_set_allows_one_worker(tmp_path: Path) -> None:
@@ -566,7 +576,8 @@ def test_concurrent_run_compare_and_set_allows_one_worker(tmp_path: Path) -> Non
         outcomes = list(pool.map(transition, (0, 1)))
 
     assert sorted(outcomes) == ["advanced", "stale"]
-    assert setup.get_run(RUN_ID).stage == "inputs_verified"
+    assert (persisted := setup.get_run(RUN_ID)) is not None
+    assert persisted.stage == "inputs_verified"
     engine.dispose()
 
 
