@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Protocol, cast
 from uuid import uuid4
 
-from sqlalchemy import Engine, select, text
+from sqlalchemy import Engine, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -59,6 +59,10 @@ from auraly_pipeline.images.domain import (
     ImageGenerationSubmission,
     ImageProvider,
     generation_request_fingerprint,
+)
+from auraly_pipeline.images.flow_repository import (
+    FlowCheckpointConflictError,
+    FlowCheckpointRepository,
 )
 from auraly_pipeline.images.repository import ImageRepository
 from auraly_pipeline.jobs.db_models import JobEventRow, JobRow
@@ -173,29 +177,28 @@ class _RecoveryDownloadCheckpointSink:
 
     def __init__(
         self,
-        sessions: sessionmaker[Session],
+        repository: FlowCheckpointRepository,
         *,
         run_id: str,
+        generation_id: str,
+        job_id: str,
         clock: Callable[[], datetime],
-        validate_locked_state: Callable[[Session], None],
     ) -> None:
-        self._sessions = sessions
+        self._repository = repository
         self._run_id = run_id
+        self._generation_id = generation_id
+        self._job_id = job_id
         self._clock = clock
-        self._validate_locked_state = validate_locked_state
 
     def candidate_fingerprint(self, slot_index: int) -> str:
-        with self._sessions() as session:
-            slot = session.scalar(
-                select(FlowCandidateSlotRow).where(
-                    FlowCandidateSlotRow.flow_generation_run_id == self._run_id,
-                    FlowCandidateSlotRow.slot_index == slot_index,
-                    FlowCandidateSlotRow.state == "download_intent_recorded",
-                )
-            )
-            if slot is None or slot.provider_slot_fingerprint is None:
-                raise ImageRecoveryBlockedError
-            return slot.provider_slot_fingerprint
+        slot = self._repository.get_slot(self._run_id, slot_index)
+        if (
+            slot is None
+            or slot.state != "download_intent_recorded"
+            or slot.provider_slot_fingerprint is None
+        ):
+            raise ImageRecoveryBlockedError
+        return slot.provider_slot_fingerprint
 
     def record_download_intent(self, slot_index: int, fingerprint: str) -> None:
         if self.candidate_fingerprint(slot_index) != fingerprint:
@@ -208,24 +211,19 @@ class _RecoveryDownloadCheckpointSink:
         relative_path: str,
         sha256: str,
     ) -> None:
-        with self._sessions() as session:
-            session.execute(text("BEGIN IMMEDIATE"))
-            self._validate_locked_state(session)
-            slot = session.scalar(
-                select(FlowCandidateSlotRow).where(
-                    FlowCandidateSlotRow.flow_generation_run_id == self._run_id,
-                    FlowCandidateSlotRow.slot_index == slot_index,
-                    FlowCandidateSlotRow.state == "download_intent_recorded",
-                )
+        try:
+            self._repository.record_recovery_downloaded(
+                self._run_id,
+                self._generation_id,
+                self._job_id,
+                slot_index,
+                expected_fingerprint=self.candidate_fingerprint(slot_index),
+                relative_path=relative_path,
+                sha256=sha256,
+                now=self._clock(),
             )
-            if slot is None or slot.provider_slot_fingerprint is None:
-                session.rollback()
-                raise ImageRecoveryBlockedError
-            slot.state = "downloaded"
-            slot.staging_path = relative_path
-            slot.staged_sha256 = sha256
-            slot.updated_at = self._clock()
-            session.commit()
+        except FlowCheckpointConflictError:
+            raise ImageRecoveryBlockedError from None
 
 
 class ImageService:
@@ -241,6 +239,7 @@ class ImageService:
         self._engine = engine
         self._sessions = sessionmaker(engine, expire_on_commit=False, class_=Session)
         self._repository = ImageRepository(self._sessions)
+        self._checkpoints = FlowCheckpointRepository(self._sessions)
         self._jobs = jobs
         self._clock = clock or (lambda: datetime.now(UTC))
         self._work_root = configured_work_root(work_root)
@@ -309,8 +308,8 @@ class ImageService:
             if request.executor == "playwright_python":
                 # The authorization is durable data, never a worker/CLI choice.
                 run_id = str(uuid4())
-                flow_run = FlowGenerationRunRow(
-                    id=run_id,
+                flow_run = FlowGenerationRun(
+                    flow_generation_run_id=run_id,
                     image_generation_id=generation.image_generation_id,
                     stage="prepared",
                     required_candidate_count=2,
@@ -323,30 +322,27 @@ class ImageService:
                     grid_evidence_path=None,
                     grid_evidence_sha256=None,
                     last_failure_code=None,
-                    provider_action_approved_by=request.provider_action_approved_by,
+                    provider_action_approved_by=cast(
+                        str, request.provider_action_approved_by
+                    ),
                     provider_action_approved_at=timestamp,
                     created_at=timestamp,
                     updated_at=timestamp,
                 )
-                session.add(flow_run)
-                session.flush()
-                session.add_all(
+                self._checkpoints.create_run_in_session(
+                    session,
+                    flow_run,
                     [
-                        FlowCandidateSlotRow(
-                            id=str(uuid4()),
+                        FlowCandidateSlot(
+                            flow_candidate_slot_id=str(uuid4()),
                             flow_generation_run_id=run_id,
                             slot_index=index,
-                            provider_slot_fingerprint=None,
                             state="pending",
-                            download_intent_at=None,
-                            staging_path=None,
-                            staged_sha256=None,
-                            image_candidate_id=None,
                             created_at=timestamp,
                             updated_at=timestamp,
                         )
-                        for index in range(2)
-                    ]
+                        for index in (0, 1)
+                    ],
                 )
                 session.add(
                     JobEventRow(
@@ -881,6 +877,9 @@ class ImageService:
             return "completed_generation_reconciled"
 
         if any(slot.state == "downloaded" for slot in slots):
+            expected_slot_identities = [
+                self._recovery_slot_identity(slot) for slot in slots
+            ]
             downloaded: list[tuple[FlowCandidateSlotRow, FlowArtifactFacts]] = []
             for slot in slots:
                 if slot.state == "ingested":
@@ -891,7 +890,16 @@ class ImageService:
                 elif slot.state not in {"observed", "download_intent_recorded"}:
                     raise ImageRecoveryBlockedError
             for slot, facts in downloaded:
-                self._ingest_recovered_slot(generation, run.id, slot.slot_index, facts)
+                ingested = self._ingest_recovered_slot(
+                    generation,
+                    run.id,
+                    slot.slot_index,
+                    facts,
+                    expected_slot_identities,
+                )
+                expected_slot_identities[slot.slot_index] = self._recovery_slot_identity(
+                    ingested
+                )
             with self._sessions() as session:
                 slots = list(
                     session.scalars(
@@ -937,26 +945,38 @@ class ImageService:
         self._promote_recovered_dispatch(generation.id, run.id, slots)
         intent_slots = [slot for slot in slots if slot.state == "download_intent_recorded"]
         if intent_slots:
+            expected_slot_identities = [
+                self._recovery_slot_identity(slot) for slot in slots
+            ]
             sink = _RecoveryDownloadCheckpointSink(
-                self._sessions,
+                self._checkpoints,
                 run_id=run.id,
+                generation_id=generation.id,
+                job_id=generation.job_id,
                 clock=lambda: self._utc(self._clock()),
-                validate_locked_state=lambda session: self._validate_recovery_run_identity(
-                    session,
-                    generation.id,
-                    run.id,
-                ),
             )
             for slot in intent_slots:
                 facts = runtime.download_slot(
                     slot.slot_index,
                     cast(FlowGenerationDownloadCheckpointSink, sink),
                 )
-                self._ingest_recovered_slot(
+                current_generation, current_run, current_slots, _job = (
+                    self._validated_recovery_state(generation.id)
+                )
+                if current_generation.id != generation.id or current_run.id != run.id:
+                    raise ImageRecoveryBlockedError
+                expected_slot_identities = [
+                    self._recovery_slot_identity(current) for current in current_slots
+                ]
+                ingested = self._ingest_recovered_slot(
                     generation,
                     run.id,
                     slot.slot_index,
                     facts,
+                    expected_slot_identities,
+                )
+                expected_slot_identities[slot.slot_index] = self._recovery_slot_identity(
+                    ingested
                 )
             with self._sessions() as session:
                 refreshed = list(
@@ -971,30 +991,15 @@ class ImageService:
         return "existing_dispatch_reconciled"
 
     def _reset_pre_intent_run(self, generation_id: str, run_id: str) -> None:
-        def reset(session: Session) -> None:
-            generation, run, slots, _job = self._validated_recovery_state_in_session(
-                session,
+        try:
+            self._checkpoints.reset_pre_intent(
+                run_id,
                 generation_id,
+                expected_stages=frozenset({"prepared", "inputs_verified", "blocked"}),
+                now=self._utc(self._clock()),
             )
-            if (
-                run.id != run_id
-                or generation.provider_state not in {"queued", "generating", "blocked"}
-                or generation.dispatched_at is not None
-                or generation.completed_at is not None
-                or run.dispatch_intent_at is not None
-                or run.dispatch_confirmed_at is not None
-                or run.stage not in {"prepared", "inputs_verified", "blocked"}
-                or [slot.slot_index for slot in slots] != [0, 1]
-            ):
-                raise ImageRecoveryBlockedError
-            run.stage = "prepared"
-            run.last_failure_code = None
-            run.updated_at = self._utc(self._clock())
-            generation.provider_state = "queued"
-            generation.updated_at = run.updated_at
-            session.flush()
-
-        self._repository.immediate_transaction(reset)
+        except FlowCheckpointConflictError:
+            raise ImageRecoveryBlockedError from None
 
     def _promote_recovered_dispatch(
         self,
@@ -1002,37 +1007,17 @@ class ImageService:
         run_id: str,
         slots: list[FlowCandidateSlotRow],
     ) -> None:
-        slot_states = [slot.state for slot in slots]
-        expected_slots = [self._recovery_slot_identity(slot) for slot in slots]
-
-        def promote(session: Session) -> None:
-            generation, run, current_slots, _job = (
-                self._validated_recovery_state_in_session(session, generation_id)
+        try:
+            self._checkpoints.promote_recovered_dispatch(
+                run_id,
+                generation_id,
+                expected_slot_identities=[
+                    self._recovery_slot_identity(slot) for slot in slots
+                ],
+                now=self._utc(self._clock()),
             )
-            if (
-                run.id != run_id
-                or run.dispatch_intent_at is None
-                or [self._recovery_slot_identity(slot) for slot in current_slots]
-                != expected_slots
-            ):
-                raise ImageRecoveryBlockedError
-            now = self._utc(self._clock())
-            if run.dispatch_confirmed_at is None:
-                run.dispatch_confirmed_at = now
-            if any(state in {"download_intent_recorded", "downloaded", "ingested"} for state in slot_states):
-                run.stage = "downloading"
-            elif any(state == "observed" for state in slot_states):
-                run.stage = "candidates_observed"
-            else:
-                run.stage = "dispatch_confirmed"
-            run.last_failure_code = None
-            run.updated_at = now
-            generation.provider_state = "generating"
-            generation.dispatched_at = generation.dispatched_at or now
-            generation.updated_at = now
-            session.flush()
-
-        self._repository.immediate_transaction(promote)
+        except FlowCheckpointConflictError:
+            raise ImageRecoveryBlockedError from None
 
     def _recovery_downloaded_facts(
         self,
@@ -1093,7 +1078,8 @@ class ImageService:
         run_id: str,
         slot_index: int,
         facts: FlowArtifactFacts,
-    ) -> None:
+        expected_slot_identities: list[tuple[object, ...]],
+    ) -> FlowCandidateSlotRow:
         final = resolve_flow_final_path(
             work_root=self._work_root,
             campaign_id=generation.campaign_id,
@@ -1119,36 +1105,19 @@ class ImageService:
             updated_at=self._utc(self._clock()),
         )
 
-        def ingest(session: Session) -> None:
-            current_generation, run, _slots, _job = (
-                self._validated_recovery_state_in_session(session, generation.id)
+        try:
+            return self._checkpoints.ingest_recovery_candidate(
+                run_id,
+                generation.id,
+                generation.job_id,
+                slot_index,
+                expected_slot_identities=expected_slot_identities,
+                expected_staged_sha256=facts.sha256,
+                candidate=candidate,
+                now=candidate.updated_at,
             )
-            if (
-                run.id != run_id
-                or current_generation.id != generation.id
-                or inspect_flow_artifact(final) != facts
-            ):
-                raise ImageRecoveryBlockedError
-            slot = session.scalar(
-                select(FlowCandidateSlotRow).where(
-                    FlowCandidateSlotRow.flow_generation_run_id == run_id,
-                    FlowCandidateSlotRow.slot_index == slot_index,
-                )
-            )
-            if (
-                slot is None
-                or slot.state != "downloaded"
-                or slot.staged_sha256 != facts.sha256
-                or slot.image_candidate_id is not None
-            ):
-                raise ImageRecoveryBlockedError
-            ImageRepository.create_candidate_in_session(session, candidate)
-            slot.image_candidate_id = candidate.image_candidate_id
-            slot.state = "ingested"
-            slot.updated_at = candidate.updated_at
-            session.flush()
-
-        self._repository.immediate_transaction(ingest)
+        except FlowCheckpointConflictError:
+            raise ImageRecoveryBlockedError from None
 
     def _validate_recovery_ingested(
         self,
@@ -1201,27 +1170,14 @@ class ImageService:
             raise ImageRecoveryBlockedError
 
     def _complete_recovered_generation(self, generation_id: str, run_id: str) -> None:
-        def complete(session: Session) -> None:
-            generation, run, slots, _job = self._validated_recovery_state_in_session(
-                session,
+        try:
+            self._checkpoints.complete_recovered_generation(
+                run_id,
                 generation_id,
+                now=self._utc(self._clock()),
             )
-            if (
-                run.id != run_id
-                or [slot.state for slot in slots] != ["ingested", "ingested"]
-            ):
-                raise ImageRecoveryBlockedError
-            now = self._utc(self._clock())
-            run.stage = "completed"
-            run.last_failure_code = None
-            run.updated_at = now
-            generation.provider_state = "completed"
-            generation.completed_at = generation.completed_at or now
-            generation.dispatched_at = generation.dispatched_at or run.dispatch_confirmed_at
-            generation.updated_at = now
-            session.flush()
-
-        self._repository.immediate_transaction(complete)
+        except FlowCheckpointConflictError:
+            raise ImageRecoveryBlockedError from None
 
     def _resolve_no_dispatch_transaction(
         self,
@@ -1235,69 +1191,20 @@ class ImageService:
                 session,
                 image_generation_id,
             )
-            existing = session.scalar(
-                select(JobEventRow)
-                .where(
-                    JobEventRow.job_id == job.id,
-                    JobEventRow.event_type == "job.flow_dispatch_resolved",
-                )
-                .order_by(JobEventRow.sequence.desc())
+            return self._checkpoints.resolve_no_dispatch_in_session(
+                session,
+                run_id=run.id,
+                generation_id=generation.id,
+                job_id=job.id,
+                resolved_by=resolved_by,
+                reason=reason,
+                now=self._utc(self._clock()),
             )
-            already_committed = (
-                run.stage == "prepared"
-                and run.dispatch_intent_at is None
-                and run.dispatch_confirmed_at is None
-                and existing is not None
-                and existing.metadata_json.get("nextDispatchAttemptNumber")
-                == run.dispatch_attempt_number
-                and existing.metadata_json.get("resolvedBy") == resolved_by
-                and existing.metadata_json.get("reason") == reason
-            )
-            if already_committed:
-                return job.id
-            if (
-                generation.provider_state != "blocked"
-                or run.stage != "ambiguous"
-                or run.dispatch_intent_at is None
-                or run.dispatch_confirmed_at is not None
-            ):
-                raise ImageTransitionError
-            now = self._utc(self._clock())
-            previous_attempt = run.dispatch_attempt_number
-            previous_intent = self._utc(run.dispatch_intent_at)
-            previous_confirmation = (
-                None
-                if run.dispatch_confirmed_at is None
-                else self._utc(run.dispatch_confirmed_at).isoformat()
-            )
-            run.dispatch_attempt_number += 1
-            run.stage = "prepared"
-            run.dispatch_intent_at = None
-            run.dispatch_confirmed_at = None
-            run.last_failure_code = None
-            run.updated_at = now
-            generation.provider_state = "queued"
-            generation.updated_at = now
-            session.add(
-                JobEventRow(
-                    id=str(uuid4()),
-                    job_id=job.id,
-                    event_type="job.flow_dispatch_resolved",
-                    timestamp=now,
-                    metadata_json={
-                        "previousDispatchAttemptNumber": previous_attempt,
-                        "previousDispatchIntentAt": previous_intent.isoformat(),
-                        "previousDispatchConfirmedAt": previous_confirmation,
-                        "nextDispatchAttemptNumber": run.dispatch_attempt_number,
-                        "resolvedBy": resolved_by,
-                        "reason": reason,
-                    },
-                )
-            )
-            session.flush()
-            return job.id
 
-        return self._repository.immediate_transaction(resolve)
+        try:
+            return self._repository.immediate_transaction(resolve)
+        except FlowCheckpointConflictError:
+            raise ImageTransitionError from None
 
     def _audit_and_resume_recovered_job(
         self,

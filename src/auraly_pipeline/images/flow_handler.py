@@ -4,15 +4,14 @@ from __future__ import annotations
 
 import hashlib
 import sqlite3
-from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, cast
+from typing import cast
 from uuid import uuid4
 
-from sqlalchemy import select, text, update
-from sqlalchemy.exc import DBAPIError, IntegrityError
+from sqlalchemy import select
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session, sessionmaker
 
 from auraly_pipeline.campaigns.db_models import CampaignRow, SceneVariantRow
@@ -61,7 +60,11 @@ from auraly_pipeline.images.domain import (
     FlowGenerationStage,
     ImageCandidate,
 )
-from auraly_pipeline.images.repository import ImageRepository
+from auraly_pipeline.images.flow_repository import (
+    FlowCheckpointBusyError,
+    FlowCheckpointConflictError,
+    FlowCheckpointRepository,
+)
 from auraly_pipeline.jobs.db_models import JobEventRow, JobRow
 from auraly_pipeline.jobs.domain import JobSubmit
 from auraly_pipeline.jobs.domain import JobExecutionOutcome, JobExecutionResult, RetrySafety
@@ -74,10 +77,6 @@ from auraly_pipeline.metadata_security import (
 
 def _utc_now() -> datetime:
     return datetime.now(UTC)
-
-
-class FlowCheckpointConflictError(RuntimeError):
-    pass
 
 
 def _is_database_concurrency_error(error: DBAPIError) -> bool:
@@ -98,21 +97,6 @@ def _is_database_concurrency_error(error: DBAPIError) -> bool:
             "database is busy",
         )
     )
-
-
-def _rowcount(result: object) -> int:
-    return int(cast(Any, result).rowcount)
-
-
-@contextmanager
-def _checkpoint_session(sessions: sessionmaker[Session]) -> Iterator[Session]:
-    try:
-        with sessions() as session:
-            yield session
-    except DBAPIError as error:
-        if _is_database_concurrency_error(error):
-            raise FlowCheckpointConflictError() from error
-        raise
 
 
 def _build_flow_runtime(context: FlowGenerationArtifactContext) -> FlowGenerationRuntime:
@@ -136,14 +120,14 @@ class FlowGenerationCheckpointSink:
         initial_stage: str | None = None,
     ) -> None:
         self._sessions = sessions
+        self._repository = FlowCheckpointRepository(sessions)
         self._run_id = run_id
         self._clock = clock
         if initial_stage is None:
-            with self._sessions() as session:
-                run = session.get(FlowGenerationRunRow, self._run_id)
-                if run is None:
-                    raise ValueError("Flow generation run is missing")
-                initial_stage = run.stage
+            run = self._repository.get_run(self._run_id)
+            if run is None:
+                raise ValueError("Flow generation run is missing")
+            initial_stage = run.stage
         self._run_stage = initial_stage
 
     @property
@@ -151,216 +135,109 @@ class FlowGenerationCheckpointSink:
         return self._run_stage
 
     def set_workspace(self, workspace: FlowWorkspaceIdentity) -> None:
-        self._mutate_run({"prepared"}, "prepared", workspace=workspace)
+        self._repository.set_workspace(
+            self._run_id,
+            expected_stage="prepared",
+            workspace_path=workspace.workspace_path,
+            workspace_fingerprint=workspace.fingerprint,
+            now=self._clock(),
+        )
 
     def record_inputs_verified(self, observation: FlowGenerationObservation) -> None:
         if not (observation.reference_verified and observation.prompt_verified):
             raise ValueError("unverified Flow inputs cannot be checkpointed")
-        self._mutate_run({"prepared"}, "inputs_verified")
+        self._repository.transition_run(
+            self._run_id,
+            expected_stage="prepared",
+            target_stage="inputs_verified",
+            now=self._clock(),
+        )
+        self._run_stage = "inputs_verified"
 
     def record_dispatch_intent(self, workspace: FlowWorkspaceIdentity) -> None:
-        self._mutate_run({"inputs_verified"}, "dispatch_intent_recorded", workspace=workspace)
+        now = self._clock()
+        self._repository.transition_run(
+            self._run_id,
+            expected_stage="inputs_verified",
+            target_stage="dispatch_intent_recorded",
+            updates={
+                "provider_workspace_path": workspace.workspace_path,
+                "provider_workspace_fingerprint": workspace.fingerprint,
+                "dispatch_intent_at": now,
+            },
+            now=now,
+        )
+        self._run_stage = "dispatch_intent_recorded"
 
     def record_dispatch_confirmed(self, observation: FlowGenerationObservation) -> None:
         if not (observation.reference_verified and observation.prompt_verified):
             raise ValueError("unverified Flow inputs cannot confirm dispatch")
-        self._mutate_run({"dispatch_intent_recorded"}, "dispatch_confirmed", confirmed=True)
+        self._repository.confirm_dispatch(
+            self._run_id,
+            expected_stage="dispatch_intent_recorded",
+            now=self._clock(),
+        )
+        self._run_stage = "dispatch_confirmed"
 
     def bind_candidate_slot(self, slot_index: int, observation: FlowCandidateObservation) -> None:
         if slot_index not in {0, 1} or observation.semantic_order != slot_index:
             raise ValueError("unexpected Flow candidate slot")
-        with _checkpoint_session(self._sessions) as session:
-            changed = _rowcount(
-                session.execute(
-                    update(FlowCandidateSlotRow)
-                    .where(
-                        FlowCandidateSlotRow.flow_generation_run_id == self._run_id,
-                        FlowCandidateSlotRow.slot_index == slot_index,
-                        FlowCandidateSlotRow.state == "pending",
-                    )
-                    .values(
-                        provider_slot_fingerprint=observation.fingerprint,
-                        state="observed",
-                        updated_at=self._clock(),
-                    )
-                )
-            )
-            if changed != 1:
-                session.rollback()
-                raise FlowCheckpointConflictError()
-            session.commit()
-        self._reload_slot(slot_index, "observed")
+        self._repository.transition_slot(
+            self._run_id,
+            slot_index,
+            expected_state="pending",
+            target_state="observed",
+            updates={"provider_slot_fingerprint": observation.fingerprint},
+            now=self._clock(),
+        )
 
     def record_candidates_observed(self, evidence: object) -> None:
         relative_path = getattr(evidence, "relative_path", None)
         sha256 = getattr(evidence, "sha256", None)
         if not isinstance(relative_path, str) or not isinstance(sha256, str):
             raise ValueError("invalid Flow grid evidence")
-        self._mutate_run(
-            {"dispatch_confirmed"},
-            "candidates_observed",
-            grid_evidence=(relative_path, sha256),
+        self._repository.transition_run(
+            self._run_id,
+            expected_stage="dispatch_confirmed",
+            target_stage="candidates_observed",
+            updates={"grid_evidence_path": relative_path, "grid_evidence_sha256": sha256},
+            now=self._clock(),
         )
+        self._run_stage = "candidates_observed"
 
     def candidate_fingerprint(self, slot_index: int) -> str:
-        with self._sessions() as session:
-            slot = self._slot(session, slot_index)
-            if slot.state not in {"observed", "download_intent_recorded", "downloaded"}:
-                raise ValueError("candidate slot is not downloadable")
-            if slot.provider_slot_fingerprint is None:
-                raise ValueError("candidate slot is unbound")
-            return slot.provider_slot_fingerprint
+        slot = self._repository.get_slot(self._run_id, slot_index)
+        if slot is None or slot.state not in {
+            "observed",
+            "download_intent_recorded",
+            "downloaded",
+        }:
+            raise ValueError("candidate slot is not downloadable")
+        if slot.provider_slot_fingerprint is None:
+            raise ValueError("candidate slot is unbound")
+        return slot.provider_slot_fingerprint
 
     def record_download_intent(self, slot_index: int, fingerprint: str) -> None:
-        with _checkpoint_session(self._sessions) as session:
-            now = self._clock()
-            changed = _rowcount(
-                session.execute(
-                    update(FlowCandidateSlotRow)
-                    .where(
-                        FlowCandidateSlotRow.flow_generation_run_id == self._run_id,
-                        FlowCandidateSlotRow.slot_index == slot_index,
-                        FlowCandidateSlotRow.state == "observed",
-                        FlowCandidateSlotRow.provider_slot_fingerprint == fingerprint,
-                    )
-                    .values(
-                        state="download_intent_recorded",
-                        download_intent_at=now,
-                        updated_at=now,
-                    )
-                )
-            )
-            run_changed = _rowcount(
-                session.execute(
-                    update(FlowGenerationRunRow)
-                    .where(
-                        FlowGenerationRunRow.id == self._run_id,
-                        FlowGenerationRunRow.stage.in_({"candidates_observed", "downloading"}),
-                    )
-                    .values(stage="downloading", updated_at=now)
-                )
-            )
-            if changed != 1 or run_changed != 1:
-                session.rollback()
-                raise FlowCheckpointConflictError()
-            session.commit()
-        self._reload_slot(slot_index, "download_intent_recorded")
-        self._reload_run("downloading")
+        self._repository.record_download_intent(
+            self._run_id,
+            slot_index,
+            expected_state="observed",
+            expected_fingerprint=fingerprint,
+            now=self._clock(),
+        )
         self._run_stage = "downloading"
 
     def record_downloaded(self, slot_index: int, *, relative_path: str, sha256: str) -> None:
-        with _checkpoint_session(self._sessions) as session:
-            changed = _rowcount(
-                session.execute(
-                    update(FlowCandidateSlotRow)
-                    .where(
-                        FlowCandidateSlotRow.flow_generation_run_id == self._run_id,
-                        FlowCandidateSlotRow.slot_index == slot_index,
-                        FlowCandidateSlotRow.state == "download_intent_recorded",
-                    )
-                    .values(
-                        state="downloaded",
-                        staging_path=relative_path,
-                        staged_sha256=sha256,
-                        updated_at=self._clock(),
-                    )
-                )
-            )
-            if changed != 1:
-                session.rollback()
-                raise FlowCheckpointConflictError()
-            session.commit()
-        self._reload_slot(slot_index, "downloaded")
-
-    def _mutate_run(
-        self,
-        expected: set[str],
-        target: str,
-        *,
-        workspace: FlowWorkspaceIdentity | None = None,
-        confirmed: bool = False,
-        grid_evidence: tuple[str, str] | None = None,
-    ) -> None:
-        with _checkpoint_session(self._sessions) as session:
-            now = self._clock()
-            generation_id: str | None = None
-            if confirmed:
-                current = session.get(FlowGenerationRunRow, self._run_id)
-                if current is None or current.stage not in expected:
-                    session.rollback()
-                    raise FlowCheckpointConflictError()
-                generation_id = current.image_generation_id
-            values: dict[str, object] = {"stage": target, "updated_at": now}
-            if workspace is not None:
-                values["provider_workspace_path"] = workspace.workspace_path
-                values["provider_workspace_fingerprint"] = workspace.fingerprint
-            if target == "dispatch_intent_recorded":
-                values["dispatch_intent_at"] = now
-            if confirmed:
-                values["dispatch_confirmed_at"] = now
-            if grid_evidence is not None:
-                values["grid_evidence_path"], values["grid_evidence_sha256"] = grid_evidence
-            changed = _rowcount(
-                session.execute(
-                    update(FlowGenerationRunRow)
-                    .where(
-                        FlowGenerationRunRow.id == self._run_id,
-                        FlowGenerationRunRow.stage.in_(expected),
-                        *(
-                            (
-                                FlowGenerationRunRow.dispatch_intent_at.is_(None),
-                                FlowGenerationRunRow.dispatch_confirmed_at.is_(None),
-                            )
-                            if target == "dispatch_intent_recorded"
-                            else ()
-                        ),
-                    )
-                    .values(**values)
-                )
-            )
-            if changed != 1:
-                session.rollback()
-                raise FlowCheckpointConflictError()
-            if confirmed:
-                generation_changed = _rowcount(
-                    session.execute(
-                        update(ImageGenerationRow)
-                        .where(
-                            ImageGenerationRow.id == generation_id,
-                            ImageGenerationRow.provider_state == "generating",
-                            ImageGenerationRow.dispatched_at.is_(None),
-                        )
-                        .values(dispatched_at=now, updated_at=now)
-                    )
-                )
-                if generation_changed != 1:
-                    session.rollback()
-                    raise FlowCheckpointConflictError()
-            session.commit()
-        self._reload_run(target)
-        self._run_stage = target
-
-    def _slot(self, session: Session, slot_index: int) -> FlowCandidateSlotRow:
-        row = session.scalar(
-            select(FlowCandidateSlotRow).where(
-                FlowCandidateSlotRow.flow_generation_run_id == self._run_id,
-                FlowCandidateSlotRow.slot_index == slot_index,
-            )
+        fingerprint = self.candidate_fingerprint(slot_index)
+        self._repository.record_downloaded(
+            self._run_id,
+            slot_index,
+            expected_state="download_intent_recorded",
+            expected_fingerprint=fingerprint,
+            relative_path=relative_path,
+            sha256=sha256,
+            now=self._clock(),
         )
-        if row is None:
-            raise ValueError("Flow candidate slot is missing")
-        return row
-
-    def _reload_run(self, expected: str) -> None:
-        with _checkpoint_session(self._sessions) as session:
-            row = session.get(FlowGenerationRunRow, self._run_id)
-            if row is None or row.stage != expected:
-                raise FlowCheckpointConflictError()
-
-    def _reload_slot(self, slot_index: int, expected: str) -> None:
-        with _checkpoint_session(self._sessions) as session:
-            if self._slot(session, slot_index).state != expected:
-                raise FlowCheckpointConflictError()
 
 
 class FlowImageGenerateHandler:
@@ -377,6 +254,7 @@ class FlowImageGenerateHandler:
         ] = _build_flow_runtime,
     ) -> None:
         self._sessions = session_factory
+        self._checkpoints = FlowCheckpointRepository(session_factory)
         self._work_root = work_root.resolve()
         self._clock = clock or _utc_now
         self._runtime_factory = _runtime_factory
@@ -845,35 +723,27 @@ class FlowImageGenerateHandler:
         return True
 
     def _mark_generating(self, generation_id: str) -> None:
-        with _checkpoint_session(self._sessions) as session:
-            generation = session.get(ImageGenerationRow, generation_id)
-            if generation is None or generation.provider_state not in {
-                "queued",
-                "generating",
-            }:
-                raise FlowArtifactConflictError()
-            generation.provider_state = "generating"
-            generation.updated_at = self._clock()
-            session.commit()
+        try:
+            self._checkpoints.mark_generation_generating(
+                generation_id,
+                now=self._clock(),
+            )
+        except FlowCheckpointBusyError:
+            raise
+        except FlowCheckpointConflictError as error:
+            raise FlowArtifactConflictError() from error
 
     def _run(self, run_id: str) -> FlowGenerationRunRow:
-        with self._sessions() as session:
-            row = session.get(FlowGenerationRunRow, run_id)
-            if row is None:
-                raise FlowArtifactConflictError()
-            return row
+        row = self._checkpoints.get_run(run_id)
+        if row is None:
+            raise FlowArtifactConflictError()
+        return row
 
     def _slot(self, run_id: str, index: int) -> FlowCandidateSlotRow:
-        with self._sessions() as session:
-            row = session.scalar(
-                select(FlowCandidateSlotRow).where(
-                    FlowCandidateSlotRow.flow_generation_run_id == run_id,
-                    FlowCandidateSlotRow.slot_index == index,
-                )
-            )
-            if row is None:
-                raise FlowArtifactConflictError()
-            return row
+        row = self._checkpoints.get_slot(run_id, index)
+        if row is None:
+            raise FlowArtifactConflictError()
+        return row
 
     def _ingest_slot(
         self, generation: ImageGenerationRow, run_id: str, index: int, facts: FlowArtifactFacts
@@ -903,38 +773,14 @@ class FlowImageGenerateHandler:
             created_at=self._clock(),
             updated_at=self._clock(),
         )
-        try:
-            with self._sessions() as session:
-                session.execute(text("BEGIN IMMEDIATE"))
-                ImageRepository.create_candidate_in_session(session, candidate)
-                changed = _rowcount(
-                    session.execute(
-                        update(FlowCandidateSlotRow)
-                        .where(
-                            FlowCandidateSlotRow.flow_generation_run_id == run_id,
-                            FlowCandidateSlotRow.slot_index == index,
-                            FlowCandidateSlotRow.state == "downloaded",
-                            FlowCandidateSlotRow.staged_sha256 == facts.sha256,
-                            FlowCandidateSlotRow.image_candidate_id.is_(None),
-                        )
-                        .values(
-                            image_candidate_id=candidate.image_candidate_id,
-                            state="ingested",
-                            updated_at=self._clock(),
-                        )
-                    )
-                )
-                if changed != 1:
-                    session.rollback()
-                    raise FlowCheckpointConflictError()
-                session.commit()
-        except IntegrityError as exc:
-            raise FlowCheckpointConflictError() from exc
-        except DBAPIError as exc:
-            if _is_database_concurrency_error(exc):
-                raise FlowCheckpointConflictError() from exc
-            raise
-        self._reload_ingested_slot(run_id, index, candidate.image_candidate_id)
+        self._checkpoints.ingest_candidate(
+            run_id,
+            index,
+            expected_state="downloaded",
+            expected_staged_sha256=facts.sha256,
+            candidate=candidate,
+            now=self._clock(),
+        )
 
     def _recover_downloaded_facts(
         self, generation: ImageGenerationRow, slot: FlowCandidateSlotRow
@@ -991,75 +837,12 @@ class FlowImageGenerateHandler:
                 raise FlowArtifactConflictError()
 
     def _complete(self, generation_id: str, run_id: str) -> None:
-        with _checkpoint_session(self._sessions) as session:
-            session.execute(text("BEGIN IMMEDIATE"))
-            run = session.get(FlowGenerationRunRow, run_id)
-            generation = session.get(ImageGenerationRow, generation_id)
-            slots = list(
-                session.scalars(
-                    select(FlowCandidateSlotRow).where(
-                        FlowCandidateSlotRow.flow_generation_run_id == run_id
-                    )
-                )
-            )
-            if (
-                run is None
-                or generation is None
-                or run.stage != "downloading"
-                or [slot.state for slot in sorted(slots, key=lambda item: item.slot_index)]
-                != ["ingested", "ingested"]
-            ):
-                session.rollback()
-                raise FlowCheckpointConflictError()
-            now = self._clock()
-            run_changed = _rowcount(
-                session.execute(
-                    update(FlowGenerationRunRow)
-                    .where(
-                        FlowGenerationRunRow.id == run_id,
-                        FlowGenerationRunRow.stage == "downloading",
-                    )
-                    .values(stage="completed", updated_at=now)
-                )
-            )
-            generation_changed = _rowcount(
-                session.execute(
-                    update(ImageGenerationRow)
-                    .where(
-                        ImageGenerationRow.id == generation_id,
-                        ImageGenerationRow.provider_state == "generating",
-                    )
-                    .values(provider_state="completed", completed_at=now, updated_at=now)
-                )
-            )
-            if run_changed != 1 or generation_changed != 1:
-                session.rollback()
-                raise FlowCheckpointConflictError()
-            session.commit()
-        self._reload_completed(run_id, generation_id)
-
-    def _reload_ingested_slot(self, run_id: str, index: int, candidate_id: str) -> None:
-        with self._sessions() as session:
-            slot = session.scalar(
-                select(FlowCandidateSlotRow).where(
-                    FlowCandidateSlotRow.flow_generation_run_id == run_id,
-                    FlowCandidateSlotRow.slot_index == index,
-                )
-            )
-            if slot is None or slot.state != "ingested" or slot.image_candidate_id != candidate_id:
-                raise FlowCheckpointConflictError()
-
-    def _reload_completed(self, run_id: str, generation_id: str) -> None:
-        with self._sessions() as session:
-            run = session.get(FlowGenerationRunRow, run_id)
-            generation = session.get(ImageGenerationRow, generation_id)
-            if (
-                run is None
-                or generation is None
-                or run.stage != "completed"
-                or generation.provider_state != "completed"
-            ):
-                raise FlowCheckpointConflictError()
+        self._checkpoints.complete_generation(
+            run_id,
+            generation_id,
+            expected_stage="downloading",
+            now=self._clock(),
+        )
 
     def _completed_if_intact(
         self, generation: ImageGenerationRow, slots: list[FlowCandidateSlotRow]
@@ -1087,31 +870,13 @@ class FlowImageGenerateHandler:
         *,
         expected_stage: str,
     ) -> None:
-        with self._sessions() as session:
-            try:
-                changed = _rowcount(
-                    session.execute(
-                        update(FlowGenerationRunRow)
-                        .where(
-                            FlowGenerationRunRow.id == run_id,
-                            FlowGenerationRunRow.stage == expected_stage,
-                        )
-                        .values(
-                            stage=stage,
-                            last_failure_code=code,
-                            updated_at=self._clock(),
-                        )
-                    )
-                )
-                if changed != 1:
-                    session.rollback()
-                    return
-                session.commit()
-            except DBAPIError as exc:
-                session.rollback()
-                if _is_database_concurrency_error(exc):
-                    return
-                raise
+        self._checkpoints.try_set_run_failure(
+            run_id,
+            expected_stage=cast(FlowGenerationStage, expected_stage),
+            target_stage=cast(FlowGenerationStage, stage),
+            code=code,
+            now=self._clock(),
+        )
 
     @staticmethod
     def _terminal(code: str) -> JobExecutionResult:
