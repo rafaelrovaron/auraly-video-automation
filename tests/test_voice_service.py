@@ -19,7 +19,11 @@ from auraly_pipeline.jobs.domain import (
 )
 from auraly_pipeline.voices.db_models import VoiceMasterRow
 from auraly_pipeline.voices.domain import VoiceGenerateRequest, VoiceMasterStatus
-from auraly_pipeline.voices.provider import SpeechGeneration
+from auraly_pipeline.voices.provider import (
+    ProviderFailure,
+    ProviderFailureKind,
+    SpeechGeneration,
+)
 from auraly_pipeline.voices.service import VoiceMasterConflictError, VoiceMasterService
 from tests.test_campaign_domain import valid_campaign_data
 
@@ -70,6 +74,14 @@ class OutOfBoundsAlignmentElevenLabs(FakeElevenLabs):
         return generated
 
 
+class FailingElevenLabs:
+    def __init__(self, failure: ProviderFailure) -> None:
+        self.failure = failure
+
+    def generate_speech(self, **kwargs: object) -> SpeechGeneration:
+        raise self.failure
+
+
 def _mp3(tmp_path: Path) -> bytes:
     path = tmp_path / "source.mp3"
     result = subprocess.run(
@@ -105,6 +117,118 @@ def _campaign(database: Path) -> tuple[str, str, str]:
     service.close()
     copy = campaign.copy_masters[0]
     return campaign.campaign_id, copy.copy_master_id, copy.spoken_text
+
+
+def _authorized_request(campaign_id: str) -> VoiceGenerateRequest:
+    return VoiceGenerateRequest(
+        campaign_id=campaign_id,
+        voice_id="voice-explicit",
+        model_id="eleven_multilingual_v2",
+        paid_request_approved=True,
+        paid_request_approved_by="rafael",
+        approved_budget_cents=1000,
+    )
+
+
+def test_terminal_http_rejection_persists_confirmed_response_without_artifacts(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "auraly.db"
+    campaign_id, _, _ = _campaign(database)
+    provider = FailingElevenLabs(
+        ProviderFailure(
+            ProviderFailureKind.TERMINAL,
+            "The provider rejected the speech request permanently.",
+            request_dispatched=True,
+            http_status=401,
+        )
+    )
+    service = VoiceMasterService.for_database(
+        database, work_root=tmp_path / "work", provider=provider
+    )
+    submitted = service.generate(_authorized_request(campaign_id))
+
+    job = service.worker_once("voice-worker")
+
+    assert job is not None
+    assert job.status is JobStatus.FAILED
+    assert job.attempt_count == 1
+    assert job.next_retry_at is None
+    assert job.last_error_code == "provider_http_401"
+    assert job.attempts[0].status == "terminal_failure"
+    assert service.get(submitted.voice_master.voice_master_id).status is VoiceMasterStatus.FAILED
+    with service._sessions() as session:
+        row = session.get(VoiceMasterRow, submitted.voice_master.voice_master_id)
+        assert row is not None
+        assert row.provider_state == "response_received"
+        assert row.failure_code == "provider_http_401"
+        assert row.raw_audio_path is None
+        assert row.processed_audio_path is None
+        assert row.transcript_path is None
+        assert row.manifest_path is None
+    assert not (
+        tmp_path
+        / "work"
+        / "campaigns"
+        / campaign_id
+        / "voice"
+        / submitted.voice_master.voice_master_id
+    ).exists()
+    service.close()
+
+
+@pytest.mark.parametrize(
+    ("failure", "expected_job_status", "expected_voice_status", "expected_provider_state"),
+    [
+        (
+            ProviderFailure(
+                ProviderFailureKind.CONFIGURATION,
+                "ElevenLabs API configuration is unavailable.",
+            ),
+            JobStatus.FAILED,
+            VoiceMasterStatus.FAILED,
+            "not_dispatched",
+        ),
+        (
+            ProviderFailure(
+                ProviderFailureKind.AMBIGUOUS,
+                "The paid provider outcome requires reconciliation.",
+                request_dispatched=True,
+            ),
+            JobStatus.BLOCKED,
+            VoiceMasterStatus.GENERATING,
+            "ambiguous",
+        ),
+    ],
+)
+def test_provider_failure_boundaries_remain_distinguishable(
+    tmp_path: Path,
+    failure: ProviderFailure,
+    expected_job_status: JobStatus,
+    expected_voice_status: VoiceMasterStatus,
+    expected_provider_state: str,
+) -> None:
+    database = tmp_path / f"{failure.kind}.db"
+    campaign_id, _, _ = _campaign(database)
+    service = VoiceMasterService.for_database(
+        database,
+        work_root=tmp_path / "work" / failure.kind,
+        provider=FailingElevenLabs(failure),
+    )
+    submitted = service.generate(_authorized_request(campaign_id))
+
+    job = service.worker_once("voice-worker")
+
+    assert job is not None
+    assert job.status is expected_job_status
+    assert job.attempt_count == 1
+    assert job.next_retry_at is None
+    assert service.get(submitted.voice_master.voice_master_id).status is expected_voice_status
+    with service._sessions() as session:
+        row = session.get(VoiceMasterRow, submitted.voice_master.voice_master_id)
+        assert row is not None
+        assert row.provider_state == expected_provider_state
+    service.close()
 
 
 def test_paid_voice_request_requires_explicit_authorization_and_positive_budget(

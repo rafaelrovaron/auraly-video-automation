@@ -417,20 +417,20 @@ class VoiceGenerateHandler:
                 voice_settings=settings,
             )
         except ProviderFailure as exc:
-            self._mark_provider_failure(voice_master_id, exc)
+            error_code = self._mark_provider_failure(voice_master_id, exc)
             if exc.kind is ProviderFailureKind.AMBIGUOUS:
                 return JobExecutionResult(
                     outcome=JobExecutionOutcome.BLOCKED,
-                    error_code="provider_outcome_ambiguous",
+                    error_code=error_code,
                     error_message="The paid provider outcome requires reconciliation.",
                 )
             if exc.kind is ProviderFailureKind.RETRYABLE:
                 return JobExecutionResult(
                     outcome=JobExecutionOutcome.RETRYABLE_FAILURE,
-                    error_code="provider_temporarily_unavailable",
+                    error_code=error_code,
                     error_message="The provider temporarily rejected the speech request.",
                 )
-            return self._terminal("provider_request_failed", exc.public_message)
+            return self._terminal(error_code, exc.public_message)
         finally:
             if owned_provider and isinstance(provider, ElevenLabsAdapter):
                 provider.close()
@@ -636,20 +636,31 @@ class VoiceGenerateHandler:
                 raise AudioProcessingError(AudioProcessingError.public_message)
             return row.campaign_id
 
-    def _mark_provider_failure(self, voice_master_id: str, failure: ProviderFailure) -> None:
+    def _mark_provider_failure(self, voice_master_id: str, failure: ProviderFailure) -> str:
+        if failure.kind is ProviderFailureKind.AMBIGUOUS:
+            error_code = "provider_outcome_ambiguous"
+        elif failure.kind is ProviderFailureKind.RETRYABLE:
+            error_code = "provider_temporarily_unavailable"
+        elif failure.http_status is not None and 400 <= failure.http_status < 500:
+            error_code = f"provider_http_{failure.http_status}"
+        else:
+            error_code = "provider_request_failed"
         with self._sessions() as session:
             row = session.get(VoiceMasterRow, voice_master_id)
             if row is None:
-                return
+                return error_code
             row.status = "generating" if failure.request_dispatched else "failed"
-            row.provider_state = "ambiguous" if failure.request_dispatched else "not_dispatched"
-            row.failure_code = (
-                "provider_outcome_ambiguous"
-                if failure.request_dispatched
-                else "provider_request_failed"
-            )
+            if failure.kind is ProviderFailureKind.AMBIGUOUS:
+                row.provider_state = "ambiguous"
+            else:
+                row.status = "failed"
+                row.provider_state = (
+                    "response_received" if failure.http_status is not None else "not_dispatched"
+                )
+            row.failure_code = error_code
             row.updated_at = self._clock()
             session.commit()
+        return error_code
 
     def _mark_failed(self, voice_master_id: str, code: str) -> None:
         with self._sessions() as session:

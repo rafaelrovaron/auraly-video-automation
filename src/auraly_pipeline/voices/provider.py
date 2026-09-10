@@ -30,11 +30,13 @@ class ProviderFailure(RuntimeError):
         public_message: str,
         *,
         request_dispatched: bool = False,
+        http_status: int | None = None,
     ) -> None:
         super().__init__(public_message)
         self.kind = kind
         self.public_message = public_message
         self.request_dispatched = request_dispatched
+        self.http_status = http_status
 
 
 @dataclass(frozen=True)
@@ -130,11 +132,14 @@ class ElevenLabsAdapter:
                 ProviderFailureKind.AMBIGUOUS,
                 "The paid provider outcome requires reconciliation.",
                 request_dispatched=True,
+                http_status=response.status_code,
             )
         if response.status_code >= 400:
             raise ProviderFailure(
                 ProviderFailureKind.TERMINAL,
                 "The provider rejected the speech request permanently.",
+                request_dispatched=True,
+                http_status=response.status_code,
             )
         try:
             data = response.json()
@@ -146,11 +151,15 @@ class ElevenLabsAdapter:
             raise ProviderFailure(
                 ProviderFailureKind.TERMINAL,
                 "The provider returned an invalid speech artifact.",
+                request_dispatched=True,
+                http_status=response.status_code,
             ) from exc
         if not audio or len(audio) > MAX_AUDIO_BYTES:
             raise ProviderFailure(
                 ProviderFailureKind.TERMINAL,
                 "The provider returned an invalid speech artifact.",
+                request_dispatched=True,
+                http_status=response.status_code,
             )
         alignment = data.get("alignment")
         aligned_text = None

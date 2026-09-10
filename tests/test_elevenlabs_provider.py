@@ -62,6 +62,8 @@ def test_missing_api_key_is_stable_and_does_not_disclose_environment(monkeypatch
     with pytest.raises(ProviderFailure) as caught:
         ElevenLabsAdapter.from_environment()
     assert caught.value.kind is ProviderFailureKind.CONFIGURATION
+    assert caught.value.http_status is None
+    assert caught.value.request_dispatched is False
     assert str(caught.value) == "ElevenLabs API configuration is unavailable."
 
 
@@ -88,6 +90,8 @@ def test_http_failures_are_classified_without_raw_body(
     with pytest.raises(ProviderFailure) as caught:
         adapter.generate_speech(text="Text", voice_id=VOICE_ID, model_id=MODEL_ID)
     assert caught.value.kind is kind
+    assert caught.value.http_status == status
+    assert caught.value.request_dispatched is True
     assert "SENSITIVE" not in str(caught.value)
     assert "secret-value" not in str(caught.value)
 
@@ -103,6 +107,8 @@ def test_timeout_after_dispatch_is_ambiguous_not_blindly_retryable() -> None:
     with pytest.raises(ProviderFailure) as caught:
         adapter.generate_speech(text="Text", voice_id=VOICE_ID, model_id=MODEL_ID)
     assert caught.value.kind is ProviderFailureKind.AMBIGUOUS
+    assert caught.value.http_status is None
+    assert caught.value.request_dispatched is True
     assert str(caught.value) == "The paid provider outcome requires reconciliation."
 
 
