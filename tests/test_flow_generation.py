@@ -11,6 +11,7 @@ import inspect
 import json
 from pathlib import Path
 from typing import Literal
+from unittest.mock import MagicMock, Mock
 
 from PIL import Image
 from playwright.sync_api import Locator, Page, sync_playwright
@@ -1288,10 +1289,11 @@ def test_unrelated_download_event_cannot_satisfy_slot_when_selected_action_emits
     assert flow_generation_page.evaluate("window.flowDownloadActions") == ["unrelated"]
 
 
-@pytest.mark.parametrize("event_case", ["none", "two", "cancelled"])
+@pytest.mark.parametrize("event_case", ["none", "cancelled"])
 def test_download_requires_one_successful_event_from_the_exact_action(
     flow_generation_page: Page,
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
     event_case: str,
 ) -> None:
     runtime = _task9_runtime("grid-two.html", flow_generation_page, tmp_path)
@@ -1300,23 +1302,43 @@ def test_download_requires_one_successful_event_from_the_exact_action(
     action = flow_generation_page.locator("[data-flow-candidate-id='candidate-a'] button")
     if event_case == "none":
         action.evaluate("button => button.dataset.downloadDisabled = 'true'")
-    if event_case == "two":
-        action.evaluate("button => button.dataset.downloadCount = '2'")
 
-    def cancel(download: object) -> None:
-        getattr(download, "cancel")()
+    def cancelled_failure(_download: object) -> str:
+        return "canceled"
 
     if event_case == "cancelled":
-        flow_generation_page.on("download", cancel)
-    try:
-        with pytest.raises(FlowDownloadCorrelationError):
-            runtime.download_slot(0, checkpoint_sink)
-    finally:
-        if event_case == "cancelled":
-            flow_generation_page.remove_listener("download", cancel)
+        monkeypatch.setattr(generation_module.Download, "failure", cancelled_failure)
+
+    with pytest.raises(FlowDownloadCorrelationError):
+        runtime.download_slot(0, checkpoint_sink)
 
     assert checkpoint_sink.slot_state(0) == "download_intent_recorded"
     assert checkpoint_sink.slot_state(1) == "observed"
+
+
+@pytest.mark.parametrize("correlation_case", ["two", "mismatched"])
+def test_download_rejects_invalid_event_correlation(
+    tmp_path: Path,
+    correlation_case: str,
+) -> None:
+    page = MagicMock(spec=Page)
+    runtime = _task9_runtime("grid-two.html", page, tmp_path)
+    action = Mock(spec=Locator)
+    expected_download = Mock()
+    observed_download = expected_download if correlation_case == "two" else Mock()
+    download_info = Mock(value=expected_download)
+    page.expect_download.return_value.__enter__.return_value = download_info
+
+    def emit_downloads() -> None:
+        observe = page.on.call_args.args[1]
+        observe(observed_download)
+        if correlation_case == "two":
+            observe(Mock())
+
+    action.click.side_effect = emit_downloads
+
+    with pytest.raises(FlowDownloadCorrelationError):
+        runtime._one_download_from_action(page, action, 0)
 
 
 @pytest.mark.parametrize("artifact_case", ["partial", "1k"])
