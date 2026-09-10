@@ -649,14 +649,17 @@ class VoiceGenerateHandler:
             row = session.get(VoiceMasterRow, voice_master_id)
             if row is None:
                 return error_code
-            row.status = "generating" if failure.request_dispatched else "failed"
-            if failure.kind is ProviderFailureKind.AMBIGUOUS:
+            if failure.kind is ProviderFailureKind.AMBIGUOUS and failure.request_dispatched:
+                row.status = "generating"
                 row.provider_state = "ambiguous"
             else:
                 row.status = "failed"
-                row.provider_state = (
-                    "response_received" if failure.http_status is not None else "not_dispatched"
-                )
+                if failure.http_status is not None:
+                    row.provider_state = "response_received"
+                elif failure.request_dispatched:
+                    row.provider_state = "dispatching"
+                else:
+                    row.provider_state = "not_dispatched"
             row.failure_code = error_code
             row.updated_at = self._clock()
             session.commit()

@@ -110,6 +110,32 @@ def test_timeout_after_dispatch_is_ambiguous_not_blindly_retryable() -> None:
     assert caught.value.http_status is None
     assert caught.value.request_dispatched is True
     assert str(caught.value) == "The paid provider outcome requires reconciliation."
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
+
+
+def test_invalid_provider_json_is_terminal_without_response_chain() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            request=request,
+            content=b"SENSITIVE malformed provider response",
+            headers={"content-type": "application/json"},
+        )
+
+    adapter = ElevenLabsAdapter(
+        api_key="secret-value",
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+    with pytest.raises(ProviderFailure) as caught:
+        adapter.generate_speech(text="Text", voice_id=VOICE_ID, model_id=MODEL_ID)
+    assert caught.value.kind is ProviderFailureKind.TERMINAL
+    assert caught.value.http_status == 200
+    assert caught.value.request_dispatched is True
+    assert "SENSITIVE" not in str(caught.value)
+    assert "secret-value" not in str(caught.value)
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
 
 
 def test_invalid_alignment_falls_back_instead_of_being_trusted() -> None:

@@ -199,6 +199,16 @@ def test_terminal_http_rejection_persists_confirmed_response_without_artifacts(
             VoiceMasterStatus.GENERATING,
             "ambiguous",
         ),
+        (
+            ProviderFailure(
+                ProviderFailureKind.TERMINAL,
+                "The provider request failed after dispatch.",
+                request_dispatched=True,
+            ),
+            JobStatus.FAILED,
+            VoiceMasterStatus.FAILED,
+            "dispatching",
+        ),
     ],
 )
 def test_provider_failure_boundaries_remain_distinguishable(

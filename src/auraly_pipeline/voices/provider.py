@@ -99,6 +99,7 @@ class ElevenLabsAdapter:
         if voice_settings:
             payload["voice_settings"] = voice_settings
         url = f"{ELEVENLABS_API_ROOT}/text-to-speech/{voice_id}/with-timestamps"
+        failure: ProviderFailure | None = None
         try:
             response = self._client.post(
                 url,
@@ -110,23 +111,25 @@ class ElevenLabsAdapter:
                 },
                 json=payload,
             )
-        except (httpx.ReadTimeout, httpx.WriteTimeout, httpx.PoolTimeout) as exc:
-            raise ProviderFailure(
+        except (httpx.ReadTimeout, httpx.WriteTimeout, httpx.PoolTimeout):
+            failure = ProviderFailure(
                 ProviderFailureKind.AMBIGUOUS,
                 "The paid provider outcome requires reconciliation.",
                 request_dispatched=True,
-            ) from exc
-        except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
-            raise ProviderFailure(
+            )
+        except (httpx.ConnectError, httpx.ConnectTimeout):
+            failure = ProviderFailure(
                 ProviderFailureKind.RETRYABLE,
                 "The provider connection failed before a response was received.",
-            ) from exc
-        except httpx.HTTPError as exc:
-            raise ProviderFailure(
+            )
+        except httpx.HTTPError:
+            failure = ProviderFailure(
                 ProviderFailureKind.AMBIGUOUS,
                 "The paid provider outcome requires reconciliation.",
                 request_dispatched=True,
-            ) from exc
+            )
+        if failure is not None:
+            raise failure
         if response.status_code in {408, 429} or 500 <= response.status_code < 600:
             raise ProviderFailure(
                 ProviderFailureKind.AMBIGUOUS,
@@ -141,19 +144,22 @@ class ElevenLabsAdapter:
                 request_dispatched=True,
                 http_status=response.status_code,
             )
+        invalid_artifact = False
         try:
             data = response.json()
             encoded = data["audio_base64"]
             if not isinstance(encoded, str):
                 raise TypeError
             audio = base64.b64decode(encoded, validate=True)
-        except (ValueError, KeyError, TypeError, binascii.Error) as exc:
+        except (ValueError, KeyError, TypeError, binascii.Error):
+            invalid_artifact = True
+        if invalid_artifact:
             raise ProviderFailure(
                 ProviderFailureKind.TERMINAL,
                 "The provider returned an invalid speech artifact.",
                 request_dispatched=True,
                 http_status=response.status_code,
-            ) from exc
+            )
         if not audio or len(audio) > MAX_AUDIO_BYTES:
             raise ProviderFailure(
                 ProviderFailureKind.TERMINAL,
