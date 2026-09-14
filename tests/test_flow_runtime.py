@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast
 from collections.abc import Callable
 from contextlib import AbstractContextManager, contextmanager
+from dataclasses import replace
 import hashlib
 from pathlib import Path
 from typing import Iterator, cast
@@ -81,6 +82,56 @@ def test_authenticated_session_reuses_goal_4b_launch_and_route_trust(tmp_path: P
     with FlowBrowserSession(config(tmp_path), _target=local_target("ready.html")) as session:
         session.require_current_flow_page()
         assert session.page.url == fake_flow_url("ready.html")
+
+
+def test_legacy_flow_route_redirect_to_canonical_origin_is_accepted(tmp_path: Path) -> None:
+    assert _classify_url("https://labs.google/fx/tools/flow", PRODUCTION_TARGET) == "flow"
+    target = replace(
+        PRODUCTION_TARGET,
+        navigation_url="https://labs.google/fx/tools/flow",
+    )
+    page = _FakePage(
+        url=target.navigation_url,
+        ready=True,
+        goto_redirect_url="https://flow.google.com/",
+    )
+    context = _FakeContext(page=page)
+
+    observation = GoogleFlowRuntime(
+        config(tmp_path),
+        _target=target,
+        _playwright_factory=_playwright_factory(context),
+    ).run()
+
+    assert observation.status == "ready"
+    assert page.url == "https://flow.google.com/"
+
+
+def test_direct_canonical_flow_navigation_is_accepted(tmp_path: Path) -> None:
+    page = _FakePage(url="https://flow.google.com/", ready=True)
+    context = _FakeContext(page=page)
+
+    observation = GoogleFlowRuntime(
+        config(tmp_path),
+        _playwright_factory=_playwright_factory(context),
+    ).run()
+
+    assert observation.status == "ready"
+    assert page.url == "https://flow.google.com/"
+
+
+@pytest.mark.parametrize(
+    "url",
+    (
+        "https://example.com/",
+        "https://accounts.google.com/",
+        "https://evil.google.com/",
+        "https://other-google-product.google.com/",
+        "https://flow.google.com/not-flow",
+    ),
+)
+def test_production_flow_classifier_rejects_untrusted_origins_and_paths(url: str) -> None:
+    assert _classify_url(url, PRODUCTION_TARGET) == "unexpected"
 
 
 def test_authenticated_session_exit_preserves_close_browser_failure(tmp_path: Path) -> None:
@@ -984,6 +1035,7 @@ class _FakePage:
         empty_roles: set[str] | None = None,
         evidence_redirect_stage: str | None = None,
         goto_error: BaseException | None = None,
+        goto_redirect_url: str | None = None,
         account_mask_count: int = 1,
         screenshot_error: BaseException | None = None,
         screenshot_errors: list[BaseException | None] | None = None,
@@ -999,6 +1051,7 @@ class _FakePage:
         self._empty_roles = empty_roles or set()
         self._evidence_redirect_stage = evidence_redirect_stage
         self._goto_error = goto_error
+        self._goto_redirect_url = goto_redirect_url
         self._account_mask_count = account_mask_count
         self._screenshot_error = screenshot_error
         self._screenshot_errors = screenshot_errors
@@ -1028,7 +1081,7 @@ class _FakePage:
         self._url = value
 
     def goto(self, url: str, *, wait_until: str, timeout: int) -> None:
-        self.url = url
+        self.url = self._goto_redirect_url or url
         if self._goto_error is not None:
             raise self._goto_error
 

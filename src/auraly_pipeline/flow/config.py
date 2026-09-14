@@ -27,7 +27,7 @@ class FlowRuntimeConfig:
     staging_root: Path
     login_timeout_seconds: int
     navigation_timeout_seconds: int
-    flow_url: Literal["https://labs.google/fx/tools/flow"] = field(default=FLOW_URL, init=False)
+    flow_url: Literal["https://flow.google.com/"] = field(default=FLOW_URL, init=False)
 
 
 @dataclass(frozen=True)

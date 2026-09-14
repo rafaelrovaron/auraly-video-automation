@@ -141,6 +141,16 @@ def test_config_uses_exact_production_defaults_from_home(tmp_path: Path, monkeyp
     assert config.flow_url == FLOW_URL
 
 
+def test_config_uses_the_canonical_flow_destination(tmp_path: Path) -> None:
+    config = resolve_flow_runtime_config(
+        environment={},
+        repository_root=REPOSITORY_ROOT,
+        _local_state_root=tmp_path / "state",
+    )
+
+    assert config.flow_url == "https://flow.google.com/"
+
+
 @pytest.mark.parametrize(
     ("name", "value"),
     (

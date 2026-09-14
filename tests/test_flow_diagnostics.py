@@ -747,7 +747,7 @@ def test_trace_sanitizer_rejects_raw_archives_over_configured_input_bound(
 
 
 def test_trace_sanitizer_rejects_excessive_compression_ratio(tmp_path: Path) -> None:
-    events = [{"type": "event", "callId": f"call@{index}", "url": FLOW_URL} for index in range(200)]
+    events = [{"type": "event", "callId": "call@1", "url": FLOW_URL}] * 200
     raw = _write_trace_archive(tmp_path / "raw.zip", events, compression=ZIP_DEFLATED)
     safe = tmp_path / "safe.zip"
 

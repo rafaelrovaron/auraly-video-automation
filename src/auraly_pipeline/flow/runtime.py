@@ -38,6 +38,7 @@ class _FlowRuntimeTarget:
     flow_url: str
     flow_origin: str
     flow_path: str
+    flow_routes: frozenset[tuple[str, str]]
     authentication_origin: str
     authentication_paths: frozenset[str] | None
     workspace_urls: frozenset[tuple[str, str]] | None = None
@@ -58,6 +59,12 @@ PRODUCTION_TARGET = _FlowRuntimeTarget(
     flow_url=FLOW_URL,
     flow_origin="https://labs.google",
     flow_path="/fx/tools/flow",
+    flow_routes=frozenset(
+        {
+            ("https://flow.google.com", "/"),
+            ("https://labs.google", "/fx/tools/flow"),
+        }
+    ),
     authentication_origin="https://accounts.google.com",
     authentication_paths=frozenset(
         {
@@ -331,6 +338,7 @@ def _local_test_target(
         flow_url=flow_url,
         flow_origin=_origin(flow_url),
         flow_path=flow.path,
+        flow_routes=frozenset({(_origin(flow_url), flow.path)}),
         authentication_origin="file://",
         authentication_paths=frozenset(urlsplit(url).path for url in login_urls),
         workspace_urls=frozenset(local_workspace_urls) if workspace_urls is not None else None,
@@ -521,7 +529,7 @@ def _classify_url(url: str, target: _FlowRuntimeTarget) -> Literal["flow", "logi
     """Classify only exact allowlisted origin/path pairs, deliberately ignoring suffixes."""
     parsed = urlsplit(url)
     origin = _origin(url)
-    if origin == target.flow_origin and parsed.path == target.flow_path:
+    if (origin, parsed.path) in target.flow_routes:
         return "flow"
     if origin != target.authentication_origin:
         return "unexpected"

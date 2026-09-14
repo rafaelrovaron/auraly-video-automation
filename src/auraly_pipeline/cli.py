@@ -14,7 +14,7 @@ from pydantic import ValidationError
 from auraly_pipeline.campaigns.domain import CampaignCreate
 from auraly_pipeline.campaigns.persistence import default_database_path
 from auraly_pipeline.campaigns.service import CampaignError, CampaignService
-from auraly_pipeline.flow import FlowPreflightService, FlowWorkspaceIdentity
+from auraly_pipeline.flow import FLOW_URL, FlowPreflightService, FlowWorkspaceIdentity
 from auraly_pipeline.image_generation import (
     DEFAULT_RETRY_COUNT,
     DEFAULT_TIMEOUT_SECONDS,
@@ -212,7 +212,7 @@ def _flow_preflight_boundary_failure_payload() -> dict[str, object]:
         "schemaVersion": "1.0",
         "success": False,
         "status": "browser_launch_failed",
-        "flowUrl": "https://labs.google/fx/tools/flow",
+        "flowUrl": FLOW_URL,
         "authenticated": False,
         "uiReady": False,
         "failedStep": "validate_config",

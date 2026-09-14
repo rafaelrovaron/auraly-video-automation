@@ -12,7 +12,7 @@ from pydantic import model_validator
 
 from auraly_pipeline.models import ContractModel
 
-FLOW_URL: Literal["https://labs.google/fx/tools/flow"] = "https://labs.google/fx/tools/flow"
+FLOW_URL: Literal["https://flow.google.com/"] = "https://flow.google.com/"
 
 FlowPreflightStatus = Literal[
     "ready",
@@ -70,7 +70,7 @@ class FlowPreflightResult(ContractModel):
     schema_version: Literal["1.0"] = "1.0"
     success: bool
     status: FlowPreflightStatus
-    flow_url: Literal["https://labs.google/fx/tools/flow"] = FLOW_URL
+    flow_url: Literal["https://flow.google.com/"] = FLOW_URL
     authenticated: bool
     ui_ready: bool
     failed_step: FlowFailedStep | None = None

@@ -458,7 +458,7 @@ def test_flow_preflight_unexpected_exception_emits_one_sanitized_boundary_failur
         "schemaVersion": "1.0",
         "success": False,
         "status": "browser_launch_failed",
-        "flowUrl": "https://labs.google/fx/tools/flow",
+        "flowUrl": "https://flow.google.com/",
         "authenticated": False,
         "uiReady": False,
         "failedStep": "validate_config",
