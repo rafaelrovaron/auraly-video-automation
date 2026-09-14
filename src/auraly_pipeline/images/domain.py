@@ -51,6 +51,9 @@ FlowReconciliationReason = Literal[
 _UUID_PATTERN = r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
 _SHA256_PATTERN = r"^[0-9a-f]{64}$"
 _SAFE_WORKSPACE_PATH = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]*$")
+_FLOW_PROJECT_WORKSPACE_PATH = re.compile(
+    r"^project/[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+)
 
 
 def _validate_workspace_path(value: str) -> str:
@@ -72,7 +75,10 @@ def _validate_workspace_path(value: str) -> str:
 
 def _validate_flow_workspace_path(value: str) -> str:
     safe_path = _validate_workspace_path(value)
-    if PurePosixPath(safe_path).parts[:3] != ("fx", "tools", "flow"):
+    if (
+        PurePosixPath(safe_path).parts[:3] != ("fx", "tools", "flow")
+        and _FLOW_PROJECT_WORKSPACE_PATH.fullmatch(safe_path) is None
+    ):
         raise ValueError("expected an allowlisted relative Flow workspace route")
     return safe_path
 

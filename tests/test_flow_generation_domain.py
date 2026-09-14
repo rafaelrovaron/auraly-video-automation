@@ -60,6 +60,24 @@ def test_workspace_identity_is_relative_and_hash_bound() -> None:
             FlowWorkspaceIdentity(workspace_path=unsafe_path, fingerprint="b" * 64)
 
 
+def test_workspace_identity_accepts_only_canonical_project_uuid() -> None:
+    workspace_path = "project/4f4aeb44-ea73-43f9-b622-77080a525fe8"
+
+    assert FlowWorkspaceIdentity(
+        workspace_path=workspace_path,
+        fingerprint="b" * 64,
+    ).workspace_path == workspace_path
+    for unsafe_path in (
+        "project/not-a-uuid",
+        f"{workspace_path}/extra",
+        f"{workspace_path}?token=private",
+        f"{workspace_path}#private",
+        "project/4F4AEB44-EA73-43F9-B622-77080A525FE8",
+    ):
+        with pytest.raises(ValidationError):
+            FlowWorkspaceIdentity(workspace_path=unsafe_path, fingerprint="b" * 64)
+
+
 def test_generation_observation_carries_only_verification_facts() -> None:
     """Returning a prompt or reference path would cross the browser privacy boundary."""
     observation = FlowGenerationObservation(reference_verified=True, prompt_verified=True)

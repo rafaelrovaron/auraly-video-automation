@@ -356,6 +356,12 @@ def test_scalar_locator_accepts_only_canonical_false_aria_disabled_value(
     (
         ("https://labs.google/fx/tools/flow", True),
         ("https://labs.google/fx/tools/flow/workspaces/approved", True),
+        ("https://flow.google.com/project/4f4aeb44-ea73-43f9-b622-77080a525fe8", True),
+        ("https://flow.google.com/project/not-a-uuid", False),
+        ("https://flow.google.com/project/4f4aeb44-ea73-43f9-b622-77080a525fe8/extra", False),
+        ("https://flow.google.com/project/4f4aeb44-ea73-43f9-b622-77080a525fe8?token=private", False),
+        ("https://flow.google.com/project/4f4aeb44-ea73-43f9-b622-77080a525fe8#private", False),
+        ("https://evil.google.com/project/4f4aeb44-ea73-43f9-b622-77080a525fe8", False),
         ("https://labs.google/fx/tools/flow-evil", False),
         ("https://labs.google/fx/tools/flow?token=private", False),
         ("https://labs.google/fx/tools/flow#private", False),

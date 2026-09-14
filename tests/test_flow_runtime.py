@@ -29,6 +29,7 @@ from auraly_pipeline.flow.runtime import (
     _classify_url,
     _local_test_target,
     _workspace_identity_for_url,
+    _workspace_url_for_target,
 )
 from auraly_pipeline.flow import runtime as runtime_module
 from auraly_pipeline.flow.generation_domain import FlowWorkspaceIdentity
@@ -120,6 +121,12 @@ def test_direct_canonical_flow_navigation_is_accepted(tmp_path: Path) -> None:
     assert page.url == "https://flow.google.com/"
 
 
+def test_canonical_flow_project_route_is_accepted() -> None:
+    url = "https://flow.google.com/project/4f4aeb44-ea73-43f9-b622-77080a525fe8"
+
+    assert _classify_url(url, PRODUCTION_TARGET) == "flow"
+
+
 @pytest.mark.parametrize(
     "url",
     (
@@ -167,6 +174,49 @@ def test_workspace_identity_accepts_only_safe_production_flow_subpaths() -> None
     ):
         with pytest.raises(FlowUnexpectedStateError):
             _workspace_identity_for_url(unsafe)
+
+
+def test_workspace_identity_accepts_canonical_flow_project_route() -> None:
+    workspace_path = "project/4f4aeb44-ea73-43f9-b622-77080a525fe8"
+    identity = _workspace_identity_for_url(f"https://flow.google.com/{workspace_path}")
+
+    assert identity.workspace_path == workspace_path
+    assert _workspace_url_for_target(identity, PRODUCTION_TARGET) == (
+        f"https://flow.google.com/{workspace_path}"
+    )
+
+
+@pytest.mark.parametrize(
+    "url",
+    (
+        "https://flow.google.com/project/not-a-uuid",
+        "https://flow.google.com/project/4f4aeb44-ea73-43f9-b622-77080a525fe8/extra",
+        "https://flow.google.com/project/4f4aeb44-ea73-43f9-b622-77080a525fe8?token=private",
+        "https://flow.google.com/project/4f4aeb44-ea73-43f9-b622-77080a525fe8#private",
+        "https://evil.google.com/project/4f4aeb44-ea73-43f9-b622-77080a525fe8",
+    ),
+)
+def test_canonical_flow_project_route_rejects_lookalikes(url: str) -> None:
+    assert _classify_url(url, PRODUCTION_TARGET) == "unexpected"
+    with pytest.raises(FlowUnexpectedStateError):
+        _workspace_identity_for_url(url)
+
+
+def test_local_target_cannot_accept_or_build_canonical_production_project_route() -> None:
+    workspace_path = "project/4f4aeb44-ea73-43f9-b622-77080a525fe8"
+    workspace = FlowWorkspaceIdentity(
+        workspace_path=workspace_path,
+        fingerprint=hashlib.sha256(workspace_path.encode()).hexdigest(),
+    )
+    target = _local_test_target(
+        navigation_url=fake_flow_url("ready.html"),
+        flow_url=fake_flow_url("ready.html"),
+        login_urls=(fake_flow_url("login-required.html"),),
+    )
+
+    assert _classify_url(f"https://flow.google.com/{workspace_path}", target) == "unexpected"
+    with pytest.raises(FlowUnexpectedStateError):
+        _workspace_url_for_target(workspace, target)
 
 
 def test_authenticated_session_opens_only_the_bound_local_workspace(tmp_path: Path) -> None:

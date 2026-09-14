@@ -40,7 +40,10 @@ FlowGenerationFailedStep = Literal[
 ]
 
 _SAFE_SHA256 = re.compile(r"^[0-9a-f]{64}$")
-_SAFE_WORKSPACE_PATH = re.compile(r"^fx/tools/flow(?:/[a-z0-9][a-z0-9_-]*)+$")
+_PROJECT_ID = r"[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}"
+_SAFE_WORKSPACE_PATH = re.compile(
+    rf"^(?:fx/tools/flow(?:/[a-z0-9][a-z0-9_-]*)+|project/{_PROJECT_ID})$"
+)
 _FAILED_STEPS: frozenset[str] = frozenset(
     {
         "open_workspace",

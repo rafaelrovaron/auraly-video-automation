@@ -768,6 +768,10 @@ def test_flow_run_requires_utc_chronology() -> None:
         "fx/tools/flow?workspace=abc",
         "fx/tools/flow#workspace",
         "https://labs.google/fx/tools/flow",
+        "project/not-a-uuid",
+        "project/4f4aeb44-ea73-43f9-b622-77080a525fe8/extra",
+        "project/4f4aeb44-ea73-43f9-b622-77080a525fe8?token=private",
+        "project/4f4aeb44-ea73-43f9-b622-77080a525fe8#private",
     ],
 )
 def test_flow_run_rejects_workspace_paths_outside_safe_flow_family(
@@ -778,6 +782,17 @@ def test_flow_run_rejects_workspace_paths_outside_safe_flow_family(
             provider_workspace_path=workspace_path,
             provider_workspace_fingerprint="e" * 64,
         )
+
+
+def test_flow_run_accepts_canonical_flow_project_workspace() -> None:
+    workspace_path = "project/4f4aeb44-ea73-43f9-b622-77080a525fe8"
+
+    run = _flow_run(
+        provider_workspace_path=workspace_path,
+        provider_workspace_fingerprint=hashlib.sha256(workspace_path.encode()).hexdigest(),
+    )
+
+    assert run.provider_workspace_path == workspace_path
 
 
 def test_flow_run_requires_both_workspace_and_grid_evidence_pairs() -> None:

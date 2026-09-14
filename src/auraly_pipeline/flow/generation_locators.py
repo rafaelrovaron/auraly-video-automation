@@ -22,6 +22,10 @@ _LocatorT = TypeVar("_LocatorT", bound=LocatorProtocol)
 _SAFE_CANDIDATE_KEY = re.compile(r"^[a-z0-9][a-z0-9_-]{0,127}$")
 _FLOW_HOST = "labs.google"
 _FLOW_PREFIX = "/fx/tools/flow"
+_CANONICAL_FLOW_HOST = "flow.google.com"
+_CANONICAL_PROJECT_PATH = re.compile(
+    r"^/project/[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+)
 _COMPLETED_ROLE = "completed"
 
 
@@ -63,11 +67,19 @@ class _GenerationLocatorTarget:
         parsed = urlsplit(url)
         return (
             self.permits_production_route
-            and parsed.scheme == "https"
-            and parsed.netloc == _FLOW_HOST
-            and (parsed.path == _FLOW_PREFIX or parsed.path.startswith(f"{_FLOW_PREFIX}/"))
             and not parsed.query
             and not parsed.fragment
+            and parsed.scheme == "https"
+            and (
+                (
+                    parsed.netloc == _FLOW_HOST
+                    and (parsed.path == _FLOW_PREFIX or parsed.path.startswith(f"{_FLOW_PREFIX}/"))
+                )
+                or (
+                    parsed.netloc == _CANONICAL_FLOW_HOST
+                    and _CANONICAL_PROJECT_PATH.fullmatch(parsed.path) is not None
+                )
+            )
         )
 
 

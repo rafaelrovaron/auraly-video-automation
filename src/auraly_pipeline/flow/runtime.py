@@ -41,6 +41,7 @@ class _FlowRuntimeTarget:
     flow_routes: frozenset[tuple[str, str]]
     authentication_origin: str
     authentication_paths: frozenset[str] | None
+    project_origin: str | None = None
     workspace_urls: frozenset[tuple[str, str]] | None = None
 
 
@@ -79,9 +80,14 @@ PRODUCTION_TARGET = _FlowRuntimeTarget(
             "/signin/v2/challenge/az",
         }
     ),
+    project_origin="https://flow.google.com",
 )
 
-_SAFE_WORKSPACE_PATH = re.compile(r"^fx/tools/flow(?:/[a-z0-9][a-z0-9_-]*)+$")
+_PROJECT_ID = r"[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}"
+_CANONICAL_PROJECT_PATH = re.compile(rf"^/project/{_PROJECT_ID}$")
+_SAFE_WORKSPACE_PATH = re.compile(
+    rf"^(?:fx/tools/flow(?:/[a-z0-9][a-z0-9_-]*)+|project/{_PROJECT_ID})$"
+)
 
 
 class FlowBrowserSession:
@@ -531,6 +537,14 @@ def _classify_url(url: str, target: _FlowRuntimeTarget) -> Literal["flow", "logi
     origin = _origin(url)
     if (origin, parsed.path) in target.flow_routes:
         return "flow"
+    if (
+        not parsed.query
+        and not parsed.fragment
+        and target.project_origin is not None
+        and origin == target.project_origin
+        and _CANONICAL_PROJECT_PATH.fullmatch(parsed.path)
+    ):
+        return "flow"
     if origin != target.authentication_origin:
         return "unexpected"
     if target.authentication_paths is None or parsed.path in target.authentication_paths:
@@ -544,7 +558,15 @@ def _workspace_identity_for_url(url: str) -> FlowWorkspaceIdentity:
     workspace_path = parsed.path.removeprefix("/")
     if (
         parsed.scheme != "https"
-        or parsed.netloc != "labs.google"
+        or (
+            parsed.netloc == "labs.google"
+            and not workspace_path.startswith("fx/tools/flow/")
+        )
+        or (
+            parsed.netloc == "flow.google.com"
+            and not workspace_path.startswith("project/")
+        )
+        or parsed.netloc not in {"labs.google", "flow.google.com"}
         or parsed.query
         or parsed.fragment
         or _SAFE_WORKSPACE_PATH.fullmatch(workspace_path) is None
@@ -572,6 +594,10 @@ def _workspace_url_for_target(workspace: FlowWorkspaceIdentity, target: _FlowRun
         if local_workspace_url is None:
             raise FlowUnexpectedStateError(failed_step="navigate_flow")
         return local_workspace_url
+    if workspace.workspace_path.startswith("project/"):
+        if target.project_origin is None:
+            raise FlowUnexpectedStateError(failed_step="navigate_flow")
+        return f"{target.project_origin}/{workspace.workspace_path}"
     if target.flow_origin != "https://labs.google" or target.flow_path != "/fx/tools/flow":
         raise FlowUnexpectedStateError(failed_step="navigate_flow")
     return f"{target.flow_origin}/{workspace.workspace_path}"
