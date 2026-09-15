@@ -1188,8 +1188,12 @@ def test_lock_release_failure_refuses_staging_symlink_to_outside_raw_trace(
         authenticated=True,
         ui_ready=False,
         failed_step="sanitize_diagnostics",
+        primary_failure=FlowPrimaryFailure(
+            phase="verify_flow_ui", category="locator_contract_failed"
+        ),
         timestamp=TIMESTAMP,
     )
+    assert result.diagnostic_processing == "failed"
     assert staged_link.is_symlink()
     assert outside_raw_trace.exists()
     assert result.screenshot is None
