@@ -30,6 +30,7 @@ class ConfigResolver(Protocol):
         diagnostics_dir: Path | None = None,
         login_timeout_seconds: int | None = None,
         navigation_timeout_seconds: int | None = None,
+        workspace_path: str | None = None,
     ) -> FlowRuntimeConfig: ...
 
 
@@ -82,15 +83,25 @@ class FlowPreflightService:
         diagnostics_dir: Path | None = None,
         login_timeout_seconds: int | None = None,
         navigation_timeout_seconds: int | None = None,
+        workspace_path: str | None = None,
     ) -> FlowPreflightResult:
         """Resolve config, hold the exclusive lock, run preflight, and map sanitized results."""
         try:
-            config = self._config_resolver(
-                profile_dir=profile_dir,
-                diagnostics_dir=diagnostics_dir,
-                login_timeout_seconds=login_timeout_seconds,
-                navigation_timeout_seconds=navigation_timeout_seconds,
-            )
+            if workspace_path is None:
+                config = self._config_resolver(
+                    profile_dir=profile_dir,
+                    diagnostics_dir=diagnostics_dir,
+                    login_timeout_seconds=login_timeout_seconds,
+                    navigation_timeout_seconds=navigation_timeout_seconds,
+                )
+            else:
+                config = self._config_resolver(
+                    profile_dir=profile_dir,
+                    diagnostics_dir=diagnostics_dir,
+                    login_timeout_seconds=login_timeout_seconds,
+                    navigation_timeout_seconds=navigation_timeout_seconds,
+                    workspace_path=workspace_path,
+                )
         except FlowRuntimeError as error:
             return self._result_from_error(error)
         except Exception:

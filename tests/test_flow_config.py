@@ -151,6 +151,31 @@ def test_config_uses_the_canonical_flow_destination(tmp_path: Path) -> None:
     assert config.flow_url == "https://flow.google.com/"
 
 
+def test_config_accepts_only_an_explicit_safe_workspace_path(tmp_path: Path) -> None:
+    workspace_path = "project/4f4aeb44-ea73-43f9-b622-77080a525fe8"
+
+    config = resolve_flow_runtime_config(
+        workspace_path=workspace_path,
+        environment={},
+        repository_root=REPOSITORY_ROOT,
+        _local_state_root=tmp_path / "state",
+    )
+
+    assert config.workspace_path == workspace_path
+    for unsafe in (
+        "https://flow.google.com/project/4f4aeb44-ea73-43f9-b622-77080a525fe8",
+        "project/not-a-uuid",
+        f"{workspace_path}/extra",
+        f"{workspace_path}?token=private",
+    ):
+        _assert_config_error(
+            workspace_path=unsafe,
+            environment={},
+            repository_root=REPOSITORY_ROOT,
+            _local_state_root=tmp_path / "state",
+        )
+
+
 @pytest.mark.parametrize(
     ("name", "value"),
     (

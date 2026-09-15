@@ -230,6 +230,7 @@ def flow_preflight_command(
     diagnostics_dir: Annotated[Path | None, typer.Option("--diagnostics-dir")] = None,
     login_timeout: Annotated[int | None, typer.Option("--login-timeout", min=1)] = None,
     navigation_timeout: Annotated[int | None, typer.Option("--navigation-timeout", min=1)] = None,
+    workspace_path: Annotated[str | None, typer.Option("--workspace-path")] = None,
 ) -> None:
     """Inspect the Google Flow browser runtime without generating media."""
     try:
@@ -238,6 +239,7 @@ def flow_preflight_command(
             diagnostics_dir=diagnostics_dir,
             login_timeout_seconds=login_timeout,
             navigation_timeout_seconds=navigation_timeout,
+            workspace_path=workspace_path,
         )
         payload = result.model_dump(by_alias=True, mode="json", exclude_none=False)
         success = result.success

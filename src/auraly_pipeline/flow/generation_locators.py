@@ -6,7 +6,7 @@ import hashlib
 import json
 import re
 from dataclasses import dataclass
-from typing import Protocol, TypeVar, cast
+from typing import Generic, Literal, Protocol, TypeVar, cast
 from urllib.parse import urlsplit
 
 from .generation_domain import (
@@ -15,7 +15,7 @@ from .generation_domain import (
     FlowGenerationLocatorName,
     FlowGenerationUiContractError,
 )
-from .locators import LocatorProtocol, PageProtocol, blocking_overlay_present
+from .locators import LocatorProtocol, PageProtocol, SemanticRole, blocking_overlay_present
 
 
 _LocatorT = TypeVar("_LocatorT", bound=LocatorProtocol)
@@ -27,6 +27,25 @@ _CANONICAL_PROJECT_PATH = re.compile(
     r"^/project/[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
 )
 _COMPLETED_ROLE = "completed"
+_LIVE_UPLOAD_BUTTON_NAMES = ("Menu para adicionar arquivos",)
+_LIVE_UPLOAD_ITEM_NAMES = ("Enviar",)
+_GENERATE_NAMES = ("Generate", "Iniciar geração")
+
+
+class _ScopedLocatorProtocol(LocatorProtocol, Protocol):
+    def locator(self, selector: str) -> LocatorProtocol: ...
+
+
+class _ScopedPageProtocol(PageProtocol[LocatorProtocol], Protocol):
+    def locator(self, selector: str) -> _ScopedLocatorProtocol: ...
+
+
+@dataclass(frozen=True)
+class FlowReferenceUploadControl(Generic[_LocatorT]):
+    """One exact legacy input or live upload-menu entry point."""
+
+    kind: Literal["input", "menu"]
+    locator: _LocatorT
 
 
 class _CandidateLocatorProtocol(LocatorProtocol, Protocol):
@@ -34,7 +53,7 @@ class _CandidateLocatorProtocol(LocatorProtocol, Protocol):
 
     def get_by_role(
         self,
-        role: str,
+        role: SemanticRole,
         *,
         name: str | None = None,
         exact: bool | None = None,
@@ -128,6 +147,53 @@ def resolve_reference_input(
     )
 
 
+def resolve_reference_upload_control(
+    page: PageProtocol[_LocatorT],
+    *,
+    _target: _GenerationLocatorTarget = _PRODUCTION_GENERATION_TARGET,
+) -> FlowReferenceUploadControl[_LocatorT]:
+    """Resolve exactly one supported upload contract without preferring either family."""
+    _require_safe_generation_route(page, _target)
+    _raise_if_blocked(page, failed_step="upload_reference", locator_name="REFERENCE_INPUT")
+    direct = _actionable_candidates(page.get_by_label("Reference image", exact=True))
+    menu = _actionable_candidates_for_roles(page, "button", _LIVE_UPLOAD_BUTTON_NAMES)
+    if len(direct) + len(menu) != 1:
+        raise FlowGenerationUiContractError(
+            failed_step="upload_reference", failed_locator="REFERENCE_INPUT"
+        )
+    if direct:
+        return FlowReferenceUploadControl(kind="input", locator=cast(_LocatorT, direct[0]))
+    return FlowReferenceUploadControl(kind="menu", locator=cast(_LocatorT, menu[0]))
+
+
+def resolve_upload_menu_item(
+    page: PageProtocol[_LocatorT],
+    *,
+    _target: _GenerationLocatorTarget = _PRODUCTION_GENERATION_TARGET,
+) -> _LocatorT:
+    """Resolve the one exact live upload action after its menu has been opened."""
+    _require_safe_generation_route(page, _target)
+    menu: LocatorProtocol = _require_unique_candidates(
+        page,
+        _actionable_candidates(page.get_by_role("menu")),
+        locator_name="REFERENCE_INPUT",
+        failed_step="upload_reference",
+    )
+    return cast(
+        _LocatorT,
+        _require_unique_candidates(
+            page,
+            _actionable_candidates(
+                cast(_CandidateLocatorProtocol, menu).get_by_role(
+                    "menuitem", name=_LIVE_UPLOAD_ITEM_NAMES[0], exact=True
+                )
+            ),
+            locator_name="REFERENCE_INPUT",
+            failed_step="upload_reference",
+        ),
+    )
+
+
 def resolve_upload_complete(
     page: PageProtocol[_LocatorT],
     *,
@@ -150,11 +216,33 @@ def resolve_generation_prompt(
 ) -> _LocatorT:
     """Resolve the exact prompt control whose value is later verified in memory."""
     _require_safe_generation_route(page, _target)
-    return _require_unique(
-        page,
-        page.get_by_label("Prompt", exact=True),
-        locator_name="GENERATION_PROMPT",
-        failed_step="fill_prompt",
+    _raise_if_blocked(page, failed_step="fill_prompt", locator_name="GENERATION_PROMPT")
+    legacy = _actionable_candidates(page.get_by_label("Prompt", exact=True))
+    hosts = tuple(
+        candidate
+        for candidate in cast(_ScopedPageProtocol, page).locator("flow-rich-text-editor").all()
+        if candidate.is_visible()
+    )
+    if len(hosts) > 1:
+        raise FlowGenerationUiContractError(
+            failed_step="fill_prompt", failed_locator="GENERATION_PROMPT"
+        )
+    live: tuple[LocatorProtocol, ...] = ()
+    if hosts:
+        editor = cast(_ScopedLocatorProtocol, hosts[0]).locator("[contenteditable='true']")
+        live = _actionable_candidates(editor)
+        if len(live) != 1:
+            raise FlowGenerationUiContractError(
+                failed_step="fill_prompt", failed_locator="GENERATION_PROMPT"
+            )
+    return cast(
+        _LocatorT,
+        _require_unique_candidates(
+            page,
+            (*legacy, *live),
+            locator_name="GENERATION_PROMPT",
+            failed_step="fill_prompt",
+        ),
     )
 
 
@@ -165,11 +253,39 @@ def resolve_generate_control(
 ) -> _LocatorT:
     """Resolve the single enabled irreversible Generate control."""
     _require_safe_generation_route(page, _target)
-    return _require_unique(
-        page,
-        page.get_by_role("button", name="Generate", exact=True),
-        locator_name="GENERATE_CONTROL",
-        failed_step="dispatch_generate",
+    return cast(
+        _LocatorT,
+        _require_unique_candidates(
+            page,
+            _actionable_candidates_for_roles(page, "button", _GENERATE_NAMES),
+            locator_name="GENERATE_CONTROL",
+            failed_step="dispatch_generate",
+        ),
+    )
+
+
+def resolve_preflight_generate_control(
+    page: PageProtocol[_LocatorT],
+    *,
+    _target: _GenerationLocatorTarget = _PRODUCTION_GENERATION_TARGET,
+) -> _LocatorT:
+    """Resolve one visible exact Generate control while permitting its initial disabled state."""
+    _require_safe_generation_route(page, _target)
+    candidates: list[LocatorProtocol] = []
+    for name in _GENERATE_NAMES:
+        candidates.extend(
+            candidate
+            for candidate in page.get_by_role("button", name=name, exact=True).all()
+            if _is_observable(candidate)
+        )
+    return cast(
+        _LocatorT,
+        _require_unique_candidates(
+            page,
+            candidates,
+            locator_name="GENERATE_CONTROL",
+            failed_step="dispatch_generate",
+        ),
     )
 
 
@@ -220,7 +336,9 @@ def resolve_candidate_2k_action(
         failed_step="request_2k",
     )
     matching_candidates = [
-        candidate for candidate, observed_fingerprint in candidates if observed_fingerprint == fingerprint
+        candidate
+        for candidate, observed_fingerprint in candidates
+        if observed_fingerprint == fingerprint
     ]
     if len(matching_candidates) != 1:
         raise FlowGenerationUiContractError(
@@ -263,9 +381,9 @@ def _validated_candidate_slots(
         failed_step=failed_step,
     )
     candidates: list[tuple[_CandidateLocatorProtocol, str]] = []
-    for candidate in cast(_CandidateLocatorProtocol, grid).get_by_role(
-        "listitem", include_hidden=True
-    ).all():
+    for candidate in (
+        cast(_CandidateLocatorProtocol, grid).get_by_role("listitem", include_hidden=True).all()
+    ):
         candidate_locator = cast(_CandidateLocatorProtocol, candidate)
         fingerprint = _fingerprint_for_candidate(candidate_locator, identity_source)
         if not _is_actionable(candidate_locator) or fingerprint is None:
@@ -273,7 +391,9 @@ def _validated_candidate_slots(
                 failed_step=failed_step, failed_locator="CANDIDATE_SLOT"
             )
         candidates.append((candidate_locator, fingerprint))
-    if not candidates or len({fingerprint for _candidate, fingerprint in candidates}) != len(candidates):
+    if not candidates or len({fingerprint for _candidate, fingerprint in candidates}) != len(
+        candidates
+    ):
         raise FlowGenerationUiContractError(
             failed_step=failed_step, failed_locator="CANDIDATE_SLOT"
         )
@@ -287,16 +407,58 @@ def _require_unique(
     locator_name: FlowGenerationLocatorName,
     failed_step: FlowGenerationFailedStep,
 ) -> _LocatorT:
+    return cast(
+        _LocatorT,
+        _require_unique_candidates(
+            page,
+            _actionable_candidates(locator),
+            locator_name=locator_name,
+            failed_step=failed_step,
+        ),
+    )
+
+
+def _require_unique_candidates(
+    page: PageProtocol[LocatorProtocol],
+    candidates: tuple[LocatorProtocol, ...] | list[LocatorProtocol],
+    *,
+    locator_name: FlowGenerationLocatorName,
+    failed_step: FlowGenerationFailedStep,
+) -> LocatorProtocol:
+    _raise_if_blocked(page, failed_step=failed_step, locator_name=locator_name)
+    if len(candidates) != 1:
+        raise FlowGenerationUiContractError(failed_step=failed_step, failed_locator=locator_name)
+    return candidates[0]
+
+
+def _raise_if_blocked(
+    page: PageProtocol[LocatorProtocol],
+    *,
+    failed_step: FlowGenerationFailedStep,
+    locator_name: FlowGenerationLocatorName,
+) -> None:
     if blocking_overlay_present(page):
-        raise FlowGenerationUiContractError(
-            failed_step=failed_step, failed_locator=locator_name
-        )
-    applicable = tuple(candidate for candidate in locator.all() if _is_actionable(candidate))
-    if len(applicable) != 1:
-        raise FlowGenerationUiContractError(
-            failed_step=failed_step, failed_locator=locator_name
-        )
-    return cast(_LocatorT, applicable[0])
+        raise FlowGenerationUiContractError(failed_step=failed_step, failed_locator=locator_name)
+
+
+def _actionable_candidates(locator: LocatorProtocol) -> tuple[LocatorProtocol, ...]:
+    return tuple(candidate for candidate in locator.all() if _is_actionable(candidate))
+
+
+def _actionable_candidates_for_roles(
+    page: PageProtocol[LocatorProtocol],
+    role: SemanticRole,
+    names: tuple[str, ...],
+) -> tuple[LocatorProtocol, ...]:
+    candidates: list[LocatorProtocol] = []
+    for name in names:
+        candidates.extend(_actionable_candidates(page.get_by_role(role, name=name, exact=True)))
+    return tuple(candidates)
+
+
+def _is_observable(candidate: LocatorProtocol) -> bool:
+    aria_disabled = getattr(candidate, "get_attribute", lambda _name: None)("aria-disabled")
+    return candidate.is_visible() and aria_disabled in {None, "false", "true"}
 
 
 def _is_actionable(candidate: LocatorProtocol) -> bool:

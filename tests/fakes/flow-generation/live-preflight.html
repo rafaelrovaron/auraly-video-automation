@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head><meta charset="utf-8"><title>Flow live preflight</title></head>
+  <body>
+    <main aria-label="Flow workspace">
+      <button type="button" id="upload-menu" aria-label="Menu para adicionar arquivos">add</button>
+      <div id="menu-root"></div>
+      <div contenteditable="true" aria-label="Unrelated editor"></div>
+      <flow-rich-text-editor>
+        <span>O que você quer criar?</span>
+        <div contenteditable="true"></div>
+      </flow-rich-text-editor>
+      <button type="submit" id="generate-live" aria-label="Iniciar geração" disabled>
+        arrow_forward
+      </button>
+    </main>
+    <script>
+      const menuButton = document.getElementById("upload-menu");
+      const menuRoot = document.getElementById("menu-root");
+      const prompt = document.querySelector("flow-rich-text-editor [contenteditable=true]");
+      const generate = document.getElementById("generate-live");
+      window.uploadMenuClicks = 0;
+      window.sendClicks = 0;
+      window.generateClicks = 0;
+      menuButton.addEventListener("click", () => {
+        window.uploadMenuClicks += 1;
+        menuRoot.innerHTML = '<div role="menu"><button type="button" role="menuitem" id="send-upload">Enviar</button></div>';
+        document.getElementById("send-upload").addEventListener("click", () => {
+          window.sendClicks += 1;
+          const input = document.createElement("input");
+          input.type = "file";
+          input.addEventListener("change", () => {
+            const status = document.createElement("output");
+            status.setAttribute("role", "status");
+            status.setAttribute("aria-label", "Reference upload complete");
+            status.textContent = "Complete";
+            document.querySelector("main").appendChild(status);
+          });
+          input.click();
+        });
+      });
+      prompt.addEventListener("input", () => { generate.disabled = !prompt.textContent.trim(); });
+      generate.addEventListener("click", () => {
+        window.generateClicks += 1;
+        const status = document.createElement("output");
+        status.setAttribute("role", "status");
+        status.setAttribute("aria-label", "Generating");
+        status.textContent = "Generating";
+        document.querySelector("main").appendChild(status);
+      });
+      document.addEventListener("keydown", event => {
+        if (event.key === "Escape") menuRoot.replaceChildren();
+      });
+    </script>
+  </body>
+</html>

@@ -13,6 +13,7 @@ from auraly_pipeline.flow.generation_domain import (
     FlowCandidateObservation,
     FlowGenerationUiContractError,
 )
+from auraly_pipeline.flow import generation_locators as locator_module
 from auraly_pipeline.flow.generation_locators import (
     _GenerationLocatorTarget,
     _PRODUCTION_GENERATION_TARGET,
@@ -39,6 +40,7 @@ FLOW_GENERATION_FIXTURES = (
     "loading-grid.html",
     "failed-grid.html",
     "production-safe-grid.html",
+    "live-preflight.html",
 )
 
 
@@ -116,6 +118,166 @@ def test_ready_page_resolves_exact_generation_controls(flow_generation_page: Pag
     assert resolve_local_locator(resolve_reference_input, flow_generation_page).count() == 1
     assert resolve_local_locator(resolve_generation_prompt, flow_generation_page).count() == 1
     assert resolve_local_locator(resolve_generate_control, flow_generation_page).count() == 1
+
+
+def test_live_upload_menu_button_and_item_resolve_uniquely(
+    flow_generation_page: Page,
+) -> None:
+    """Removing either exact live control must prevent a deterministic filechooser path."""
+    flow_generation_page.goto(fake_generation_url("live-preflight.html"))
+
+    control = locator_module.resolve_reference_upload_control(
+        flow_generation_page,
+        _target=LOCAL_FLOW_TARGET,
+    )
+    assert control.kind == "menu"
+    assert control.locator.get_attribute("aria-label") == "Menu para adicionar arquivos"
+    control.locator.click()
+    menu_item = locator_module.resolve_upload_menu_item(
+        flow_generation_page,
+        _target=LOCAL_FLOW_TARGET,
+    )
+
+    assert menu_item.get_by_text("Enviar", exact=True).count() == 1
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    (
+        "document.querySelector('main').insertAdjacentHTML('beforeend', document.getElementById('upload-menu').outerHTML)",
+        "document.getElementById('upload-menu').remove()",
+    ),
+)
+def test_live_upload_menu_button_ambiguity_or_absence_fails_closed(
+    flow_generation_page: Page,
+    mutation: str,
+) -> None:
+    """Choosing among zero or multiple upload entry points could upload to the wrong surface."""
+    flow_generation_page.goto(fake_generation_url("live-preflight.html"))
+    flow_generation_page.evaluate(mutation)
+
+    with pytest.raises(FlowGenerationUiContractError):
+        locator_module.resolve_reference_upload_control(
+            flow_generation_page,
+            _target=LOCAL_FLOW_TARGET,
+        )
+
+
+def test_live_upload_menu_item_ambiguity_fails_closed(flow_generation_page: Page) -> None:
+    """Multiple Enviar actions must not be reduced to a positional filechooser click."""
+    flow_generation_page.goto(fake_generation_url("live-preflight.html"))
+    flow_generation_page.get_by_role(
+        "button", name="Menu para adicionar arquivos", exact=True
+    ).click()
+    flow_generation_page.get_by_role("menu").evaluate(
+        "menu => menu.insertAdjacentHTML('beforeend', '<button role=menuitem>Enviar</button>')"
+    )
+
+    with pytest.raises(FlowGenerationUiContractError):
+        locator_module.resolve_upload_menu_item(
+            flow_generation_page,
+            _target=LOCAL_FLOW_TARGET,
+        )
+
+
+def test_live_upload_menu_item_requires_one_menu(flow_generation_page: Page) -> None:
+    """A second visible menu must prevent a page-global Enviar match from being trusted."""
+    flow_generation_page.goto(fake_generation_url("live-preflight.html"))
+    flow_generation_page.get_by_role(
+        "button", name="Menu para adicionar arquivos", exact=True
+    ).click()
+    flow_generation_page.evaluate(
+        "document.body.insertAdjacentHTML('beforeend', '<div role=menu><button role=menuitem>Other</button></div>')"
+    )
+
+    with pytest.raises(FlowGenerationUiContractError):
+        locator_module.resolve_upload_menu_item(
+            flow_generation_page,
+            _target=LOCAL_FLOW_TARGET,
+        )
+
+
+def test_live_prompt_uses_one_scoped_editor_and_ignores_global_editor(
+    flow_generation_page: Page,
+) -> None:
+    """A global contenteditable must never displace the editor inside the exact Flow host."""
+    flow_generation_page.goto(fake_generation_url("live-preflight.html"))
+
+    prompt = resolve_local_locator(resolve_generation_prompt, flow_generation_page)
+
+    assert prompt.get_attribute("contenteditable") == "true"
+    assert prompt.get_attribute("aria-label") is None
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    (
+        "document.querySelector('main').insertAdjacentHTML('beforeend', '<flow-rich-text-editor><div contenteditable=true></div></flow-rich-text-editor>')",
+        "document.querySelector('flow-rich-text-editor').insertAdjacentHTML('beforeend', '<div contenteditable=true></div>')",
+    ),
+)
+def test_live_prompt_rejects_multiple_hosts_or_scoped_editors(
+    flow_generation_page: Page,
+    mutation: str,
+) -> None:
+    """An ambiguous host or editor would make prompt entry nondeterministic."""
+    flow_generation_page.goto(fake_generation_url("live-preflight.html"))
+    flow_generation_page.evaluate(mutation)
+
+    with pytest.raises(FlowGenerationUiContractError):
+        resolve_local_locator(resolve_generation_prompt, flow_generation_page)
+
+
+def test_live_generate_is_visible_unique_and_may_be_disabled_only_for_preflight(
+    flow_generation_page: Page,
+) -> None:
+    """Preflight observes disabled submit readiness while dispatch still requires enabled state."""
+    flow_generation_page.goto(fake_generation_url("live-preflight.html"))
+
+    preflight = locator_module.resolve_preflight_generate_control(
+        flow_generation_page,
+        _target=LOCAL_FLOW_TARGET,
+    )
+    assert preflight.get_attribute("aria-label") == "Iniciar geração"
+    assert preflight.is_disabled()
+    with pytest.raises(FlowGenerationUiContractError):
+        resolve_local_locator(resolve_generate_control, flow_generation_page)
+
+    preflight.evaluate("button => button.disabled = false")
+    assert resolve_local_locator(resolve_generate_control, flow_generation_page).count() == 1
+
+
+def test_live_generate_missing_or_ambiguous_fails_preflight_closed(
+    flow_generation_page: Page,
+) -> None:
+    """Preflight cannot approve an absent or duplicate localized submit control."""
+    for mutation in (
+        "document.getElementById('generate-live').remove()",
+        "document.querySelector('main').insertAdjacentHTML('beforeend', document.getElementById('generate-live').outerHTML)",
+    ):
+        flow_generation_page.goto(fake_generation_url("live-preflight.html"))
+        flow_generation_page.evaluate(mutation)
+        with pytest.raises(FlowGenerationUiContractError):
+            locator_module.resolve_preflight_generate_control(
+                flow_generation_page,
+                _target=LOCAL_FLOW_TARGET,
+            )
+
+
+def test_live_pre_generation_surface_does_not_require_post_generation_controls(
+    flow_generation_page: Page,
+) -> None:
+    """Candidate and download controls are invalid before a provider result exists."""
+    flow_generation_page.goto(fake_generation_url("live-preflight.html"))
+
+    assert flow_generation_page.get_by_role(
+        "list", name="Generated candidates", exact=True
+    ).count() == 0
+    assert flow_generation_page.get_by_role(
+        "button", name="Request 2K", exact=True
+    ).count() == 0
+    with pytest.raises(FlowGenerationUiContractError):
+        observe_local_candidates(flow_generation_page)
 
 
 def test_upload_complete_and_generating_pages_resolve_exact_state_indicators(
@@ -420,13 +582,30 @@ def test_flow_locator_modules_prohibit_unsafe_selector_and_coordinate_escape_hat
         for name in ("locators.py", "generation_locators.py", "runtime.py")
     ]
     forbidden_text = ("xpath=", "nth-child", ".nth(", "get_by_alt_text", "class=")
+    approved_structural_selectors = {
+        "flow-rich-text-editor",
+        "[contenteditable='true']",
+    }
 
     for source in sources:
         tree = ast.parse(source)
         assert not any(marker in source.casefold() for marker in forbidden_text)
         assert not any(
-            isinstance(node, ast.Attribute) and node.attr in {"mouse", "locator", "nth"}
+            isinstance(node, ast.Attribute) and node.attr in {"mouse", "nth"}
             for node in ast.walk(tree)
+        )
+        locator_calls = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "locator"
+        ]
+        assert all(
+            len(call.args) == 1
+            and isinstance(call.args[0], ast.Constant)
+            and call.args[0].value in approved_structural_selectors
+            for call in locator_calls
         )
         assert not any(
             isinstance(node, ast.keyword) and node.arg in {"position", "x", "y"}

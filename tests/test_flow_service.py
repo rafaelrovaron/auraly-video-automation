@@ -163,6 +163,7 @@ def _resolver(config: FlowRuntimeConfig, calls: list[dict[str, object]]) -> Conf
         diagnostics_dir: Path | None = None,
         login_timeout_seconds: int | None = None,
         navigation_timeout_seconds: int | None = None,
+        workspace_path: str | None = None,
     ) -> FlowRuntimeConfig:
         calls.append(
             {
@@ -170,6 +171,7 @@ def _resolver(config: FlowRuntimeConfig, calls: list[dict[str, object]]) -> Conf
                 "diagnostics_dir": diagnostics_dir,
                 "login_timeout_seconds": login_timeout_seconds,
                 "navigation_timeout_seconds": navigation_timeout_seconds,
+                "workspace_path": workspace_path,
             }
         )
         return config
@@ -291,6 +293,7 @@ def test_service_holds_lock_until_runtime_has_closed_returns_ready_and_forwards_
         diagnostics_dir=Path("diagnostics-option"),
         login_timeout_seconds=12,
         navigation_timeout_seconds=34,
+        workspace_path="project/4f4aeb44-ea73-43f9-b622-77080a525fe8",
     )
 
     assert result == FlowPreflightResult.ready(timestamp=TIMESTAMP)
@@ -302,6 +305,7 @@ def test_service_holds_lock_until_runtime_has_closed_returns_ready_and_forwards_
             "diagnostics_dir": Path("diagnostics-option"),
             "login_timeout_seconds": 12,
             "navigation_timeout_seconds": 34,
+            "workspace_path": "project/4f4aeb44-ea73-43f9-b622-77080a525fe8",
         }
     ]
 
@@ -342,6 +346,7 @@ def test_config_failure_returns_sanitized_result_before_constructing_lock_or_run
         diagnostics_dir: Path | None = None,
         login_timeout_seconds: int | None = None,
         navigation_timeout_seconds: int | None = None,
+        workspace_path: str | None = None,
     ) -> FlowRuntimeConfig:
         raise FlowBrowserLaunchError(failed_step="validate_config")
 
@@ -414,6 +419,7 @@ def test_service_constructs_config_lock_and_runtime_in_lifecycle_order(tmp_path:
         diagnostics_dir: Path | None = None,
         login_timeout_seconds: int | None = None,
         navigation_timeout_seconds: int | None = None,
+        workspace_path: str | None = None,
     ) -> FlowRuntimeConfig:
         events.append("config")
         return config
@@ -469,6 +475,7 @@ def test_unknown_runtime_or_factory_error_releases_lock_then_writes_sanitized_re
         diagnostics_dir: Path | None = None,
         login_timeout_seconds: int | None = None,
         navigation_timeout_seconds: int | None = None,
+        workspace_path: str | None = None,
     ) -> FlowRuntimeConfig:
         events.append("config")
         return config

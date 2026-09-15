@@ -17,6 +17,14 @@ from playwright.sync_api import BrowserContext, Locator, Page, Playwright, sync_
 
 from .config import FlowRuntimeConfig
 from .generation_domain import FlowWorkspaceIdentity
+from .generation_locators import (
+    _GenerationLocatorTarget,
+    _PRODUCTION_GENERATION_TARGET,
+    resolve_generation_prompt,
+    resolve_preflight_generate_control,
+    resolve_reference_upload_control,
+    resolve_upload_menu_item,
+)
 from .domain import (
     FLOW_URL,
     FlowAuthenticationTimeoutError,
@@ -359,13 +367,33 @@ class GoogleFlowRuntime:
         config: FlowRuntimeConfig,
         *,
         _target: _FlowRuntimeTarget | None = None,
+        _locator_target: _GenerationLocatorTarget = _PRODUCTION_GENERATION_TARGET,
         _playwright_factory: Callable[[], AbstractContextManager[Playwright]] = sync_playwright,
         _monotonic: Callable[[], float] = time.monotonic,
     ) -> None:
         self._config = config
         self._target = PRODUCTION_TARGET if _target is None else _target
+        self._locator_target = _locator_target
         self._playwright_factory = _playwright_factory
         self._monotonic = _monotonic
+
+    def _verify_pre_generation_ui(self, session: FlowBrowserSession) -> None:
+        """Validate only controls that must exist before any provider generation."""
+        page = session.page
+        session.require_current_flow_page()
+        upload = resolve_reference_upload_control(page, _target=self._locator_target)
+        session.require_current_flow_page()
+        if upload.kind == "menu":
+            upload.locator.click()
+            session.require_current_flow_page()
+            resolve_upload_menu_item(page, _target=self._locator_target)
+            session.require_current_flow_page()
+            page.keyboard.press("Escape")
+            session.require_current_flow_page()
+        resolve_generation_prompt(page, _target=self._locator_target)
+        session.require_current_flow_page()
+        resolve_preflight_generate_control(page, _target=self._locator_target)
+        session.require_current_flow_page()
 
     def run(self) -> FlowRuntimeObservation:
         """Run observation-only preflight, close all browser resources, or raise a typed failure."""
@@ -394,6 +422,10 @@ class GoogleFlowRuntime:
                 if context is None:
                     raise FlowBrowserLaunchError()
                 phase = "navigate_flow"
+                if self._config.workspace_path is not None:
+                    session.open_workspace(
+                        _workspace_identity_for_path(self._config.workspace_path)
+                    )
                 trusted_page = True
 
                 context.tracing.start(screenshots=False, snapshots=False, sources=False)
@@ -406,10 +438,13 @@ class GoogleFlowRuntime:
                         authenticated=True,
                         trusted_page=True,
                     )
-                for locator_name in REQUIRED_FLOW_LOCATORS:
-                    session.require_current_flow_page()
-                    resolve_required_locator(page, locator_name)
-                    session.require_current_flow_page()
+                if self._config.workspace_path is None:
+                    for locator_name in REQUIRED_FLOW_LOCATORS:
+                        session.require_current_flow_page()
+                        resolve_required_locator(page, locator_name)
+                        session.require_current_flow_page()
+                else:
+                    self._verify_pre_generation_ui(session)
                 session.require_current_flow_page()
 
                 raw_trace.stop_attempted = True
@@ -533,6 +568,8 @@ class GoogleFlowRuntime:
 
 def _classify_url(url: str, target: _FlowRuntimeTarget) -> Literal["flow", "login", "unexpected"]:
     """Classify only exact allowlisted origin/path pairs, deliberately ignoring suffixes."""
+    if target.workspace_urls is not None and url in dict(target.workspace_urls).values():
+        return "flow"
     parsed = urlsplit(url)
     origin = _origin(url)
     if (origin, parsed.path) in target.flow_routes:

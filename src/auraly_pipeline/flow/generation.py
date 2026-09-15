@@ -11,7 +11,7 @@ import re
 import time
 from typing import Protocol
 
-from playwright.sync_api import Download, Locator, Page, TimeoutError as PlaywrightTimeoutError
+from playwright.sync_api import Download, FileChooser, Locator, Page, TimeoutError as PlaywrightTimeoutError
 
 from .artifacts import (
     FlowArtifactConflictError,
@@ -50,7 +50,8 @@ from .generation_locators import (
     resolve_generate_control,
     resolve_generating_indicator,
     resolve_generation_prompt,
-    resolve_reference_input,
+    resolve_reference_upload_control,
+    resolve_upload_menu_item,
     resolve_upload_complete,
 )
 from .lock import BrowserRuntimeLock
@@ -693,12 +694,24 @@ class FlowGenerationRuntime:
     ) -> FlowGenerationObservation:
         self._require_session_page(session, workspace)
         try:
-            reference_input = resolve_reference_input(
+            upload_control = resolve_reference_upload_control(
                 session.page,
                 _target=self._locator_target,
             )
             upload_was_complete = self._upload_complete_present(session.page)
-            self._set_input_files(reference_input, reference)
+            if upload_control.kind == "input":
+                self._set_input_files(upload_control.locator, reference)
+            else:
+                upload_control.locator.click()
+                self._require_session_page(session, workspace)
+                upload_item = resolve_upload_menu_item(
+                    session.page,
+                    _target=self._locator_target,
+                )
+                with session.page.expect_file_chooser() as chooser_info:
+                    upload_item.click()
+                self._require_session_page(session, workspace)
+                _playwright_set_file_chooser(chooser_info.value, reference)
         except FlowGenerationRuntimeError:
             raise
         except Exception:
@@ -721,7 +734,7 @@ class FlowGenerationRuntime:
 
         self._require_session_page(session, workspace)
         try:
-            actual_prompt_hash = _sha256_text(prompt.input_value())
+            actual_prompt_hash = _sha256_text(_playwright_prompt_value(prompt))
         except Exception:
             raise FlowGenerationRuntimeError(
                 failed_step="verify_prompt", failed_locator="GENERATION_PROMPT"
@@ -749,7 +762,7 @@ class FlowGenerationRuntime:
                     failed_step="verify_reference", failed_locator="UPLOAD_COMPLETE"
                 )
             prompt = resolve_generation_prompt(session.page, _target=self._locator_target)
-            if _sha256_text(prompt.input_value()) != request.prompt_sha256:
+            if _sha256_text(_playwright_prompt_value(prompt)) != request.prompt_sha256:
                 raise FlowGenerationRuntimeError(
                     failed_step="verify_prompt", failed_locator="GENERATION_PROMPT"
                 )
@@ -899,6 +912,25 @@ def _playwright_set_input_files(locator: Locator, reference: FlowReferenceUpload
             "buffer": reference.payload,
         }
     )
+
+
+def _playwright_set_file_chooser(
+    chooser: FileChooser,
+    reference: FlowReferenceUpload,
+) -> None:
+    chooser.set_files(
+        {
+            "name": reference.name,
+            "mimeType": reference.mime_type,
+            "buffer": reference.payload,
+        }
+    )
+
+
+def _playwright_prompt_value(locator: Locator) -> str:
+    if locator.get_attribute("contenteditable") == "true":
+        return locator.inner_text()
+    return locator.input_value()
 
 
 def _sha256_text(value: str) -> str:

@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Literal, Mapping
 
 from .domain import FLOW_URL, FlowBrowserLaunchError
+from .generation_domain import FlowWorkspaceIdentity
 
 
 _DEFAULT_LOGIN_TIMEOUT_SECONDS = 300
@@ -27,6 +28,7 @@ class FlowRuntimeConfig:
     staging_root: Path
     login_timeout_seconds: int
     navigation_timeout_seconds: int
+    workspace_path: str | None = None
     flow_url: Literal["https://flow.google.com/"] = field(default=FLOW_URL, init=False)
 
 
@@ -74,6 +76,7 @@ def resolve_flow_runtime_config(
     diagnostics_dir: Path | None = None,
     login_timeout_seconds: int | None = None,
     navigation_timeout_seconds: int | None = None,
+    workspace_path: str | None = None,
     environment: Mapping[str, str] | None = None,
     repository_root: Path | None = None,
     _local_state_root: Path | None = None,
@@ -117,6 +120,15 @@ def resolve_flow_runtime_config(
             environment_name="AURALY_FLOW_NAVIGATION_TIMEOUT_SECONDS",
             default=_DEFAULT_NAVIGATION_TIMEOUT_SECONDS,
         )
+        resolved_workspace_path = None
+        if workspace_path is not None:
+            workspace = FlowWorkspaceIdentity(
+                workspace_path=workspace_path,
+                fingerprint="0" * 64,
+            )
+            if workspace.workspace_path != workspace_path:
+                raise ValueError("workspace path must be canonical")
+            resolved_workspace_path = workspace.workspace_path
 
         runtime_paths = (
             resolved_profile_dir,
@@ -141,6 +153,7 @@ def resolve_flow_runtime_config(
         staging_root=staging_root,
         login_timeout_seconds=resolved_login_timeout_seconds,
         navigation_timeout_seconds=resolved_navigation_timeout_seconds,
+        workspace_path=resolved_workspace_path,
     )
 
 

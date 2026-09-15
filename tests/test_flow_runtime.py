@@ -33,6 +33,7 @@ from auraly_pipeline.flow.runtime import (
 )
 from auraly_pipeline.flow import runtime as runtime_module
 from auraly_pipeline.flow.generation_domain import FlowWorkspaceIdentity
+from auraly_pipeline.flow.generation_locators import _local_test_target as local_locator_target
 from tests.flow_browser_support import fake_flow_url
 
 
@@ -40,6 +41,7 @@ def config(
     tmp_path: Path,
     *,
     login_timeout_seconds: int = 2,
+    workspace_path: str | None = None,
 ) -> FlowRuntimeConfig:
     """Build an isolated already-validated configuration for a local browser test."""
     profile_dir = tmp_path / "profile"
@@ -54,6 +56,7 @@ def config(
         staging_root=staging_root,
         login_timeout_seconds=login_timeout_seconds,
         navigation_timeout_seconds=2,
+        workspace_path=workspace_path,
     )
 
 
@@ -106,6 +109,30 @@ def test_legacy_flow_route_redirect_to_canonical_origin_is_accepted(tmp_path: Pa
 
     assert observation.status == "ready"
     assert page.url == "https://flow.google.com/"
+
+
+def test_workspace_preflight_checks_only_live_pre_generation_controls(
+    tmp_path: Path,
+) -> None:
+    """Adding candidate or download requirements here would reject a valid empty workspace."""
+    workspace_path = "project/4f4aeb44-ea73-43f9-b622-77080a525fe8"
+    workspace_url = (
+        Path(__file__).parent / "fakes" / "flow-generation" / "live-preflight.html"
+    ).resolve(strict=True).as_uri()
+    target = _local_test_target(
+        navigation_url=fake_flow_url("ready.html"),
+        flow_url=fake_flow_url("ready.html"),
+        login_urls=(fake_flow_url("login-required.html"),),
+        workspace_urls={workspace_path: workspace_url},
+    )
+
+    observation = GoogleFlowRuntime(
+        config(tmp_path, workspace_path=workspace_path),
+        _target=target,
+        _locator_target=local_locator_target(workspace_url),
+    ).run()
+
+    assert observation.status == "ready"
 
 
 def test_direct_canonical_flow_navigation_is_accepted(tmp_path: Path) -> None:
@@ -237,6 +264,20 @@ def test_authenticated_session_opens_only_the_bound_local_workspace(tmp_path: Pa
         session.open_workspace(workspace)
         assert session.page.url == fake_flow_url("ready.html")
         assert session.workspace_identity() == workspace
+
+
+def test_local_classifier_accepts_only_an_explicitly_bound_workspace_url() -> None:
+    workspace_path = "fx/tools/flow/local-workspace"
+    workspace_url = fake_flow_url("blocking-modal.html")
+    target = _local_test_target(
+        navigation_url=fake_flow_url("ready.html"),
+        flow_url=fake_flow_url("ready.html"),
+        login_urls=(fake_flow_url("login-required.html"),),
+        workspace_urls={workspace_path: workspace_url},
+    )
+
+    assert _classify_url(workspace_url, target) == "flow"
+    assert _classify_url(fake_flow_url("missing-prompt.html"), target) == "unexpected"
 
 
 def test_local_workspace_target_rejects_untrusted_suffixes_and_wrong_bindings(tmp_path: Path) -> None:
@@ -553,11 +594,9 @@ def test_close_failure_after_trusted_ui_failure_preserves_managed_evidence_and_t
 def test_runtime_uses_only_observation_methods_and_exact_evidence_calls(tmp_path: Path) -> None:
     """The source and fake boundary prevent interaction drift and pin evidence call semantics."""
     forbidden = {
-        "click",
         "dblclick",
         "fill",
         "type",
-        "press",
         "check",
         "uncheck",
         "select_option",
@@ -571,6 +610,25 @@ def test_runtime_uses_only_observation_methods_and_exact_evidence_calls(tmp_path
         if isinstance(call, ast.Call) and isinstance(call.func, ast.Attribute)
     }
     assert forbidden.isdisjoint(called_attributes)
+    preflight_method = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.ClassDef) and node.name == "GoogleFlowRuntime"
+        for node in node.body
+        if isinstance(node, ast.FunctionDef) and node.name == "_verify_pre_generation_ui"
+    )
+    interaction_calls = [
+        call
+        for call in ast.walk(preflight_method)
+        if isinstance(call, ast.Call)
+        and isinstance(call.func, ast.Attribute)
+        and call.func.attr in {"click", "press"}
+    ]
+    assert [getattr(call.func, "attr", None) for call in interaction_calls] == ["click", "press"]
+    press = interaction_calls[1]
+    assert len(press.args) == 1
+    assert isinstance(press.args[0], ast.Constant)
+    assert press.args[0].value == "Escape"
 
     target = local_target("ready.html")
     page = _FakePage(url=target.flow_url, empty_roles={"main"})

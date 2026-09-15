@@ -82,6 +82,7 @@ class PreflightFake(Protocol):
         diagnostics_dir: Path | None = None,
         login_timeout_seconds: int | None = None,
         navigation_timeout_seconds: int | None = None,
+        workspace_path: str | None = None,
     ) -> FlowPreflightResult: ...
 
 
@@ -118,8 +119,10 @@ def preflight_returning(value: FlowPreflightResult) -> PreflightFake:
         diagnostics_dir: Path | None = None,
         login_timeout_seconds: int | None = None,
         navigation_timeout_seconds: int | None = None,
+        workspace_path: str | None = None,
     ) -> FlowPreflightResult:
         del profile_dir, diagnostics_dir, login_timeout_seconds, navigation_timeout_seconds
+        del workspace_path
         return value
 
     return fake_preflight
@@ -226,7 +229,7 @@ def test_flow_preflight_keeps_result_only_failure_nulls(
 
 
 def test_flow_preflight_forwards_all_options_once(monkeypatch: pytest.MonkeyPatch) -> None:
-    calls: list[tuple[Path | None, Path | None, int | None, int | None]] = []
+    calls: list[tuple[Path | None, Path | None, int | None, int | None, str | None]] = []
 
     def fake_preflight(
         _self: FlowPreflightService,
@@ -235,8 +238,17 @@ def test_flow_preflight_forwards_all_options_once(monkeypatch: pytest.MonkeyPatc
         diagnostics_dir: Path | None = None,
         login_timeout_seconds: int | None = None,
         navigation_timeout_seconds: int | None = None,
+        workspace_path: str | None = None,
     ) -> FlowPreflightResult:
-        calls.append((profile_dir, diagnostics_dir, login_timeout_seconds, navigation_timeout_seconds))
+        calls.append(
+            (
+                profile_dir,
+                diagnostics_dir,
+                login_timeout_seconds,
+                navigation_timeout_seconds,
+                workspace_path,
+            )
+        )
         return result_for_status("ready")
 
     monkeypatch.setattr(FlowPreflightService, "preflight", fake_preflight)
@@ -253,15 +265,25 @@ def test_flow_preflight_forwards_all_options_once(monkeypatch: pytest.MonkeyPatc
             "123",
             "--navigation-timeout",
             "45",
+            "--workspace-path",
+            "project/4f4aeb44-ea73-43f9-b622-77080a525fe8",
         ],
     )
 
     assert invocation.exit_code == 0
-    assert calls == [(Path("profile"), Path("diagnostics"), 123, 45)]
+    assert calls == [
+        (
+            Path("profile"),
+            Path("diagnostics"),
+            123,
+            45,
+            "project/4f4aeb44-ea73-43f9-b622-77080a525fe8",
+        )
+    ]
 
 
 def test_flow_preflight_forwards_none_defaults_once(monkeypatch: pytest.MonkeyPatch) -> None:
-    calls: list[tuple[Path | None, Path | None, int | None, int | None]] = []
+    calls: list[tuple[Path | None, Path | None, int | None, int | None, str | None]] = []
 
     def fake_preflight(
         _self: FlowPreflightService,
@@ -270,8 +292,17 @@ def test_flow_preflight_forwards_none_defaults_once(monkeypatch: pytest.MonkeyPa
         diagnostics_dir: Path | None = None,
         login_timeout_seconds: int | None = None,
         navigation_timeout_seconds: int | None = None,
+        workspace_path: str | None = None,
     ) -> FlowPreflightResult:
-        calls.append((profile_dir, diagnostics_dir, login_timeout_seconds, navigation_timeout_seconds))
+        calls.append(
+            (
+                profile_dir,
+                diagnostics_dir,
+                login_timeout_seconds,
+                navigation_timeout_seconds,
+                workspace_path,
+            )
+        )
         return result_for_status("ready")
 
     monkeypatch.setattr(FlowPreflightService, "preflight", fake_preflight)
@@ -279,7 +310,7 @@ def test_flow_preflight_forwards_none_defaults_once(monkeypatch: pytest.MonkeyPa
     invocation = runner.invoke(app, ["flow", "preflight"])
 
     assert invocation.exit_code == 0
-    assert calls == [(None, None, None, None)]
+    assert calls == [(None, None, None, None, None)]
 
 
 @pytest.mark.parametrize(
@@ -305,9 +336,11 @@ def test_flow_preflight_rejects_non_positive_timeouts_without_calling_service(
         diagnostics_dir: Path | None = None,
         login_timeout_seconds: int | None = None,
         navigation_timeout_seconds: int | None = None,
+        workspace_path: str | None = None,
     ) -> FlowPreflightResult:
         nonlocal calls
         del profile_dir, diagnostics_dir, login_timeout_seconds, navigation_timeout_seconds
+        del workspace_path
         calls += 1
         return result_for_status("ready")
 
@@ -329,6 +362,7 @@ def test_flow_preflight_registers_only_approved_options() -> None:
         "--diagnostics-dir",
         "--login-timeout",
         "--navigation-timeout",
+        "--workspace-path",
     }
 
 
@@ -344,6 +378,7 @@ def test_flow_preflight_help_uses_only_approved_public_options() -> None:
         "--diagnostics-dir",
         "--login-timeout",
         "--navigation-timeout",
+        "--workspace-path",
     }
     for forbidden in (
         "--url",

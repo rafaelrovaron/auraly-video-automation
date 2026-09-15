@@ -93,7 +93,7 @@ def _runtime_for_fixture(
     generation_timeout_seconds: int = 1,
 ) -> FlowGenerationRuntime:
     page.goto(_fixture_url(fixture))
-    if upload_completes:
+    if upload_completes and page.locator('input[type="file"]').count() == 1:
         page.locator('input[type="file"]').evaluate(
             """element => element.addEventListener('change', () => {
                 const status = document.createElement('output');
@@ -283,6 +283,32 @@ def test_prepare_uploads_reference_and_verifies_prompt_hash(
         "reference_verified": True,
         "prompt_verified": True,
     }
+
+
+def test_prepare_live_upload_uses_one_filechooser_and_scoped_prompt(
+    flow_generation_page: Page,
+    reference_png: Path,
+) -> None:
+    """Replacing the chooser path with a blind click or global editor must fail this contract."""
+    runtime = _runtime_for_fixture("live-preflight.html", flow_generation_page)
+
+    observed = runtime.prepare_inputs(
+        reference_path=reference_png,
+        reference_sha256=_sha256(reference_png),
+        prompt_snapshot="private prompt",
+        prompt_sha256=_sha256_text("private prompt"),
+    )
+
+    assert observed.reference_verified is True
+    assert observed.prompt_verified is True
+    assert flow_generation_page.evaluate("window.uploadMenuClicks") == 1
+    assert flow_generation_page.evaluate("window.sendClicks") == 1
+    assert flow_generation_page.locator(
+        "flow-rich-text-editor [contenteditable=true]"
+    ).inner_text() == "private prompt"
+    assert flow_generation_page.locator(
+        "[contenteditable=true][aria-label='Unrelated editor']"
+    ).inner_text() == ""
 
 
 def test_prepare_rejects_wrong_reference_hash_before_browser_upload(

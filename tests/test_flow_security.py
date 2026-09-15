@@ -280,12 +280,14 @@ def local_preflight(
         diagnostics_dir: Path | None = None,
         login_timeout_seconds: int | None = None,
         navigation_timeout_seconds: int | None = None,
+        workspace_path: str | None = None,
     ) -> FlowRuntimeConfig:
         return resolve_flow_runtime_config(
             profile_dir=profile_dir,
             diagnostics_dir=diagnostics_dir,
             login_timeout_seconds=login_timeout_seconds,
             navigation_timeout_seconds=navigation_timeout_seconds,
+            workspace_path=workspace_path,
             environment={},
             repository_root=REPOSITORY_ROOT,
             _local_state_root=paths.state_root,
@@ -584,6 +586,8 @@ def test_flow_package_limits_provider_mutations_to_checkpointed_generation_runti
         "call:fill",
         "call:click",
         "call:expect_download",
+        "call:expect_file_chooser",
+        "call:press",
     }
     assert inventory.playwright_importers == frozenset({"generation.py", "runtime.py"})
 
@@ -593,7 +597,13 @@ def test_flow_package_limits_provider_mutations_to_checkpointed_generation_runti
         for node in ast.walk(generation_tree)
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
     }
-    assert {"set_input_files", "fill", "click", "expect_download"}.issubset(
+    assert {
+        "set_input_files",
+        "fill",
+        "click",
+        "expect_download",
+        "expect_file_chooser",
+    }.issubset(
         generation_calls
     )
     assert not any(
@@ -601,7 +611,7 @@ def test_flow_package_limits_provider_mutations_to_checkpointed_generation_runti
         for attribute in generation_calls
     )
     for module_path in inventory.module_paths:
-        if module_path == "generation.py":
+        if module_path in {"generation.py", "runtime.py"}:
             continue
         module_calls = {
             node.func.attr
@@ -686,6 +696,7 @@ def test_flow_cli_and_service_expose_no_job_database_or_arbitrary_target_boundar
         "diagnostics_dir",
         "login_timeout_seconds",
         "navigation_timeout_seconds",
+        "workspace_path",
     }
     service_imports = _resolved_imports(
         _module_tree(Path(service_module.__file__)),
