@@ -8,7 +8,7 @@ from pathlib import Path
 import re
 from typing import Literal, Self
 
-from pydantic import model_validator
+from pydantic import Field, model_validator
 
 from auraly_pipeline.models import ContractModel
 
@@ -42,6 +42,25 @@ FlowFailedStep = Literal[
 FlowLocatorName = Literal[
     "FLOW_WORKSPACE", "CREATE_ENTRY_POINT", "PROMPT_INPUT", "ACCOUNT_IDENTITY"
 ]
+FlowPreflightControl = Literal[
+    "flow.upload_menu_button",
+    "flow.upload_menuitem_send",
+    "flow.prompt_host",
+    "flow.prompt_editor",
+    "flow.generate_button",
+]
+FlowFailureCategory = Literal[
+    "missing",
+    "ambiguous",
+    "not_visible",
+    "unexpected_state",
+    "route_mismatch",
+    "workspace_mismatch",
+    "authentication_required",
+    "locator_contract_failed",
+    "diagnostic_failure",
+]
+FlowDiagnosticProcessing = Literal["sanitized", "partially_sanitized", "failed"]
 
 _SAFE_DIAGNOSTIC_RUN_ID = re.compile(r"^[0-9]{8}T[0-9]{6}Z-[0-9a-f]{8}$")
 _FLOW_FAILED_STEPS: frozenset[str] = frozenset(
@@ -64,6 +83,34 @@ _BROWSER_LAUNCH_STEPS: frozenset[str] = frozenset(
 )
 
 
+def _default_failure_category(
+    status: FlowPreflightStatus, failed_step: FlowFailedStep
+) -> FlowFailureCategory:
+    if failed_step == "sanitize_diagnostics":
+        return "diagnostic_failure"
+    if failed_step == "await_manual_authentication":
+        return "authentication_required"
+    if failed_step == "navigate_flow":
+        return "route_mismatch"
+    if status == "ui_contract_failed":
+        return "locator_contract_failed"
+    return "unexpected_state"
+
+
+class FlowPrimaryFailure(ContractModel):
+    """Only allowlisted preflight facts; never provider text or browser data."""
+
+    phase: FlowFailedStep
+    control: FlowPreflightControl | None = None
+    category: FlowFailureCategory
+    expected_cardinality: Literal[1] | None = None
+    observed_cardinality: Literal[0, 1, "2+"] | None = None
+    visible: bool | None = None
+    enabled: bool | None = None
+    ambiguity_detected: bool = False
+    unsafe_fallback_required: bool = False
+
+
 class FlowPreflightResult(ContractModel):
     """The stable, allowlisted result emitted by a Flow preflight."""
 
@@ -75,6 +122,12 @@ class FlowPreflightResult(ContractModel):
     ui_ready: bool
     failed_step: FlowFailedStep | None = None
     failed_locator: FlowLocatorName | None = None
+    primary_failure: FlowPrimaryFailure | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    diagnostic_processing: FlowDiagnosticProcessing | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     diagnostic_run_id: str | None = None
     screenshot: Literal["screenshot.png"] | None = None
     trace: Literal["trace.zip"] | None = None
@@ -95,6 +148,8 @@ class FlowPreflightResult(ContractModel):
                 for value in (
                     self.failed_step,
                     self.failed_locator,
+                    self.primary_failure,
+                    self.diagnostic_processing,
                     self.diagnostic_run_id,
                     self.screenshot,
                     self.trace,
@@ -107,6 +162,15 @@ class FlowPreflightResult(ContractModel):
             raise ValueError("non-ready preflight cannot have ready status")
         if self.failed_step is None:
             raise ValueError("non-ready preflight requires a failed step")
+        if self.primary_failure is not None and self.primary_failure.phase != self.failed_step:
+            if self.failed_step != "close_browser" and (
+                self.failed_step != "sanitize_diagnostics" or self.diagnostic_processing != "failed"
+            ):
+                raise ValueError("primary failure phase mismatch requires a secondary failure")
+        if self.diagnostic_processing == "failed" and (
+            self.screenshot is not None or self.trace is not None
+        ):
+            raise ValueError("failed diagnostic processing cannot publish artifacts")
         if self.diagnostic_run_id is not None and not _SAFE_DIAGNOSTIC_RUN_ID.fullmatch(
             self.diagnostic_run_id
         ):
@@ -141,10 +205,15 @@ class FlowPreflightResult(ContractModel):
         failed_step: FlowFailedStep,
         timestamp: datetime,
         failed_locator: FlowLocatorName | None = None,
+        primary_failure: FlowPrimaryFailure | None = None,
+        diagnostic_processing: FlowDiagnosticProcessing | None = None,
         diagnostic_run_id: str | None = None,
         screenshot: Literal["screenshot.png"] | None = None,
         trace: Literal["trace.zip"] | None = None,
     ) -> Self:
+        resolved_primary = primary_failure or FlowPrimaryFailure(
+            phase=failed_step, category=_default_failure_category(status, failed_step)
+        )
         return cls(
             success=False,
             status=status,
@@ -153,6 +222,12 @@ class FlowPreflightResult(ContractModel):
             ui_ready=ui_ready,
             failed_step=failed_step,
             failed_locator=failed_locator,
+            primary_failure=resolved_primary,
+            diagnostic_processing=(
+                diagnostic_processing
+                if diagnostic_processing is not None
+                else "failed" if failed_step == "sanitize_diagnostics" else None
+            ),
             diagnostic_run_id=diagnostic_run_id,
             screenshot=screenshot,
             trace=trace,
@@ -189,6 +264,7 @@ class FlowRuntimeError(RuntimeError):
     failed_locator: FlowLocatorName | None
     trusted_page: bool
     evidence: FlowFailureEvidence
+    primary_failure: FlowPrimaryFailure | None
 
     def __init__(
         self,
@@ -200,6 +276,7 @@ class FlowRuntimeError(RuntimeError):
         failed_locator: FlowLocatorName | None = None,
         trusted_page: bool,
         evidence: FlowFailureEvidence | None = None,
+        primary_failure: FlowPrimaryFailure | None = None,
     ) -> None:
         super().__init__()
         self.status = status
@@ -209,6 +286,10 @@ class FlowRuntimeError(RuntimeError):
         self.failed_locator = failed_locator
         self.trusted_page = trusted_page
         self.evidence = evidence if evidence is not None else FlowFailureEvidence()
+        self.primary_failure = primary_failure or FlowPrimaryFailure(
+            phase=failed_step,
+            category=_default_failure_category(status, failed_step),
+        )
 
 
 class FlowRuntimeBusyError(FlowRuntimeError):
@@ -264,11 +345,16 @@ class FlowUnexpectedStateError(FlowRuntimeError):
         failed_locator: FlowLocatorName | None = None,
         trusted_page: bool = False,
         evidence: FlowFailureEvidence | None = None,
+        failure_category: FlowFailureCategory | None = None,
+        primary_failure: FlowPrimaryFailure | None = None,
     ) -> None:
         if failed_step not in _FLOW_FAILED_STEPS:
             raise ValueError("unexpected state requires an allowlisted failed step")
         if failed_locator is not None and failed_locator not in _FLOW_LOCATORS:
             raise ValueError("unexpected state requires an allowlisted failed locator")
+        resolved_primary = primary_failure
+        if resolved_primary is None and failure_category is not None:
+            resolved_primary = FlowPrimaryFailure(phase=failed_step, category=failure_category)
         super().__init__(
             status="human_intervention_required",
             failed_step=failed_step,
@@ -277,6 +363,7 @@ class FlowUnexpectedStateError(FlowRuntimeError):
             failed_locator=failed_locator,
             trusted_page=trusted_page,
             evidence=evidence,
+            primary_failure=resolved_primary,
         )
 
 
@@ -286,6 +373,7 @@ class FlowUiContractError(FlowRuntimeError):
         *,
         failed_locator: FlowLocatorName | None = None,
         evidence: FlowFailureEvidence | None = None,
+        primary_failure: FlowPrimaryFailure | None = None,
     ) -> None:
         super().__init__(
             status="ui_contract_failed",
@@ -295,11 +383,17 @@ class FlowUiContractError(FlowRuntimeError):
             failed_locator=failed_locator,
             trusted_page=True,
             evidence=evidence,
+            primary_failure=primary_failure,
         )
 
 
 class FlowDiagnosticSanitizationError(FlowRuntimeError):
-    def __init__(self, *, evidence: FlowFailureEvidence | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        evidence: FlowFailureEvidence | None = None,
+        primary_failure: FlowPrimaryFailure | None = None,
+    ) -> None:
         super().__init__(
             status="human_intervention_required",
             failed_step="sanitize_diagnostics",
@@ -307,4 +401,5 @@ class FlowDiagnosticSanitizationError(FlowRuntimeError):
             ui_ready=False,
             trusted_page=True,
             evidence=evidence,
+            primary_failure=primary_failure,
         )

@@ -6,7 +6,7 @@ import errno
 import json
 import os
 from pathlib import Path
-from typing import Callable, cast
+from typing import Callable, Literal, cast
 from zipfile import ZIP_STORED, ZipFile
 
 import pytest
@@ -19,6 +19,9 @@ from auraly_pipeline.flow.domain import (
     FlowBrowserLaunchError,
     FlowDiagnosticSanitizationError,
     FlowFailureEvidence,
+    FlowFailureCategory,
+    FlowPreflightControl,
+    FlowPrimaryFailure,
     FlowPreflightResult,
     FlowRuntimeBusyError,
     FlowRuntimeError,
@@ -374,6 +377,8 @@ def test_config_failure_returns_sanitized_result_before_constructing_lock_or_run
         failed_step="validate_config",
         timestamp=TIMESTAMP,
     )
+    assert result.diagnostic_processing is None
+    assert "diagnosticProcessing" not in result.model_dump(by_alias=True, mode="json")
     assert events == []
 
 
@@ -713,7 +718,43 @@ def test_valid_config_typed_failures_publish_real_result_json_and_return_run_id(
         assert result.trace is None
 
 
+@pytest.mark.parametrize(
+    ("error", "category"),
+    (
+        (FlowUnexpectedStateError(failed_step="navigate_flow"), "route_mismatch"),
+        (FlowAuthenticationTimeoutError(), "authentication_required"),
+        (
+            FlowUnexpectedStateError(
+                failed_step="navigate_flow", failure_category="workspace_mismatch"
+            ),
+            "workspace_mismatch",
+        ),
+    ),
+)
+def test_route_auth_workspace_failure_categories_survive_real_result_publication(
+    tmp_path: Path,
+    error: FlowRuntimeError,
+    category: FlowFailureCategory,
+) -> None:
+    service, _, _, _ = _service(tmp_path, runtime_error=error, use_real_writer=True)
+
+    result = service.preflight()
+
+    assert result.primary_failure is not None
+    assert result.primary_failure.phase == error.failed_step
+    assert result.primary_failure.category == category
+    assert result.diagnostic_processing == "sanitized"
+    assert result.diagnostic_run_id is not None
+    payload = json.loads(
+        (_config(tmp_path).diagnostics_dir / result.diagnostic_run_id / "result.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert payload["primaryFailure"]["category"] == category
+
+
 def test_diagnostic_sanitization_failure_returns_fresh_result_only_failure(tmp_path: Path) -> None:
+    primary = FlowUiContractError().primary_failure
     service, events, writer, _ = _service(
         tmp_path,
         runtime_error=FlowUiContractError(),
@@ -736,6 +777,7 @@ def test_diagnostic_sanitization_failure_returns_fresh_result_only_failure(tmp_p
         authenticated=True,
         ui_ready=False,
         failed_step="sanitize_diagnostics",
+        primary_failure=primary,
         timestamp=TIMESTAMP,
     )
     assert writer.evidence[1] == FlowFailureEvidence()
@@ -744,13 +786,101 @@ def test_diagnostic_sanitization_failure_returns_fresh_result_only_failure(tmp_p
         authenticated=True,
         ui_ready=False,
         failed_step="sanitize_diagnostics",
+        primary_failure=primary,
         timestamp=TIMESTAMP,
     )
+
+
+@pytest.mark.parametrize(
+    ("control", "category", "observed"),
+    (
+        ("flow.upload_menu_button", "missing", 0),
+        ("flow.upload_menu_button", "ambiguous", "2+"),
+        ("flow.prompt_host", "missing", 0),
+        ("flow.prompt_editor", "ambiguous", "2+"),
+        ("flow.generate_button", "missing", 0),
+        ("flow.generate_button", "unexpected_state", 1),
+    ),
+)
+def test_writer_failure_preserves_known_primary_cause_without_private_evidence(
+    tmp_path: Path,
+    control: FlowPreflightControl,
+    category: FlowFailureCategory,
+    observed: Literal[0, 1, "2+"],
+) -> None:
+    primary = FlowPrimaryFailure(
+        phase="verify_flow_ui",
+        control=control,
+        category=category,
+        expected_cardinality=1,
+        observed_cardinality=observed,
+        visible=True if category == "unexpected_state" else None,
+        enabled=False if category == "unexpected_state" else None,
+        ambiguity_detected=category == "ambiguous",
+        unsafe_fallback_required=True,
+    )
+    service, _, writer, _ = _service(
+        tmp_path,
+        runtime_error=FlowUiContractError(primary_failure=primary),
+        writer_error=FlowDiagnosticSanitizationError(),
+    )
+
+    result = service.preflight()
+
+    assert result.primary_failure == primary
+    assert result.diagnostic_processing == "failed"
+    assert result.failed_step == "sanitize_diagnostics"
+    assert result.screenshot is None and result.trace is None
+    assert writer.results[1].primary_failure == primary
+    assert writer.evidence[1] == FlowFailureEvidence()
+
+
+def test_real_writer_sanitizer_failure_keeps_safe_root_and_no_private_artifacts(
+    tmp_path: Path,
+) -> None:
+    primary = FlowPrimaryFailure(
+        phase="verify_flow_ui",
+        control="flow.prompt_editor",
+        category="ambiguous",
+        expected_cardinality=1,
+        observed_cardinality="2+",
+        ambiguity_detected=True,
+        unsafe_fallback_required=True,
+    )
+    private_evidence = FlowFailureEvidence(
+        screenshot_png=b"cookie=SECRET token=SECRET storage=SECRET",
+        trusted_page=True,
+    )
+    service, _, _, _ = _service(
+        tmp_path,
+        runtime_error=FlowUiContractError(
+            evidence=private_evidence, primary_failure=primary
+        ),
+        use_real_writer=True,
+    )
+
+    result = service.preflight()
+
+    assert result.failed_step == "sanitize_diagnostics"
+    assert result.primary_failure == primary
+    assert result.diagnostic_processing == "failed"
+    assert result.diagnostic_run_id is not None
+    assert result.screenshot is None and result.trace is None
+    run_dir = _config(tmp_path).diagnostics_dir / result.diagnostic_run_id
+    assert {path.name for path in run_dir.iterdir()} == {"result.json"}
+    published = (run_dir / "result.json").read_bytes()
+    for private in (b"cookie=SECRET", b"token=SECRET", b"storage=SECRET"):
+        assert private not in published
+    payload = json.loads(published)
+    assert payload["primaryFailure"]["control"] == "flow.prompt_editor"
+    assert payload["primaryFailure"]["category"] == "ambiguous"
+    assert payload["diagnosticProcessing"] == "failed"
 
 
 def test_writer_failure_retries_once_with_empty_evidence_and_returns_fallback_publication(
     tmp_path: Path,
 ) -> None:
+    primary = FlowUiContractError().primary_failure
     fallback_result = FlowPreflightResult.failure(
         status="human_intervention_required",
         authenticated=True,
@@ -795,6 +925,7 @@ def test_writer_failure_retries_once_with_empty_evidence_and_returns_fallback_pu
             authenticated=True,
             ui_ready=False,
             failed_step="sanitize_diagnostics",
+            primary_failure=primary,
             timestamp=TIMESTAMP,
         )
     ]
@@ -802,6 +933,7 @@ def test_writer_failure_retries_once_with_empty_evidence_and_returns_fallback_pu
 
 
 def test_two_writer_failures_return_fresh_result_only_failure_without_recursion(tmp_path: Path) -> None:
+    primary = FlowUiContractError().primary_failure
     service, events, writer_factory = _service_with_distinct_writers(
         tmp_path,
         runtime_error=FlowUiContractError(),
@@ -815,6 +947,7 @@ def test_two_writer_failures_return_fresh_result_only_failure_without_recursion(
         authenticated=True,
         ui_ready=False,
         failed_step="sanitize_diagnostics",
+        primary_failure=primary,
         timestamp=TIMESTAMP,
     )
     assert events == [
@@ -837,6 +970,7 @@ def test_two_writer_failures_return_fresh_result_only_failure_without_recursion(
             authenticated=True,
             ui_ready=False,
             failed_step="sanitize_diagnostics",
+            primary_failure=primary,
             timestamp=TIMESTAMP,
         )
     ]
@@ -910,6 +1044,7 @@ def test_lock_release_failure_discards_trusted_evidence_and_overrides_runtime_fa
         authenticated=False,
         ui_ready=False,
         failed_step="close_browser",
+        primary_failure=FlowUiContractError().primary_failure,
         timestamp=TIMESTAMP,
     )
     assert not raw_trace.exists()
@@ -919,6 +1054,28 @@ def test_lock_release_failure_discards_trusted_evidence_and_overrides_runtime_fa
     assert "private screenshot" not in serialized
     assert str(raw_trace) not in serialized
     assert "PRIVATE" not in serialized
+    assert writer.evidence == [FlowFailureEvidence()]
+
+
+def test_lock_release_failure_keeps_prior_safe_locator_root(tmp_path: Path) -> None:
+    primary = FlowPrimaryFailure(
+        phase="verify_flow_ui",
+        control="flow.upload_menu_button",
+        category="missing",
+        expected_cardinality=1,
+        observed_cardinality=0,
+    )
+    service, _, writer, _ = _service(
+        tmp_path,
+        runtime_error=FlowUiContractError(primary_failure=primary),
+        lock_release_error=RuntimeError("private release failure"),
+    )
+
+    result = service.preflight()
+
+    assert result.failed_step == "close_browser"
+    assert result.primary_failure == primary
+    assert result.screenshot is None and result.trace is None
     assert writer.evidence == [FlowFailureEvidence()]
 
 
@@ -951,6 +1108,7 @@ def test_lock_release_failure_refuses_unsafe_raw_trace_paths(
         authenticated=True,
         ui_ready=False,
         failed_step="sanitize_diagnostics",
+        primary_failure=FlowUiContractError().primary_failure,
         timestamp=TIMESTAMP,
     )
     assert raw_trace.exists()
@@ -1044,6 +1202,14 @@ def test_lock_release_failure_refuses_staging_symlink_to_outside_raw_trace(
 def test_lock_release_failure_maps_raw_trace_cleanup_error_to_sanitize_diagnostics(
     tmp_path: Path,
 ) -> None:
+    primary = FlowPrimaryFailure(
+        phase="verify_flow_ui",
+        control="flow.prompt_editor",
+        category="ambiguous",
+        expected_cardinality=1,
+        observed_cardinality="2+",
+        ambiguity_detected=True,
+    )
     raw_trace = tmp_path / "staging" / "private-trace.zip"
     raw_trace.parent.mkdir(parents=True)
     raw_trace.write_bytes(b"private raw trace")
@@ -1056,7 +1222,8 @@ def test_lock_release_failure_maps_raw_trace_cleanup_error_to_sanitize_diagnosti
     service, _, writer, _ = _service(
         tmp_path,
         runtime_error=FlowUiContractError(
-            evidence=FlowFailureEvidence(raw_trace_path=raw_trace, trusted_page=True)
+            evidence=FlowFailureEvidence(raw_trace_path=raw_trace, trusted_page=True),
+            primary_failure=primary,
         ),
         lock_release_error=RuntimeError("release failed"),
         raw_trace_cleanup=reject_cleanup,
@@ -1071,8 +1238,10 @@ def test_lock_release_failure_maps_raw_trace_cleanup_error_to_sanitize_diagnosti
         authenticated=True,
         ui_ready=False,
         failed_step="sanitize_diagnostics",
+        primary_failure=primary,
         timestamp=TIMESTAMP,
     )
+    assert result.diagnostic_processing == "failed"
     serialized = result.model_dump_json(by_alias=True)
     assert "private cleanup error" not in serialized
     assert r"C:\\secret" not in serialized

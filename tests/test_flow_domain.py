@@ -15,6 +15,7 @@ from auraly_pipeline.flow.domain import (
     FlowBrowserLaunchError,
     FlowDiagnosticSanitizationError,
     FlowFailureEvidence,
+    FlowPrimaryFailure,
     FlowPreflightResult,
     FlowRuntimeBusyError,
     FlowRuntimeObservation,
@@ -67,6 +68,123 @@ def test_ready_result_requires_authenticated_ui_ready_and_no_failure_fields() ->
         "trace": None,
         "timestamp": "2026-08-16T00:00:00Z",
     }
+
+
+def test_failure_serializes_allowlisted_primary_cause_separately_from_diagnostic_failure() -> None:
+    result = FlowPreflightResult.failure(
+        status="human_intervention_required",
+        authenticated=True,
+        ui_ready=False,
+        failed_step="sanitize_diagnostics",
+        primary_failure=FlowPrimaryFailure(
+            phase="verify_flow_ui",
+            control="flow.upload_menu_button",
+            category="missing",
+            expected_cardinality=1,
+            observed_cardinality=0,
+            ambiguity_detected=False,
+            unsafe_fallback_required=True,
+        ),
+        diagnostic_processing="failed",
+        timestamp=TIMESTAMP,
+    )
+
+    payload = result.model_dump(by_alias=True, mode="json", exclude_none=False)
+
+    assert payload["primaryFailure"] == {
+        "phase": "verify_flow_ui",
+        "control": "flow.upload_menu_button",
+        "category": "missing",
+        "expectedCardinality": 1,
+        "observedCardinality": 0,
+        "visible": None,
+        "enabled": None,
+        "ambiguityDetected": False,
+        "unsafeFallbackRequired": True,
+    }
+    assert payload["diagnosticProcessing"] == "failed"
+
+
+def test_secondary_browser_close_failure_does_not_replace_primary_locator_cause() -> None:
+    primary = FlowPrimaryFailure(
+        phase="verify_flow_ui", control="flow.upload_menu_button", category="missing"
+    )
+
+    result = FlowPreflightResult.failure(
+        status="human_intervention_required",
+        authenticated=True,
+        ui_ready=False,
+        failed_step="close_browser",
+        primary_failure=primary,
+        timestamp=TIMESTAMP,
+    )
+
+    assert result.failed_step == "close_browser"
+    assert result.primary_failure == primary
+
+
+def test_primary_cause_rejects_private_control_and_unbounded_count() -> None:
+    base = {
+        "status": "human_intervention_required",
+        "authenticated": True,
+        "ui_ready": False,
+        "failed_step": "sanitize_diagnostics",
+        "diagnostic_processing": "failed",
+        "timestamp": TIMESTAMP,
+    }
+    for unsafe in (
+        {"phase": "verify_flow_ui", "control": "cookie=private", "category": "missing"},
+        {
+            "phase": "verify_flow_ui",
+            "control": "flow.prompt_editor",
+            "category": "ambiguous",
+            "observed_cardinality": 999999,
+        },
+    ):
+        with pytest.raises(ValidationError):
+            FlowPreflightResult.failure(**cast(Any, base | {"primary_failure": unsafe}))
+
+
+@pytest.mark.parametrize(
+    ("error", "category"),
+    (
+        (FlowUnexpectedStateError(failed_step="navigate_flow"), "route_mismatch"),
+        (FlowAuthenticationTimeoutError(), "authentication_required"),
+        (FlowUiContractError(), "locator_contract_failed"),
+        (FlowDiagnosticSanitizationError(), "diagnostic_failure"),
+    ),
+)
+def test_typed_runtime_failures_have_safe_default_primary_categories(
+    error: object, category: str
+) -> None:
+    assert isinstance(error, Exception)
+    assert getattr(error, "primary_failure").category == category
+
+
+def test_workspace_failure_category_is_distinct_from_route_mismatch() -> None:
+    error = FlowUnexpectedStateError(
+        failed_step="navigate_flow", failure_category="workspace_mismatch"
+    )
+
+    assert error.primary_failure is not None
+    assert error.primary_failure.phase == "navigate_flow"
+    assert error.primary_failure.category == "workspace_mismatch"
+
+
+def test_failure_factory_serializes_safe_default_root_without_exception_text() -> None:
+    result = FlowPreflightResult.failure(
+        status="authentication_required",
+        authenticated=False,
+        ui_ready=False,
+        failed_step="await_manual_authentication",
+        timestamp=TIMESTAMP,
+    )
+
+    payload = result.model_dump(by_alias=True, mode="json", exclude_none=False)
+
+    assert payload["primaryFailure"]["category"] == "authentication_required"
+    assert payload["primaryFailure"]["phase"] == "await_manual_authentication"
+    assert "diagnosticProcessing" not in payload
 
 
 @pytest.mark.parametrize("status", ("ready", *NON_READY_STATUSES))

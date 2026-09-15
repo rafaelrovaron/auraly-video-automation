@@ -26,6 +26,7 @@ from auraly_pipeline.flow.runtime import (
     FlowBrowserSession,
     PRODUCTION_TARGET,
     _FlowRuntimeTarget,
+    _RawTraceState,
     _classify_url,
     _local_test_target,
     _workspace_identity_for_url,
@@ -34,6 +35,7 @@ from auraly_pipeline.flow.runtime import (
 from auraly_pipeline.flow import runtime as runtime_module
 from auraly_pipeline.flow.generation_domain import FlowWorkspaceIdentity
 from auraly_pipeline.flow.generation_locators import _local_test_target as local_locator_target
+from auraly_pipeline.flow.domain import FlowPrimaryFailure
 from tests.flow_browser_support import fake_flow_url
 
 
@@ -133,6 +135,37 @@ def test_workspace_preflight_checks_only_live_pre_generation_controls(
     ).run()
 
     assert observation.status == "ready"
+
+
+def test_workspace_locator_root_survives_failed_trusted_evidence_capture(
+    tmp_path: Path,
+) -> None:
+    """No identity mask must not turn a known missing upload control into an unknown failure."""
+    workspace_path = "project/4f4aeb44-ea73-43f9-b622-77080a525fe8"
+    workspace_url = (
+        Path(__file__).parent / "fakes" / "flow-generation" / "failed-grid.html"
+    ).resolve(strict=True).as_uri()
+    target = _local_test_target(
+        navigation_url=fake_flow_url("ready.html"),
+        flow_url=fake_flow_url("ready.html"),
+        login_urls=(fake_flow_url("login-required.html"),),
+        workspace_urls={workspace_path: workspace_url},
+    )
+
+    with pytest.raises(FlowUnexpectedStateError) as caught:
+        GoogleFlowRuntime(
+            config(tmp_path, workspace_path=workspace_path),
+            _target=target,
+            _locator_target=local_locator_target(workspace_url),
+        ).run()
+
+    assert caught.value.primary_failure is not None
+    assert caught.value.primary_failure.phase == "verify_flow_ui"
+    assert caught.value.primary_failure.control == "flow.upload_menu_button"
+    assert caught.value.primary_failure.category == "missing"
+    assert caught.value.primary_failure.observed_cardinality == 0
+    assert caught.value.failed_step == "sanitize_diagnostics"
+    assert caught.value.evidence == FlowFailureEvidence(trusted_page=True)
 
 
 def test_direct_canonical_flow_navigation_is_accepted(tmp_path: Path) -> None:
@@ -311,12 +344,16 @@ def test_local_workspace_target_rejects_untrusted_suffixes_and_wrong_bindings(tm
     )
 
     with FlowBrowserSession(config(tmp_path), _target=target) as session:
-        with pytest.raises(FlowUnexpectedStateError):
+        with pytest.raises(FlowUnexpectedStateError) as wrong_binding:
             session.open_workspace(wrong_workspace)
-        with pytest.raises(FlowUnexpectedStateError):
+        with pytest.raises(FlowUnexpectedStateError) as wrong_identity:
             session.open_workspace(
                 workspace.model_copy(update={"fingerprint": "0" * 64})
             )
+    assert wrong_binding.value.primary_failure is not None
+    assert wrong_binding.value.primary_failure.category == "workspace_mismatch"
+    assert wrong_identity.value.primary_failure is not None
+    assert wrong_identity.value.primary_failure.category == "workspace_mismatch"
 
 
 def test_login_timeout_has_no_screenshot_or_trace(tmp_path: Path) -> None:
@@ -591,6 +628,35 @@ def test_close_failure_after_trusted_ui_failure_preserves_managed_evidence_and_t
     assert context.manager_exit_calls == 1
 
 
+def test_close_failure_preserves_the_safe_locator_root(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = local_target("ready.html")
+    page = _FakePage(url=target.flow_url, ready=True)
+    context = _FakeContext(page=page, close_error=RuntimeError("private close failure"))
+    primary = FlowPrimaryFailure(
+        phase="verify_flow_ui",
+        control="flow.upload_menu_button",
+        category="missing",
+        expected_cardinality=1,
+        observed_cardinality=0,
+    )
+
+    def missing_upload(_page: object, _name: object) -> object:
+        raise FlowUiContractError(primary_failure=primary)
+
+    monkeypatch.setattr(runtime_module, "resolve_required_locator", missing_upload)
+
+    with pytest.raises(FlowUnexpectedStateError) as caught:
+        GoogleFlowRuntime(
+            config(tmp_path), _target=target, _playwright_factory=_playwright_factory(context)
+        ).run()
+
+    assert caught.value.failed_step == "close_browser"
+    assert caught.value.primary_failure == primary
+
+
 def test_runtime_uses_only_observation_methods_and_exact_evidence_calls(tmp_path: Path) -> None:
     """The source and fake boundary prevent interaction drift and pin evidence call semantics."""
     forbidden = {
@@ -754,6 +820,9 @@ def test_unlink_failure_after_evidence_redirect_is_sanitized_untrusted_failure(
     staged_traces = list(configured_trace_paths(tmp_path))
     assert error.status == "human_intervention_required"
     assert error.failed_step == "sanitize_diagnostics"
+    assert error.primary_failure is not None
+    assert error.primary_failure.phase == "verify_flow_ui"
+    assert error.primary_failure.category == "locator_contract_failed"
     assert error.authenticated is False
     assert error.trusted_page is False
     assert error.evidence.trusted_page is False
@@ -762,6 +831,48 @@ def test_unlink_failure_after_evidence_redirect_is_sanitized_untrusted_failure(
     assert str(error) == ""
     assert len(staged_traces) == 1
     assert cleanup_attempts == staged_traces
+
+
+def test_outer_raw_trace_cleanup_keeps_prior_safe_locator_root(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = local_target("ready.html")
+    page = _FakePage(url=target.flow_url, ready=True)
+    context = _FakeContext(page=page)
+    primary = FlowPrimaryFailure(
+        phase="verify_flow_ui", control="flow.generate_button", category="missing"
+    )
+
+    def missing_generate(_page: object, _name: object) -> object:
+        raise FlowUiContractError(primary_failure=primary)
+
+    def detached_trace(
+        _self: FlowBrowserSession,
+        *,
+        context: object,
+        tracing_started: bool,
+        raw_trace: _RawTraceState,
+    ) -> FlowFailureEvidence | None:
+        del context, tracing_started
+        raw_trace.path = tmp_path / "staging" / "private-trace.zip"
+        raw_trace.path.write_bytes(b"token=SECRET")
+        return None
+
+    monkeypatch.setattr(runtime_module, "resolve_required_locator", missing_generate)
+    monkeypatch.setattr(FlowBrowserSession, "capture_trusted_evidence", detached_trace)
+    monkeypatch.setattr(runtime_module, "_remove_raw_trace", lambda _path: False)
+
+    with pytest.raises(FlowUnexpectedStateError) as caught:
+        GoogleFlowRuntime(
+            config(tmp_path), _target=target, _playwright_factory=_playwright_factory(context)
+        ).run()
+
+    assert caught.value.failed_step == "sanitize_diagnostics"
+    assert caught.value.primary_failure == primary
+    assert caught.value.evidence.screenshot_png is None
+    assert caught.value.evidence.raw_trace_path is None
+    assert "SECRET" not in str(caught.value)
 
 
 def test_close_failure_cannot_replace_raw_trace_cleanup_failure(
@@ -818,6 +929,29 @@ def test_screenshot_error_fails_closed_as_sanitization_failure_without_orphan(
     assert context.close_calls == 1
     assert context.manager_exit_calls == 1
     assert str(error) == ""
+
+
+def test_close_failure_after_diagnostic_error_keeps_sanitizer_failure_distinct(
+    tmp_path: Path,
+) -> None:
+    target = local_target("ready.html")
+    page = _FakePage(
+        url=target.flow_url,
+        empty_roles={"main"},
+        screenshot_error=RuntimeError("private screenshot failure"),
+    )
+    context = _FakeContext(page=page, close_error=RuntimeError("private close failure"))
+
+    with pytest.raises(FlowUnexpectedStateError) as caught:
+        GoogleFlowRuntime(
+            config(tmp_path), _target=target, _playwright_factory=_playwright_factory(context)
+        ).run()
+
+    assert caught.value.failed_step == "sanitize_diagnostics"
+    assert caught.value.primary_failure is not None
+    assert caught.value.primary_failure.phase == "verify_flow_ui"
+    assert caught.value.primary_failure.category == "locator_contract_failed"
+    assert caught.value.evidence == FlowFailureEvidence(trusted_page=True)
 
 
 def test_transient_screenshot_error_retries_once_and_preserves_trusted_evidence(

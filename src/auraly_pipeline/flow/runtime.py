@@ -16,7 +16,7 @@ from uuid import uuid4
 from playwright.sync_api import BrowserContext, Locator, Page, Playwright, sync_playwright
 
 from .config import FlowRuntimeConfig
-from .generation_domain import FlowWorkspaceIdentity
+from .generation_domain import FlowGenerationUiContractError, FlowWorkspaceIdentity
 from .generation_locators import (
     _GenerationLocatorTarget,
     _PRODUCTION_GENERATION_TARGET,
@@ -30,8 +30,10 @@ from .domain import (
     FlowAuthenticationTimeoutError,
     FlowBrowserLaunchError,
     FlowFailureEvidence,
+    FlowPrimaryFailure,
     FlowRuntimeError,
     FlowRuntimeObservation,
+    FlowUiContractError,
     FlowUnexpectedStateError,
 )
 from .locators import REQUIRED_FLOW_LOCATORS, blocking_overlay_present, resolve_account_identity_masks
@@ -213,7 +215,9 @@ class FlowBrowserSession:
             timeout=self._config.navigation_timeout_seconds * 1000,
         )
         if self.workspace_identity() != workspace:
-            raise FlowUnexpectedStateError(failed_step="navigate_flow")
+            raise FlowUnexpectedStateError(
+                failed_step="navigate_flow", failure_category="workspace_mismatch"
+            )
 
     def _await_authenticated_flow_page(self) -> None:
         deadline = self._monotonic() + self._config.login_timeout_seconds
@@ -454,6 +458,18 @@ class GoogleFlowRuntime:
                 observation = FlowRuntimeObservation()
             except FlowRuntimeError as caught:
                 failure = self._route_safe_failure(caught, page)
+            except FlowGenerationUiContractError as caught:
+                failure = self._route_safe_failure(
+                    FlowUiContractError(
+                        primary_failure=(
+                            caught.primary_failure
+                            or FlowPrimaryFailure(
+                                phase="verify_flow_ui", category="locator_contract_failed"
+                            )
+                        )
+                    ),
+                    page,
+                )
             except Exception:
                 if trusted_page:
                     failure = self._route_safe_failure(
@@ -476,17 +492,31 @@ class GoogleFlowRuntime:
             if failure is not None:
                 failure = self._route_safe_failure(failure, page)
                 if failure.trusted_page and page is not None:
-                    evidence = session.capture_trusted_evidence(
-                        context=context,
-                        tracing_started=tracing_started,
-                        raw_trace=raw_trace,
-                    )
-                    tracing_started = False
-                    if evidence is None:
-                        failure = self._route_safe_failure(failure, page)
+                    try:
+                        evidence = session.capture_trusted_evidence(
+                            context=context,
+                            tracing_started=tracing_started,
+                            raw_trace=raw_trace,
+                        )
+                    except FlowRuntimeError as diagnostic_error:
+                        failure = (
+                            FlowUnexpectedStateError(
+                                failed_step="sanitize_diagnostics",
+                                authenticated=diagnostic_error.authenticated,
+                                trusted_page=diagnostic_error.trusted_page,
+                                evidence=diagnostic_error.evidence,
+                                primary_failure=failure.primary_failure,
+                            )
+                            if diagnostic_error.failed_step == "sanitize_diagnostics"
+                            else self._route_safe_failure(diagnostic_error, page)
+                        )
                     else:
-                        failure.evidence = evidence
-                        raw_trace.attached = evidence.raw_trace_path is not None
+                        tracing_started = False
+                        if evidence is None:
+                            failure = self._route_safe_failure(failure, page)
+                        else:
+                            failure.evidence = evidence
+                            raw_trace.attached = evidence.raw_trace_path is not None
                 elif tracing_started:
                     session.stop_trace_without_artifact(context)
                     tracing_started = False
@@ -504,6 +534,8 @@ class GoogleFlowRuntime:
                     trusted_page=trusted_page and page is not None and session.current_page_is_flow(),
                 )
                 if raw_trace_cleanup_failure is not None and not base_exception_escaping:
+                    if failure is not None:
+                        raw_trace_cleanup_failure.primary_failure = failure.primary_failure
                     failure = raw_trace_cleanup_failure
                     observation = None
             close_failed = session.close()
@@ -511,10 +543,16 @@ class GoogleFlowRuntime:
         if close_failed:
             close_failure = self._close_failure(failure, page, trusted_page)
             if close_failure.trusted_page:
-                failure = close_failure
+                if failure is None or failure.failed_step != "sanitize_diagnostics":
+                    failure = close_failure
             else:
                 cleanup_failure = session.discard_raw_trace(raw_trace, trusted_page=False)
-                failure = cleanup_failure if cleanup_failure is not None else close_failure
+                if cleanup_failure is not None:
+                    if failure is not None:
+                        cleanup_failure.primary_failure = failure.primary_failure
+                    failure = cleanup_failure
+                elif failure is None or failure.failed_step != "sanitize_diagnostics":
+                    failure = close_failure
             observation = None
 
         if failure is not None:
@@ -564,6 +602,9 @@ class GoogleFlowRuntime:
             authenticated=trusted_page,
             trusted_page=trusted_page,
             evidence=evidence,
+            primary_failure=(
+                previous_failure.primary_failure if previous_failure is not None else None
+            ),
         )
 
 def _classify_url(url: str, target: _FlowRuntimeTarget) -> Literal["flow", "login", "unexpected"]:
@@ -615,7 +656,9 @@ def _workspace_identity_for_url(url: str) -> FlowWorkspaceIdentity:
 def _workspace_identity_for_path(workspace_path: str) -> FlowWorkspaceIdentity:
     """Build a safe immutable identity after the origin/query/fragment policy has been checked."""
     if _SAFE_WORKSPACE_PATH.fullmatch(workspace_path) is None:
-        raise FlowUnexpectedStateError(failed_step="navigate_flow")
+        raise FlowUnexpectedStateError(
+            failed_step="navigate_flow", failure_category="workspace_mismatch"
+        )
     return FlowWorkspaceIdentity(
         workspace_path=workspace_path,
         fingerprint=hashlib.sha256(workspace_path.encode("utf-8")).hexdigest(),
@@ -625,11 +668,15 @@ def _workspace_identity_for_path(workspace_path: str) -> FlowWorkspaceIdentity:
 def _workspace_url_for_target(workspace: FlowWorkspaceIdentity, target: _FlowRuntimeTarget) -> str:
     """Resolve a workspace solely from its validated safe identity and immutable target policy."""
     if _workspace_identity_for_path(workspace.workspace_path) != workspace:
-        raise FlowUnexpectedStateError(failed_step="navigate_flow")
+        raise FlowUnexpectedStateError(
+            failed_step="navigate_flow", failure_category="workspace_mismatch"
+        )
     if target.workspace_urls is not None:
         local_workspace_url = dict(target.workspace_urls).get(workspace.workspace_path)
         if local_workspace_url is None:
-            raise FlowUnexpectedStateError(failed_step="navigate_flow")
+            raise FlowUnexpectedStateError(
+                failed_step="navigate_flow", failure_category="workspace_mismatch"
+            )
         return local_workspace_url
     if workspace.workspace_path.startswith("project/"):
         if target.project_origin is None:

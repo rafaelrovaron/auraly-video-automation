@@ -163,6 +163,46 @@ def test_live_upload_menu_button_ambiguity_or_absence_fails_closed(
         )
 
 
+@pytest.mark.parametrize(
+    ("mutation", "category", "observed"),
+    (
+        ("document.getElementById('upload-menu').remove()", "missing", 0),
+        (
+            "document.querySelector('main').insertAdjacentHTML('beforeend', document.getElementById('upload-menu').outerHTML)",
+            "ambiguous",
+            "2+",
+        ),
+    ),
+)
+def test_upload_failure_exposes_only_safe_cardinality_and_control(
+    flow_generation_page: Page,
+    mutation: str,
+    category: str,
+    observed: int | str,
+) -> None:
+    """A missing or doubled exact upload entry point must survive as structured facts."""
+    flow_generation_page.goto(fake_generation_url("live-preflight.html"))
+    flow_generation_page.evaluate(mutation)
+
+    with pytest.raises(FlowGenerationUiContractError) as caught:
+        locator_module.resolve_reference_upload_control(
+            flow_generation_page, _target=LOCAL_FLOW_TARGET
+        )
+
+    assert caught.value.primary_failure is not None
+    assert caught.value.primary_failure.model_dump(by_alias=True, exclude_none=False) == {
+        "phase": "verify_flow_ui",
+        "control": "flow.upload_menu_button",
+        "category": category,
+        "expectedCardinality": 1,
+        "observedCardinality": observed,
+        "visible": None,
+        "enabled": None,
+        "ambiguityDetected": category == "ambiguous",
+        "unsafeFallbackRequired": True,
+    }
+
+
 def test_live_upload_menu_item_ambiguity_fails_closed(flow_generation_page: Page) -> None:
     """Multiple Enviar actions must not be reduced to a positional filechooser click."""
     flow_generation_page.goto(fake_generation_url("live-preflight.html"))
@@ -195,6 +235,97 @@ def test_live_upload_menu_item_requires_one_menu(flow_generation_page: Page) -> 
             flow_generation_page,
             _target=LOCAL_FLOW_TARGET,
         )
+
+
+@pytest.mark.parametrize(
+    ("mutation", "category", "observed"),
+    (
+        ("document.getElementById('send-upload').remove()", "missing", 0),
+        (
+            "document.querySelector('[role=menu]').insertAdjacentHTML('beforeend', '<button role=menuitem>Enviar</button>')",
+            "ambiguous",
+            "2+",
+        ),
+    ),
+)
+def test_upload_menuitem_failure_names_exact_safe_control(
+    flow_generation_page: Page,
+    mutation: str,
+    category: str,
+    observed: int | str,
+) -> None:
+    flow_generation_page.goto(fake_generation_url("live-preflight.html"))
+    flow_generation_page.get_by_role(
+        "button", name="Menu para adicionar arquivos", exact=True
+    ).click()
+    flow_generation_page.evaluate(mutation)
+
+    with pytest.raises(FlowGenerationUiContractError) as caught:
+        locator_module.resolve_upload_menu_item(
+            flow_generation_page, _target=LOCAL_FLOW_TARGET
+        )
+
+    assert caught.value.primary_failure is not None
+    assert caught.value.primary_failure.control == "flow.upload_menuitem_send"
+    assert caught.value.primary_failure.category == category
+    assert caught.value.primary_failure.observed_cardinality == observed
+
+
+@pytest.mark.parametrize(
+    ("mutation", "control", "category", "observed"),
+    (
+        ("document.querySelector('flow-rich-text-editor').remove()", "flow.prompt_host", "missing", 0),
+        (
+            "document.querySelector('main').insertAdjacentHTML('beforeend', '<flow-rich-text-editor><div contenteditable=true></div></flow-rich-text-editor>')",
+            "flow.prompt_host",
+            "ambiguous",
+            "2+",
+        ),
+        (
+            "document.querySelector('flow-rich-text-editor [contenteditable=true]').remove()",
+            "flow.prompt_editor",
+            "missing",
+            0,
+        ),
+        (
+            "document.querySelector('flow-rich-text-editor').insertAdjacentHTML('beforeend', '<div contenteditable=true></div>')",
+            "flow.prompt_editor",
+            "ambiguous",
+            "2+",
+        ),
+        ("document.getElementById('generate-live').remove()", "flow.generate_button", "missing", 0),
+        (
+            "document.getElementById('generate-live').setAttribute('aria-disabled', 'bogus')",
+            "flow.generate_button",
+            "unexpected_state",
+            1,
+        ),
+    ),
+)
+def test_prompt_and_generate_failures_keep_specific_safe_control_facts(
+    flow_generation_page: Page,
+    mutation: str,
+    control: str,
+    category: str,
+    observed: int | str,
+) -> None:
+    flow_generation_page.goto(fake_generation_url("live-preflight.html"))
+    flow_generation_page.evaluate(mutation)
+
+    with pytest.raises(FlowGenerationUiContractError) as caught:
+        if control == "flow.generate_button":
+            locator_module.resolve_preflight_generate_control(
+                flow_generation_page, _target=LOCAL_FLOW_TARGET
+            )
+        else:
+            resolve_local_locator(resolve_generation_prompt, flow_generation_page)
+
+    assert caught.value.primary_failure is not None
+    assert caught.value.primary_failure.control == control
+    assert caught.value.primary_failure.category == category
+    assert caught.value.primary_failure.expected_cardinality == 1
+    assert caught.value.primary_failure.observed_cardinality == observed
+    assert caught.value.primary_failure.ambiguity_detected is (category == "ambiguous")
 
 
 def test_live_prompt_uses_one_scoped_editor_and_ignores_global_editor(

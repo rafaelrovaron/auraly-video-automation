@@ -1141,6 +1141,8 @@ def _with_diagnostic_references(
         ui_ready=result.ui_ready,
         failed_step=failed_step,
         failed_locator=result.failed_locator,
+        primary_failure=result.primary_failure,
+        diagnostic_processing=result.diagnostic_processing or "sanitized",
         diagnostic_run_id=run_id,
         screenshot=screenshot,
         trace=trace,

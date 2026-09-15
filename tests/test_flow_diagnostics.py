@@ -57,8 +57,10 @@ ALLOWED_RESULT_KEYS = {
     "authenticated",
     "uiReady",
     "failedStep",
-    "failedLocator",
-    "diagnosticRunId",
+"failedLocator",
+"primaryFailure",
+"diagnosticProcessing",
+"diagnosticRunId",
     "screenshot",
     "trace",
     "timestamp",
@@ -1597,6 +1599,9 @@ def test_result_json_contains_only_allowlisted_public_fields_and_no_private_valu
     payload = json.loads((_run_dir(tmp_path, published) / "result.json").read_text("utf-8"))
     serialized = json.dumps(payload, sort_keys=True).encode("utf-8")
     assert set(payload) == ALLOWED_RESULT_KEYS
+    assert payload["primaryFailure"]["phase"] == "verify_flow_ui"
+    assert payload["primaryFailure"]["category"] == "unexpected_state"
+    assert payload["diagnosticProcessing"] == "sanitized"
     assert payload["diagnosticRunId"] == published.diagnostic_run_id
     assert payload["screenshot"] == "screenshot.png"
     assert payload["trace"] == "trace.zip"

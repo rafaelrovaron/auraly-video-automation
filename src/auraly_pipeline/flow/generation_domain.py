@@ -11,6 +11,7 @@ from weakref import WeakKeyDictionary
 from pydantic import Field, field_validator
 
 from auraly_pipeline.models import ContractModel
+from .domain import FlowPrimaryFailure
 
 
 FlowGenerationLocatorName = Literal[
@@ -74,7 +75,8 @@ _LOCATOR_NAMES: frozenset[str] = frozenset(
     }
 )
 _ERROR_FACTS: WeakKeyDictionary[
-    BaseException, tuple[FlowGenerationFailedStep, FlowGenerationLocatorName | None]
+    BaseException,
+    tuple[FlowGenerationFailedStep, FlowGenerationLocatorName | None, FlowPrimaryFailure | None],
 ] = WeakKeyDictionary()
 _EMPTY_PERSISTED_FIELDS: Mapping[str, object] = MappingProxyType({})
 
@@ -135,13 +137,14 @@ class FlowGenerationRuntimeError(RuntimeError):
         *,
         failed_step: FlowGenerationFailedStep,
         failed_locator: FlowGenerationLocatorName | None = None,
+        primary_failure: FlowPrimaryFailure | None = None,
     ) -> None:
         if failed_step not in _FAILED_STEPS:
             raise ValueError("generation error requires an allowlisted failed step")
         if failed_locator is not None and failed_locator not in _LOCATOR_NAMES:
             raise ValueError("generation error requires an allowlisted locator")
         RuntimeError.__init__(self)
-        _ERROR_FACTS[self] = (failed_step, failed_locator)
+        _ERROR_FACTS[self] = (failed_step, failed_locator, primary_failure)
 
     @property
     def failed_step(self) -> FlowGenerationFailedStep:
@@ -151,8 +154,12 @@ class FlowGenerationRuntimeError(RuntimeError):
     def failed_locator(self) -> FlowGenerationLocatorName | None:
         return _ERROR_FACTS[self][1]
 
+    @property
+    def primary_failure(self) -> FlowPrimaryFailure | None:
+        return _ERROR_FACTS[self][2]
+
     def __setattr__(self, name: str, value: object) -> None:
-        if name in {"_failed_step", "_failed_locator"}:
+        if name in {"_failed_step", "_failed_locator", "_primary_failure"}:
             raise AttributeError("generation error facts are read-only")
         super().__setattr__(name, value)
 
@@ -165,8 +172,13 @@ class FlowGenerationUiContractError(FlowGenerationRuntimeError):
         *,
         failed_step: FlowGenerationFailedStep = "observe_candidates",
         failed_locator: FlowGenerationLocatorName | None = None,
+        primary_failure: FlowPrimaryFailure | None = None,
     ) -> None:
-        super().__init__(failed_step=failed_step, failed_locator=failed_locator)
+        super().__init__(
+            failed_step=failed_step,
+            failed_locator=failed_locator,
+            primary_failure=primary_failure,
+        )
 
 
 class FlowDispatchAmbiguousError(FlowGenerationRuntimeError):

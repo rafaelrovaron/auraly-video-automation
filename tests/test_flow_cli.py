@@ -22,6 +22,7 @@ from auraly_pipeline.flow import (
     FlowPreflightService,
     FlowPreflightStatus,
 )
+from auraly_pipeline.flow.domain import FlowPrimaryFailure
 
 
 runner = CliRunner()
@@ -41,6 +42,7 @@ _PUBLIC_RESULT_KEYS = {
     "trace",
     "timestamp",
 }
+_FAILURE_RESULT_KEYS = _PUBLIC_RESULT_KEYS | {"primaryFailure"}
 _ANSI_ESCAPE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 
 
@@ -154,7 +156,6 @@ def test_flow_preflight_emits_one_json_object_and_exact_exit_code(
 
     assert invocation.exit_code == exit_code
     assert json.loads(invocation.stdout)["status"] == status
-    assert invocation.stdout.rstrip().count("{") == 1
 
 
 def test_flow_preflight_serializes_aliases_and_explicit_ready_nulls(
@@ -204,6 +205,39 @@ def test_flow_preflight_preserves_relative_diagnostic_artifacts(
     assert payload["trace"] == "trace.zip"
 
 
+def test_flow_preflight_reports_only_safe_locator_root(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    result = FlowPreflightResult.failure(
+        status="human_intervention_required",
+        authenticated=True,
+        ui_ready=False,
+        failed_step="sanitize_diagnostics",
+        primary_failure=FlowPrimaryFailure(
+            phase="verify_flow_ui",
+            control="flow.prompt_editor",
+            category="ambiguous",
+            expected_cardinality=1,
+            observed_cardinality="2+",
+            ambiguity_detected=True,
+            unsafe_fallback_required=True,
+        ),
+        diagnostic_processing="failed",
+        timestamp=_TIMESTAMP,
+    )
+    monkeypatch.setattr(FlowPreflightService, "preflight", preflight_returning(result))
+
+    invocation = runner.invoke(app, ["flow", "preflight"])
+    payload = json.loads(invocation.stdout)
+
+    assert invocation.exit_code == 1
+    assert payload["primaryFailure"]["control"] == "flow.prompt_editor"
+    assert payload["primaryFailure"]["category"] == "ambiguous"
+    assert payload["diagnosticProcessing"] == "failed"
+    assert payload["screenshot"] is None and payload["trace"] is None
+    assert "SECRET" not in invocation.stdout
+
+
 def test_flow_preflight_keeps_result_only_failure_nulls(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -215,8 +249,10 @@ def test_flow_preflight_keeps_result_only_failure_nulls(
 
     payload = json.loads(runner.invoke(app, ["flow", "preflight"]).stdout)
 
-    assert set(payload) == _PUBLIC_RESULT_KEYS
+    assert set(payload) == _FAILURE_RESULT_KEYS
     assert payload["failedStep"] == "await_manual_authentication"
+    assert payload["primaryFailure"]["category"] == "authentication_required"
+    assert "diagnosticProcessing" not in payload
     assert {
         key: payload[key]
         for key in ("failedLocator", "diagnosticRunId", "screenshot", "trace")
@@ -485,7 +521,6 @@ def test_flow_preflight_unexpected_exception_emits_one_sanitized_boundary_failur
     )
 
     assert invocation.exit_code == 1
-    assert invocation.stdout.rstrip().count("{") == 1
     payload = json.loads(invocation.stdout)
     timestamp = datetime.fromisoformat(payload.pop("timestamp").replace("Z", "+00:00"))
     assert timestamp.tzinfo is not None
@@ -498,6 +533,17 @@ def test_flow_preflight_unexpected_exception_emits_one_sanitized_boundary_failur
         "uiReady": False,
         "failedStep": "validate_config",
         "failedLocator": None,
+        "primaryFailure": {
+            "phase": "validate_config",
+            "control": None,
+            "category": "unexpected_state",
+            "expectedCardinality": None,
+            "observedCardinality": None,
+            "visible": None,
+            "enabled": None,
+            "ambiguityDetected": False,
+            "unsafeFallbackRequired": False,
+        },
         "diagnosticRunId": None,
         "screenshot": None,
         "trace": None,

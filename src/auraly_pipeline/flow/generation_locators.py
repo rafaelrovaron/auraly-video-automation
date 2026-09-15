@@ -15,6 +15,7 @@ from .generation_domain import (
     FlowGenerationLocatorName,
     FlowGenerationUiContractError,
 )
+from .domain import FlowFailureCategory, FlowPreflightControl, FlowPrimaryFailure
 from .locators import LocatorProtocol, PageProtocol, SemanticRole, blocking_overlay_present
 
 
@@ -158,8 +159,19 @@ def resolve_reference_upload_control(
     direct = _actionable_candidates(page.get_by_label("Reference image", exact=True))
     menu = _actionable_candidates_for_roles(page, "button", _LIVE_UPLOAD_BUTTON_NAMES)
     if len(direct) + len(menu) != 1:
+        observed = len(direct) + len(menu)
         raise FlowGenerationUiContractError(
-            failed_step="upload_reference", failed_locator="REFERENCE_INPUT"
+            failed_step="upload_reference",
+            failed_locator="REFERENCE_INPUT",
+            primary_failure=FlowPrimaryFailure(
+                phase="verify_flow_ui",
+                control="flow.upload_menu_button",
+                category="missing" if observed == 0 else "ambiguous",
+                expected_cardinality=1,
+                observed_cardinality=_safe_cardinality(observed),
+                ambiguity_detected=observed > 1,
+                unsafe_fallback_required=True,
+            ),
         )
     if direct:
         return FlowReferenceUploadControl(kind="input", locator=cast(_LocatorT, direct[0]))
@@ -178,6 +190,7 @@ def resolve_upload_menu_item(
         _actionable_candidates(page.get_by_role("menu")),
         locator_name="REFERENCE_INPUT",
         failed_step="upload_reference",
+        primary_control="flow.upload_menuitem_send",
     )
     return cast(
         _LocatorT,
@@ -190,6 +203,7 @@ def resolve_upload_menu_item(
             ),
             locator_name="REFERENCE_INPUT",
             failed_step="upload_reference",
+            primary_control="flow.upload_menuitem_send",
         ),
     )
 
@@ -225,7 +239,9 @@ def resolve_generation_prompt(
     )
     if len(hosts) > 1:
         raise FlowGenerationUiContractError(
-            failed_step="fill_prompt", failed_locator="GENERATION_PROMPT"
+            failed_step="fill_prompt",
+            failed_locator="GENERATION_PROMPT",
+            primary_failure=_preflight_cardinality_failure("flow.prompt_host", len(hosts)),
         )
     live: tuple[LocatorProtocol, ...] = ()
     if hosts:
@@ -233,7 +249,9 @@ def resolve_generation_prompt(
         live = _actionable_candidates(editor)
         if len(live) != 1:
             raise FlowGenerationUiContractError(
-                failed_step="fill_prompt", failed_locator="GENERATION_PROMPT"
+                failed_step="fill_prompt",
+                failed_locator="GENERATION_PROMPT",
+                primary_failure=_preflight_cardinality_failure("flow.prompt_editor", len(live)),
             )
     return cast(
         _LocatorT,
@@ -242,6 +260,7 @@ def resolve_generation_prompt(
             (*legacy, *live),
             locator_name="GENERATION_PROMPT",
             failed_step="fill_prompt",
+            primary_control="flow.prompt_host" if not hosts else "flow.prompt_editor",
         ),
     )
 
@@ -271,13 +290,24 @@ def resolve_preflight_generate_control(
 ) -> _LocatorT:
     """Resolve one visible exact Generate control while permitting its initial disabled state."""
     _require_safe_generation_route(page, _target)
-    candidates: list[LocatorProtocol] = []
+    exact_controls: list[LocatorProtocol] = []
     for name in _GENERATE_NAMES:
-        candidates.extend(
-            candidate
-            for candidate in page.get_by_role("button", name=name, exact=True).all()
-            if _is_observable(candidate)
-        )
+        exact_controls.extend(page.get_by_role("button", name=name, exact=True).all())
+    candidates = [candidate for candidate in exact_controls if _is_observable(candidate)]
+    if not candidates:
+        if len(exact_controls) == 1:
+            control = exact_controls[0]
+            raise FlowGenerationUiContractError(
+                failed_step="dispatch_generate",
+                failed_locator="GENERATE_CONTROL",
+                primary_failure=_preflight_cardinality_failure(
+                    "flow.generate_button",
+                    1,
+                    category="unexpected_state" if control.is_visible() else "not_visible",
+                    visible=control.is_visible(),
+                    enabled=control.is_enabled(),
+                ),
+            )
     return cast(
         _LocatorT,
         _require_unique_candidates(
@@ -285,6 +315,7 @@ def resolve_preflight_generate_control(
             candidates,
             locator_name="GENERATE_CONTROL",
             failed_step="dispatch_generate",
+            primary_control="flow.generate_button",
         ),
     )
 
@@ -424,10 +455,19 @@ def _require_unique_candidates(
     *,
     locator_name: FlowGenerationLocatorName,
     failed_step: FlowGenerationFailedStep,
+    primary_control: FlowPreflightControl | None = None,
 ) -> LocatorProtocol:
     _raise_if_blocked(page, failed_step=failed_step, locator_name=locator_name)
     if len(candidates) != 1:
-        raise FlowGenerationUiContractError(failed_step=failed_step, failed_locator=locator_name)
+        raise FlowGenerationUiContractError(
+            failed_step=failed_step,
+            failed_locator=locator_name,
+            primary_failure=(
+                None
+                if primary_control is None
+                else _preflight_cardinality_failure(primary_control, len(candidates))
+            ),
+        )
     return candidates[0]
 
 
@@ -443,6 +483,31 @@ def _raise_if_blocked(
 
 def _actionable_candidates(locator: LocatorProtocol) -> tuple[LocatorProtocol, ...]:
     return tuple(candidate for candidate in locator.all() if _is_actionable(candidate))
+
+
+def _safe_cardinality(count: int) -> Literal[0, 1, "2+"]:
+    return 0 if count == 0 else 1 if count == 1 else "2+"
+
+
+def _preflight_cardinality_failure(
+    control: FlowPreflightControl,
+    count: int,
+    *,
+    category: FlowFailureCategory | None = None,
+    visible: bool | None = None,
+    enabled: bool | None = None,
+) -> FlowPrimaryFailure:
+    return FlowPrimaryFailure(
+        phase="verify_flow_ui",
+        control=control,
+        category=category if category is not None else "missing" if count == 0 else "ambiguous",
+        expected_cardinality=1,
+        observed_cardinality=_safe_cardinality(count),
+        visible=visible,
+        enabled=enabled,
+        ambiguity_detected=count > 1,
+        unsafe_fallback_required=True,
+    )
 
 
 def _actionable_candidates_for_roles(

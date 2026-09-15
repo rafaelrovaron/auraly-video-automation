@@ -141,16 +141,23 @@ class FlowPreflightService:
         )
         evidence = failure.evidence
         if lock_release_failed:
+            primary_failure = failure.primary_failure
             raw_trace_path = evidence.raw_trace_path
             if raw_trace_path is not None:
                 try:
                     self._raw_trace_cleanup(raw_trace_path, config.staging_root)
                 except Exception:
-                    failure = FlowDiagnosticSanitizationError()
+                    failure = FlowDiagnosticSanitizationError(
+                        primary_failure=primary_failure
+                    )
                 else:
-                    failure = FlowUnexpectedStateError(failed_step="close_browser")
+                    failure = FlowUnexpectedStateError(
+                        failed_step="close_browser", primary_failure=primary_failure
+                    )
             else:
-                failure = FlowUnexpectedStateError(failed_step="close_browser")
+                failure = FlowUnexpectedStateError(
+                    failed_step="close_browser", primary_failure=primary_failure
+                )
             evidence = FlowFailureEvidence()
         result = self._result_from_error(failure)
         return self._publish_failure(config, result, evidence=evidence)
@@ -166,12 +173,16 @@ class FlowPreflightService:
             writer = self._diagnostic_writer_factory(config.diagnostics_dir, config.staging_root)
             return writer.write_failure(result, evidence=evidence)
         except Exception:
-            fallback = self._result_from_error(FlowDiagnosticSanitizationError())
+            fallback = self._result_from_error(
+                FlowDiagnosticSanitizationError(primary_failure=result.primary_failure)
+            )
             try:
                 writer = self._diagnostic_writer_factory(config.diagnostics_dir, config.staging_root)
                 return writer.write_failure(fallback, evidence=FlowFailureEvidence())
             except Exception:
-                return self._result_from_error(FlowDiagnosticSanitizationError())
+                return self._result_from_error(
+                    FlowDiagnosticSanitizationError(primary_failure=result.primary_failure)
+                )
 
     def _result_from_error(self, error: FlowRuntimeError) -> FlowPreflightResult:
         return FlowPreflightResult.failure(
@@ -180,5 +191,6 @@ class FlowPreflightService:
             ui_ready=error.ui_ready,
             failed_step=error.failed_step,
             failed_locator=error.failed_locator,
+            primary_failure=error.primary_failure,
             timestamp=self._now(),
         )
