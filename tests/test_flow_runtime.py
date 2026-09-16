@@ -39,6 +39,9 @@ from auraly_pipeline.flow.domain import FlowPrimaryFailure
 from tests.flow_browser_support import fake_flow_url
 
 
+_PROJECT_WORKSPACE_PATH = "project/4f4aeb44-ea73-43f9-b622-77080a525fe8"
+
+
 def config(
     tmp_path: Path,
     *,
@@ -135,6 +138,240 @@ def test_workspace_preflight_checks_only_live_pre_generation_controls(
     ).run()
 
     assert observation.status == "ready"
+
+
+@pytest.mark.parametrize(
+    ("upload_after", "blocker_until", "expected_waits"),
+    (
+        (0.5, None, [500]),
+        (0.0, 0.5, [500]),
+        (1.0, 1.5, [500, 500, 500]),
+    ),
+)
+def test_workspace_preflight_waits_for_transient_upload_and_blocker(
+    tmp_path: Path,
+    upload_after: float,
+    blocker_until: float | None,
+    expected_waits: list[int],
+) -> None:
+    clock = _Clock()
+    page = _WorkspacePage(
+        clock=clock,
+        upload_after_seconds=upload_after,
+        blocker_until_seconds=blocker_until,
+    )
+    context = _FakeContext(page=page)
+
+    observation = GoogleFlowRuntime(
+        config(tmp_path, workspace_path=_PROJECT_WORKSPACE_PATH),
+        _playwright_factory=_playwright_factory(context),
+        _monotonic=clock,
+    ).run()
+
+    assert observation.status == "ready"
+    assert page.waits == expected_waits
+    assert page.upload_menu_clicks == 1
+    assert page.escape_presses == 1
+
+
+def test_already_ready_workspace_preflight_does_not_wait(tmp_path: Path) -> None:
+    clock = _Clock()
+    page = _WorkspacePage(clock=clock, upload_after_seconds=0.0)
+
+    observation = GoogleFlowRuntime(
+        config(tmp_path, workspace_path=_PROJECT_WORKSPACE_PATH),
+        _playwright_factory=_playwright_factory(_FakeContext(page=page)),
+        _monotonic=clock,
+    ).run()
+
+    assert observation.status == "ready"
+    assert page.waits == []
+
+
+def test_workspace_preflight_retries_overlay_that_appears_during_upload_resolution(
+    tmp_path: Path,
+) -> None:
+    clock = _Clock()
+    page = _WorkspacePage(
+        clock=clock,
+        upload_after_seconds=0.0,
+        overlay_on_second_query=True,
+    )
+
+    observation = GoogleFlowRuntime(
+        config(tmp_path, workspace_path=_PROJECT_WORKSPACE_PATH),
+        _playwright_factory=_playwright_factory(_FakeContext(page=page)),
+        _monotonic=clock,
+    ).run()
+
+    assert observation.status == "ready"
+    assert page.waits == [500]
+    assert page.upload_menu_clicks == 1
+
+
+def test_workspace_preflight_rechecks_overlay_after_upload_candidate_scan(
+    tmp_path: Path,
+) -> None:
+    clock = _Clock()
+    page = _WorkspacePage(
+        clock=clock,
+        upload_after_seconds=0.0,
+        overlay_after_upload_query=True,
+    )
+
+    observation = GoogleFlowRuntime(
+        config(tmp_path, workspace_path=_PROJECT_WORKSPACE_PATH),
+        _playwright_factory=_playwright_factory(_FakeContext(page=page)),
+        _monotonic=clock,
+    ).run()
+
+    assert observation.status == "ready"
+    assert page.waits == [500]
+    assert page.upload_menu_clicks == 1
+
+
+def test_workspace_preflight_refuses_upload_that_resolves_after_deadline(
+    tmp_path: Path,
+) -> None:
+    clock = _Clock()
+    page = _WorkspacePage(
+        clock=clock,
+        upload_after_seconds=1.0,
+        advance_upload_query_after_seconds=0.5,
+        advance_upload_query_milliseconds=2000,
+    )
+
+    with pytest.raises(FlowUiContractError) as caught:
+        GoogleFlowRuntime(
+            config(tmp_path, workspace_path=_PROJECT_WORKSPACE_PATH),
+            _playwright_factory=_playwright_factory(_FakeContext(page=page)),
+            _monotonic=clock,
+        ).run()
+
+    assert page.waits == [500]
+    assert caught.value.primary_failure is not None
+    assert caught.value.primary_failure.control == "flow.upload_menu_button"
+    assert caught.value.primary_failure.category == "missing"
+    assert page.upload_menu_clicks == 0
+
+
+def test_workspace_preflight_caps_poll_to_remaining_timeout_budget(tmp_path: Path) -> None:
+    clock = _Clock()
+    page = _WorkspacePage(
+        clock=clock,
+        upload_after_seconds=None,
+        advance_upload_query_after_seconds=0.0,
+        advance_upload_query_milliseconds=1750,
+    )
+
+    with pytest.raises(FlowUiContractError):
+        GoogleFlowRuntime(
+            config(tmp_path, workspace_path=_PROJECT_WORKSPACE_PATH),
+            _playwright_factory=_playwright_factory(_FakeContext(page=page)),
+            _monotonic=clock,
+        ).run()
+
+    assert page.waits == [250]
+    assert clock.value == 2.0
+
+
+def test_missing_workspace_upload_times_out_with_original_safe_root(tmp_path: Path) -> None:
+    clock = _Clock()
+    page = _WorkspacePage(clock=clock, upload_after_seconds=None)
+
+    with pytest.raises(FlowUiContractError) as caught:
+        GoogleFlowRuntime(
+            config(tmp_path, workspace_path=_PROJECT_WORKSPACE_PATH),
+            _playwright_factory=_playwright_factory(_FakeContext(page=page)),
+            _monotonic=clock,
+        ).run()
+
+    assert page.waits == [500, 500, 500, 500]
+    assert caught.value.primary_failure is not None
+    assert caught.value.primary_failure.control == "flow.upload_menu_button"
+    assert caught.value.primary_failure.category == "missing"
+    assert caught.value.primary_failure.observed_cardinality == 0
+    assert caught.value.primary_failure.unsafe_fallback_required is True
+    assert page.upload_menu_clicks == 0
+
+
+def test_persistent_workspace_blocker_times_out_as_human_intervention(tmp_path: Path) -> None:
+    clock = _Clock()
+    page = _WorkspacePage(clock=clock, upload_after_seconds=0.0, blocker_until_seconds=3.0)
+
+    with pytest.raises(FlowUnexpectedStateError) as caught:
+        GoogleFlowRuntime(
+            config(tmp_path, workspace_path=_PROJECT_WORKSPACE_PATH),
+            _playwright_factory=_playwright_factory(_FakeContext(page=page)),
+            _monotonic=clock,
+        ).run()
+
+    assert page.waits == [500, 500, 500, 500]
+    assert caught.value.failed_step == "verify_flow_ui"
+    assert caught.value.status == "human_intervention_required"
+    assert page.upload_menu_clicks == 0
+
+
+def test_ambiguous_workspace_upload_fails_closed_without_waiting(tmp_path: Path) -> None:
+    clock = _Clock()
+    page = _WorkspacePage(clock=clock, upload_after_seconds=0.0, upload_count=2)
+
+    with pytest.raises(FlowUiContractError) as caught:
+        GoogleFlowRuntime(
+            config(tmp_path, workspace_path=_PROJECT_WORKSPACE_PATH),
+            _playwright_factory=_playwright_factory(_FakeContext(page=page)),
+            _monotonic=clock,
+        ).run()
+
+    assert page.waits == []
+    assert caught.value.primary_failure is not None
+    assert caught.value.primary_failure.control == "flow.upload_menu_button"
+    assert caught.value.primary_failure.category == "ambiguous"
+    assert caught.value.primary_failure.ambiguity_detected is True
+    assert page.upload_menu_clicks == 0
+
+
+@pytest.mark.parametrize(
+    ("redirect_url", "expected_error", "expected_category"),
+    (
+        ("https://evil.google.com/", FlowUnexpectedStateError, "route_mismatch"),
+        (
+            "https://accounts.google.com/signin/v2/identifier",
+            FlowAuthenticationTimeoutError,
+            "authentication_required",
+        ),
+        (
+            "https://flow.google.com/project/4f4aeb44-ea73-43f9-b622-77080a525fe9",
+            FlowUnexpectedStateError,
+            "workspace_mismatch",
+        ),
+    ),
+)
+def test_workspace_preflight_route_auth_and_identity_drift_do_not_wait(
+    tmp_path: Path,
+    redirect_url: str,
+    expected_error: type[Exception],
+    expected_category: str,
+) -> None:
+    clock = _Clock()
+    page = _WorkspacePage(
+        clock=clock,
+        upload_after_seconds=None,
+        redirect_on_upload_query=redirect_url,
+    )
+
+    with pytest.raises(expected_error) as caught:
+        GoogleFlowRuntime(
+            config(tmp_path, workspace_path=_PROJECT_WORKSPACE_PATH),
+            _playwright_factory=_playwright_factory(_FakeContext(page=page)),
+            _monotonic=clock,
+        ).run()
+
+    assert page.waits == []
+    assert isinstance(caught.value, (FlowUnexpectedStateError, FlowAuthenticationTimeoutError))
+    assert caught.value.primary_failure is not None
+    assert caught.value.primary_failure.category == expected_category
+    assert page.upload_menu_clicks == 0
 
 
 def test_workspace_locator_root_survives_failed_trusted_evidence_capture(
@@ -1375,6 +1612,140 @@ class _FakePage:
         if self._evidence_redirect_stage == "screenshot" and self._redirect_url is not None:
             self.url = self._redirect_url
         return b"masked-screenshot"
+
+
+class _WorkspaceLocator(_FakeLocator):
+    def __init__(
+        self,
+        *,
+        visible: bool = True,
+        enabled: bool = True,
+        candidates: list[_FakeLocator] | None = None,
+        on_click: Callable[[], None] | None = None,
+    ) -> None:
+        super().__init__(visible=visible, enabled=enabled, candidates=candidates)
+        self._on_click = on_click
+
+    def get_attribute(self, _name: str) -> None:
+        return None
+
+    def locator(self, selector: str) -> _WorkspaceLocator:
+        if selector == "[contenteditable='true']":
+            return _WorkspaceLocator(candidates=[_WorkspaceLocator()])
+        return _WorkspaceLocator(candidates=[])
+
+    def get_by_role(
+        self, role: str, *, name: str | None = None, exact: bool | None = None
+    ) -> _WorkspaceLocator:
+        if role == "menuitem" and name == "Enviar" and exact is True:
+            return _WorkspaceLocator(candidates=[_WorkspaceLocator()])
+        return _WorkspaceLocator(candidates=[])
+
+    def click(self) -> None:
+        if self._on_click is not None:
+            self._on_click()
+
+
+class _WorkspaceKeyboard:
+    def __init__(self, page: _WorkspacePage) -> None:
+        self._page = page
+
+    def press(self, key: str) -> None:
+        assert key == "Escape"
+        self._page.escape_presses += 1
+        self._page._menu_open = False
+
+
+class _WorkspacePage(_FakePage):
+    def __init__(
+        self,
+        *,
+        clock: _Clock,
+        upload_after_seconds: float | None,
+        blocker_until_seconds: float | None = None,
+        upload_count: int = 1,
+        redirect_on_upload_query: str | None = None,
+        overlay_on_second_query: bool = False,
+        overlay_after_upload_query: bool = False,
+        advance_upload_query_after_seconds: float | None = None,
+        advance_upload_query_milliseconds: int = 0,
+    ) -> None:
+        super().__init__(url="https://flow.google.com/", clock=clock)
+        self._timeline_clock = clock
+        self._upload_after_seconds = upload_after_seconds
+        self._blocker_until_seconds = blocker_until_seconds
+        self._upload_count = upload_count
+        self._redirect_on_upload_query = redirect_on_upload_query
+        self._overlay_on_second_query = overlay_on_second_query
+        self._overlay_queries = 0
+        self._overlay_after_upload_query = overlay_after_upload_query
+        self._overlay_triggered = False
+        self._advance_upload_query_after_seconds = advance_upload_query_after_seconds
+        self._advance_upload_query_milliseconds = advance_upload_query_milliseconds
+        self._upload_query_advanced = False
+        self._menu_open = False
+        self.upload_menu_clicks = 0
+        self.escape_presses = 0
+        self.keyboard = _WorkspaceKeyboard(self)
+
+    def _open_upload_menu(self) -> None:
+        self.upload_menu_clicks += 1
+        self._menu_open = True
+
+    def get_by_role(
+        self, role: str, *, name: str | None = None, exact: bool | None = None
+    ) -> _FakeLocator:
+        if role == "dialog":
+            self._overlay_queries += 1
+            if (
+                self._blocker_until_seconds is not None
+                and self._timeline_clock.value < self._blocker_until_seconds
+            ) or (
+                self._overlay_on_second_query and self._overlay_queries == 2
+            ) or (
+                self._overlay_triggered and self._timeline_clock.value < 0.5
+            ):
+                return _WorkspaceLocator(candidates=[_WorkspaceLocator()])
+        if role == "button" and name == "Menu para adicionar arquivos" and exact is True:
+            if self._redirect_on_upload_query is not None:
+                self.url = self._redirect_on_upload_query
+            if self._overlay_after_upload_query:
+                self._overlay_triggered = True
+            if (
+                not self._upload_query_advanced
+                and self._advance_upload_query_after_seconds is not None
+                and self._timeline_clock.value >= self._advance_upload_query_after_seconds
+            ):
+                self._timeline_clock.advance(self._advance_upload_query_milliseconds)
+                self._upload_query_advanced = True
+            count = (
+                self._upload_count
+                if self._upload_after_seconds is not None
+                and self._timeline_clock.value >= self._upload_after_seconds
+                else 0
+            )
+            return _WorkspaceLocator(
+                candidates=[_WorkspaceLocator(on_click=self._open_upload_menu) for _ in range(count)]
+            )
+        if role == "menu":
+            return _WorkspaceLocator(
+                candidates=[_WorkspaceLocator()] if self._menu_open else []
+            )
+        if role == "button" and name == "Generate" and exact is True:
+            return _WorkspaceLocator(candidates=[_WorkspaceLocator(enabled=False)])
+        if role == "button" and name is not None and name != "Google Account":
+            return _WorkspaceLocator(candidates=[])
+        return super().get_by_role(role, name=name, exact=exact)
+
+    def get_by_label(self, text: str, *, exact: bool | None = None) -> _FakeLocator:
+        if text in {"Reference image", "Prompt"}:
+            return _WorkspaceLocator(candidates=[])
+        return super().get_by_label(text, exact=exact)
+
+    def locator(self, selector: str) -> _WorkspaceLocator:
+        if selector == "flow-rich-text-editor":
+            return _WorkspaceLocator(candidates=[_WorkspaceLocator()])
+        return _WorkspaceLocator(candidates=[])
 
 
 class _FakeTracing:

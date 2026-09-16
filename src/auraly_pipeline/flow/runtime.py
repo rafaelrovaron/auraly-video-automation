@@ -384,8 +384,72 @@ class GoogleFlowRuntime:
     def _verify_pre_generation_ui(self, session: FlowBrowserSession) -> None:
         """Validate only controls that must exist before any provider generation."""
         page = session.page
-        session.require_current_flow_page()
-        upload = resolve_reference_upload_control(page, _target=self._locator_target)
+        workspace_path = cast(str, self._config.workspace_path)
+        workspace = _workspace_identity_for_path(workspace_path)
+        deadline = self._monotonic() + self._config.navigation_timeout_seconds
+        previous_pending: FlowRuntimeError | FlowGenerationUiContractError | None = None
+        while True:
+            session.require_current_flow_page()
+            if session.workspace_identity() != workspace:
+                raise FlowUnexpectedStateError(
+                    failed_step="navigate_flow", failure_category="workspace_mismatch"
+                )
+            if blocking_overlay_present(page):
+                pending: FlowRuntimeError | FlowGenerationUiContractError = FlowUnexpectedStateError(
+                    failed_step="verify_flow_ui", authenticated=True, trusted_page=True
+                )
+            else:
+                try:
+                    upload = resolve_reference_upload_control(page, _target=self._locator_target)
+                except FlowGenerationUiContractError as caught:
+                    primary = caught.primary_failure
+                    if (
+                        primary is not None
+                        and primary.control == "flow.upload_menu_button"
+                        and primary.category == "missing"
+                    ):
+                        pending = caught
+                    elif (
+                        primary is None
+                        and caught.failed_step == "upload_reference"
+                        and caught.failed_locator == "REFERENCE_INPUT"
+                    ):
+                        pending = FlowUnexpectedStateError(
+                            failed_step="verify_flow_ui", authenticated=True, trusted_page=True
+                        )
+                    else:
+                        raise
+                else:
+                    session.require_current_flow_page()
+                    if session.workspace_identity() != workspace:
+                        raise FlowUnexpectedStateError(
+                            failed_step="navigate_flow", failure_category="workspace_mismatch"
+                        )
+                    if blocking_overlay_present(page):
+                        pending = FlowUnexpectedStateError(
+                            failed_step="verify_flow_ui", authenticated=True, trusted_page=True
+                        )
+                    else:
+                        session.require_current_flow_page()
+                        if session.workspace_identity() != workspace:
+                            raise FlowUnexpectedStateError(
+                                failed_step="navigate_flow", failure_category="workspace_mismatch"
+                            )
+                        if self._monotonic() > deadline:
+                            raise previous_pending or FlowUnexpectedStateError(
+                                failed_step="verify_flow_ui", authenticated=True, trusted_page=True
+                            )
+                        break
+            session.require_current_flow_page()
+            if session.workspace_identity() != workspace:
+                raise FlowUnexpectedStateError(
+                    failed_step="navigate_flow", failure_category="workspace_mismatch"
+                )
+            previous_pending = pending
+            remaining_seconds = deadline - self._monotonic()
+            if remaining_seconds <= 0:
+                raise pending
+            page.wait_for_timeout(min(500, max(1, int(remaining_seconds * 1000))))
         session.require_current_flow_page()
         if upload.kind == "menu":
             upload.locator.click()
@@ -436,13 +500,13 @@ class GoogleFlowRuntime:
                 tracing_started = True
                 phase = "verify_flow_ui"
                 session.require_current_flow_page()
-                if blocking_overlay_present(page):
-                    raise FlowUnexpectedStateError(
-                        failed_step="verify_flow_ui",
-                        authenticated=True,
-                        trusted_page=True,
-                    )
                 if self._config.workspace_path is None:
+                    if blocking_overlay_present(page):
+                        raise FlowUnexpectedStateError(
+                            failed_step="verify_flow_ui",
+                            authenticated=True,
+                            trusted_page=True,
+                        )
                     for locator_name in REQUIRED_FLOW_LOCATORS:
                         session.require_current_flow_page()
                         resolve_required_locator(page, locator_name)
