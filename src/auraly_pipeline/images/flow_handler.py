@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import cast
 from uuid import uuid4
 
+from pydantic import JsonValue
 from sqlalchemy import select
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session, sessionmaker
@@ -347,14 +348,19 @@ class FlowImageGenerateHandler:
         except FlowDispatchAmbiguousError:
             self._set_run_failure(run.id, "ambiguous", expected_stage=sink.run_stage)
             return self._blocked("flow_dispatch_ambiguous")
-        except FlowGenerationUiContractError:
+        except FlowGenerationUiContractError as error:
             self._set_run_failure(
                 run.id,
                 "blocked",
                 "flow_candidate_grid_ambiguous",
                 expected_stage=sink.run_stage,
             )
-            return self._blocked("flow_candidate_grid_ambiguous")
+            result: dict[str, JsonValue] = {}
+            if error.candidate_baseline_failure is not None:
+                result["candidateBaselineFailure"] = error.candidate_baseline_failure.model_dump(
+                    by_alias=True, mode="json"
+                )
+            return self._blocked("flow_candidate_grid_ambiguous", result=result)
         except FlowDownloadCorrelationError:
             self._set_run_failure(
                 run.id,
@@ -887,9 +893,12 @@ class FlowImageGenerateHandler:
         )
 
     @staticmethod
-    def _blocked(code: str) -> JobExecutionResult:
+    def _blocked(
+        code: str, *, result: dict[str, JsonValue] | None = None
+    ) -> JobExecutionResult:
         return JobExecutionResult(
             outcome=JobExecutionOutcome.BLOCKED,
             error_code=code,
             error_message="The authorized Flow image generation requires review.",
+            result=result or {},
         )

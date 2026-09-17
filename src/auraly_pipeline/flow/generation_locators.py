@@ -10,6 +10,8 @@ from typing import Generic, Literal, Protocol, TypeVar, cast
 from urllib.parse import urlsplit
 
 from .generation_domain import (
+    FlowCandidateBaselineFailure,
+    FlowCandidateBaselineFailureCategory,
     FlowCandidateObservation,
     FlowGenerationFailedStep,
     FlowGenerationLocatorName,
@@ -339,6 +341,7 @@ def observe_completed_candidate_slots(
     page: PageProtocol[_LocatorT],
     *,
     _target: _GenerationLocatorTarget = _PRODUCTION_GENERATION_TARGET,
+    _capture_baseline_failure: bool = False,
 ) -> tuple[FlowCandidateObservation, ...]:
     """Enumerate unique completed slots in provider semantic order without retaining UI text."""
     _require_safe_generation_route(page, _target)
@@ -346,6 +349,7 @@ def observe_completed_candidate_slots(
         page,
         identity_source=_target.identity_source,
         failed_step="observe_candidates",
+        capture_baseline_failure=_capture_baseline_failure,
     )
     return tuple(
         FlowCandidateObservation(fingerprint=fingerprint, semantic_order=index, completed=True)
@@ -403,14 +407,22 @@ def _validated_candidate_slots(
     *,
     identity_source: _CandidateIdentitySource,
     failed_step: FlowGenerationFailedStep,
+    capture_baseline_failure: bool = False,
 ) -> tuple[tuple[_CandidateLocatorProtocol, str], ...]:
     """Validate every visible grid slot before any one candidate action can be returned."""
-    grid = _require_unique(
-        page,
-        page.get_by_role("list", name="Generated candidates", exact=True),
-        locator_name="CANDIDATE_GRID",
-        failed_step=failed_step,
-    )
+    try:
+        grid = _require_unique(
+            page,
+            page.get_by_role("list", name="Generated candidates", exact=True),
+            locator_name="CANDIDATE_GRID",
+            failed_step=failed_step,
+        )
+    except FlowGenerationUiContractError:
+        if capture_baseline_failure:
+            raise _candidate_baseline_error(
+                page, identity_source, failed_step, "CANDIDATE_GRID"
+            ) from None
+        raise
     candidates: list[tuple[_CandidateLocatorProtocol, str]] = []
     for candidate in (
         cast(_CandidateLocatorProtocol, grid).get_by_role("listitem", include_hidden=True).all()
@@ -418,6 +430,10 @@ def _validated_candidate_slots(
         candidate_locator = cast(_CandidateLocatorProtocol, candidate)
         fingerprint = _fingerprint_for_candidate(candidate_locator, identity_source)
         if not _is_actionable(candidate_locator) or fingerprint is None:
+            if capture_baseline_failure:
+                raise _candidate_baseline_error(
+                    page, identity_source, failed_step, "CANDIDATE_SLOT"
+                ) from None
             raise FlowGenerationUiContractError(
                 failed_step=failed_step, failed_locator="CANDIDATE_SLOT"
             )
@@ -425,10 +441,129 @@ def _validated_candidate_slots(
     if not candidates or len({fingerprint for _candidate, fingerprint in candidates}) != len(
         candidates
     ):
+        if capture_baseline_failure:
+            raise _candidate_baseline_error(
+                page, identity_source, failed_step, "CANDIDATE_SLOT"
+            ) from None
         raise FlowGenerationUiContractError(
             failed_step=failed_step, failed_locator="CANDIDATE_SLOT"
         )
     return tuple(candidates)
+
+
+def _candidate_baseline_error(
+    page: PageProtocol[LocatorProtocol],
+    identity_source: _CandidateIdentitySource,
+    failed_step: FlowGenerationFailedStep,
+    failed_locator: FlowGenerationLocatorName,
+) -> FlowGenerationUiContractError:
+    try:
+        failure = _candidate_baseline_failure(page, identity_source)
+    except Exception:
+        failure = FlowCandidateBaselineFailure(
+            category="other_contract_failure",
+            grid_count=0,
+            listitem_count=0,
+            visible_candidate_count=0,
+            admissible_candidate_count=0,
+            blocker_present=False,
+            loading_state_present=False,
+            duplicate_fingerprint_detected=False,
+            hidden_candidate_detected=False,
+            invalid_identity_detected=False,
+            incomplete_candidate_detected=False,
+            malformed_grid_detected=False,
+        )
+    return FlowGenerationUiContractError(
+        failed_step=failed_step,
+        failed_locator=failed_locator,
+        candidate_baseline_failure=failure,
+    )
+
+
+def _candidate_baseline_failure(
+    page: PageProtocol[LocatorProtocol],
+    identity_source: _CandidateIdentitySource,
+) -> FlowCandidateBaselineFailure:
+    grids = page.get_by_role("list", name="Generated candidates", exact=True).all()
+    blocker_present = blocking_overlay_present(page)
+    loading_state_present = any(
+        item.is_visible()
+        for item in page.get_by_role("status", name="Carregando…", exact=True).all()
+    )
+    items = (
+        cast(_CandidateLocatorProtocol, grids[0])
+        .get_by_role("listitem", include_hidden=True)
+        .all()
+        if len(grids) == 1
+        else []
+    )
+    visible_count = sum(item.is_visible() for item in items)
+    hidden = any(not item.is_visible() for item in items)
+    disabled = any(item.is_visible() and not _is_actionable(item) for item in items)
+    identities = [
+        cast(_CandidateLocatorProtocol, item).get_attribute(
+            identity_source.candidate_id_attribute
+        )
+        for item in items
+    ]
+    completion_roles = [
+        cast(_CandidateLocatorProtocol, item).get_attribute(
+            identity_source.completion_role_attribute
+        )
+        for item in items
+    ]
+    identity_missing = any(value is None for value in identities)
+    identity_invalid = any(value is not None and not _safe_candidate_key(value) for value in identities)
+    incomplete = any(value != identity_source.completed_role for value in completion_roles)
+    fingerprints = [
+        _fingerprint_for_candidate(cast(_CandidateLocatorProtocol, item), identity_source)
+        for item in items
+    ]
+    valid_fingerprints = [value for value in fingerprints if value is not None]
+    duplicate = len(set(valid_fingerprints)) != len(valid_fingerprints)
+    admissible_count = sum(
+        _is_actionable(item) and fingerprint is not None
+        for item, fingerprint in zip(items, fingerprints, strict=True)
+    )
+    malformed_grid = len(grids) != 1 or not items
+    category: FlowCandidateBaselineFailureCategory
+    if loading_state_present:
+        category = "loading_state_present"
+    elif not grids and blocker_present:
+        category = "grid_absent_blocked"
+    elif len(grids) != 1:
+        category = "grid_ambiguous"
+    elif not items:
+        category = "candidate_cardinality_invalid"
+    elif hidden:
+        category = "candidate_hidden"
+    elif disabled:
+        category = "candidate_disabled"
+    elif identity_missing:
+        category = "candidate_identity_missing"
+    elif identity_invalid:
+        category = "candidate_identity_invalid"
+    elif incomplete:
+        category = "candidate_incomplete"
+    elif duplicate:
+        category = "candidate_duplicate_fingerprint"
+    else:
+        category = "other_contract_failure"
+    return FlowCandidateBaselineFailure(
+        category=category,
+        grid_count=_safe_cardinality(len(grids)),
+        listitem_count=_safe_cardinality(len(items)),
+        visible_candidate_count=_safe_cardinality(visible_count),
+        admissible_candidate_count=_safe_cardinality(admissible_count),
+        blocker_present=blocker_present,
+        loading_state_present=loading_state_present,
+        duplicate_fingerprint_detected=duplicate,
+        hidden_candidate_detected=hidden,
+        invalid_identity_detected=identity_missing or identity_invalid,
+        incomplete_candidate_detected=incomplete,
+        malformed_grid_detected=malformed_grid,
+    )
 
 
 def _require_unique(

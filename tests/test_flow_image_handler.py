@@ -34,8 +34,10 @@ from auraly_pipeline.flow.domain import (
 from auraly_pipeline.flow.artifacts import inspect_flow_artifact, resolve_flow_final_path
 from auraly_pipeline.flow.generation import FlowGenerationRuntime
 from auraly_pipeline.flow.generation_domain import (
+    FlowCandidateBaselineFailure,
     FlowGenerationObservation,
     FlowGenerationRuntimeError,
+    FlowGenerationUiContractError,
 )
 from auraly_pipeline.images.db_models import ImageCandidateRow, FlowGenerationRunRow
 from auraly_pipeline.images.db_models import FlowCandidateSlotRow, ImageGenerationRow
@@ -222,18 +224,57 @@ def test_invalid_flow_reference_is_terminal_before_runtime_construction(
 
 
 @pytest.mark.parametrize(
-    ("runtime_error", "expected_code"),
+    ("runtime_error", "expected_code", "expected_result"),
     (
-        (FlowRuntimeBusyError(), "flow_runtime_busy"),
-        (FlowAuthenticationTimeoutError(), "flow_authentication_required"),
-        (FlowDiagnosticSanitizationError(), "flow_diagnostic_sanitization_failed"),
+        (FlowRuntimeBusyError(), "flow_runtime_busy", {}),
+        (FlowAuthenticationTimeoutError(), "flow_authentication_required", {}),
+        (FlowDiagnosticSanitizationError(), "flow_diagnostic_sanitization_failed", {}),
         (
             FlowGenerationRuntimeError(failed_step="upload_reference"),
             "flow_input_verification_failed",
+            {},
         ),
         (
             FlowGenerationRuntimeError(failed_step="close_browser"),
             "flow_browser_close_failed",
+            {},
+        ),
+        (
+            FlowGenerationUiContractError(
+                failed_locator="CANDIDATE_SLOT",
+                candidate_baseline_failure=FlowCandidateBaselineFailure(
+                    category="candidate_identity_invalid",
+                    grid_count=1,
+                    listitem_count="2+",
+                    visible_candidate_count="2+",
+                    admissible_candidate_count=1,
+                    blocker_present=False,
+                    loading_state_present=False,
+                    duplicate_fingerprint_detected=False,
+                    hidden_candidate_detected=False,
+                    invalid_identity_detected=True,
+                    incomplete_candidate_detected=False,
+                    malformed_grid_detected=False,
+                ),
+            ),
+            "flow_candidate_grid_ambiguous",
+            {
+                "candidateBaselineFailure": {
+                    "phase": "candidate_baseline",
+                    "category": "candidate_identity_invalid",
+                    "gridCount": 1,
+                    "listitemCount": "2+",
+                    "visibleCandidateCount": "2+",
+                    "admissibleCandidateCount": 1,
+                    "blockerPresent": False,
+                    "loadingStatePresent": False,
+                    "duplicateFingerprintDetected": False,
+                    "hiddenCandidateDetected": False,
+                    "invalidIdentityDetected": True,
+                    "incompleteCandidateDetected": False,
+                    "malformedGridDetected": False,
+                }
+            },
         ),
     ),
 )
@@ -241,6 +282,7 @@ def test_flow_handler_upload_request_keeps_exact_bytes_and_maps_runtime_failures
     tmp_path: Path,
     runtime_error: BaseException,
     expected_code: str,
+    expected_result: dict[str, object],
 ) -> None:
     database = tmp_path / "reference-toctou.db"
     work_root = tmp_path / "work"
@@ -297,6 +339,7 @@ def test_flow_handler_upload_request_keeps_exact_bytes_and_maps_runtime_failures
 
     assert result.outcome == "blocked"
     assert result.error_code == expected_code
+    assert result.result == expected_result
     images.close()
 
 

@@ -5,6 +5,7 @@ from pydantic import ValidationError
 
 from auraly_pipeline import flow
 from auraly_pipeline.flow.generation_domain import (
+    FlowCandidateBaselineFailure,
     FlowCandidateObservation,
     FlowDispatchAmbiguousError,
     FlowDownloadCorrelationError,
@@ -13,6 +14,90 @@ from auraly_pipeline.flow.generation_domain import (
     FlowGenerationUiContractError,
     FlowWorkspaceIdentity,
 )
+
+
+def test_candidate_baseline_failure_contains_only_bounded_safe_facts() -> None:
+    failure = FlowCandidateBaselineFailure(
+        category="candidate_identity_invalid",
+        grid_count=1,
+        listitem_count="2+",
+        visible_candidate_count="2+",
+        admissible_candidate_count=1,
+        blocker_present=False,
+        loading_state_present=False,
+        duplicate_fingerprint_detected=False,
+        hidden_candidate_detected=False,
+        invalid_identity_detected=True,
+        incomplete_candidate_detected=False,
+        malformed_grid_detected=False,
+    )
+
+    assert failure.model_dump(by_alias=True, mode="json") == {
+        "phase": "candidate_baseline",
+        "category": "candidate_identity_invalid",
+        "gridCount": 1,
+        "listitemCount": "2+",
+        "visibleCandidateCount": "2+",
+        "admissibleCandidateCount": 1,
+        "blockerPresent": False,
+        "loadingStatePresent": False,
+        "duplicateFingerprintDetected": False,
+        "hiddenCandidateDetected": False,
+        "invalidIdentityDetected": True,
+        "incompleteCandidateDetected": False,
+        "malformedGridDetected": False,
+    }
+    assert {"url", "html", "dom", "account", "candidate_id"}.isdisjoint(
+        FlowCandidateBaselineFailure.model_fields
+    )
+
+
+def test_candidate_baseline_failure_rejects_unbounded_values_and_unknown_categories() -> None:
+    facts = {
+        "grid_count": 1,
+        "listitem_count": 0,
+        "visible_candidate_count": 0,
+        "admissible_candidate_count": 0,
+        "blocker_present": False,
+        "loading_state_present": False,
+        "duplicate_fingerprint_detected": False,
+        "hidden_candidate_detected": False,
+        "invalid_identity_detected": False,
+        "incomplete_candidate_detected": False,
+        "malformed_grid_detected": False,
+    }
+    with pytest.raises(ValidationError):
+        FlowCandidateBaselineFailure.model_validate(
+            {"category": "private DOM text", **facts}
+        )
+    with pytest.raises(ValidationError):
+        FlowCandidateBaselineFailure.model_validate(
+            {"category": "other_contract_failure", **facts, "grid_count": 37}
+        )
+
+
+def test_generation_error_preserves_candidate_baseline_failure() -> None:
+    failure = FlowCandidateBaselineFailure(
+        category="grid_ambiguous",
+        grid_count="2+",
+        listitem_count="2+",
+        visible_candidate_count="2+",
+        admissible_candidate_count="2+",
+        blocker_present=False,
+        loading_state_present=False,
+        duplicate_fingerprint_detected=False,
+        hidden_candidate_detected=False,
+        invalid_identity_detected=False,
+        incomplete_candidate_detected=False,
+        malformed_grid_detected=True,
+    )
+
+    error = FlowGenerationUiContractError(
+        failed_locator="CANDIDATE_GRID", candidate_baseline_failure=failure
+    )
+
+    assert error.candidate_baseline_failure is failure
+    assert str(error) == ""
 
 
 def test_candidate_observation_contains_only_safe_identity() -> None:

@@ -39,6 +39,20 @@ FlowGenerationFailedStep = Literal[
     "capture_download",
     "close_browser",
 ]
+SafeCardinality = Literal[0, 1, "2+"]
+FlowCandidateBaselineFailureCategory = Literal[
+    "grid_absent_blocked",
+    "grid_ambiguous",
+    "candidate_hidden",
+    "candidate_disabled",
+    "candidate_identity_missing",
+    "candidate_identity_invalid",
+    "candidate_incomplete",
+    "candidate_duplicate_fingerprint",
+    "candidate_cardinality_invalid",
+    "loading_state_present",
+    "other_contract_failure",
+]
 
 _SAFE_SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _PROJECT_ID = r"[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}"
@@ -76,7 +90,12 @@ _LOCATOR_NAMES: frozenset[str] = frozenset(
 )
 _ERROR_FACTS: WeakKeyDictionary[
     BaseException,
-    tuple[FlowGenerationFailedStep, FlowGenerationLocatorName | None, FlowPrimaryFailure | None],
+    tuple[
+        FlowGenerationFailedStep,
+        FlowGenerationLocatorName | None,
+        FlowPrimaryFailure | None,
+        FlowCandidateBaselineFailure | None,
+    ],
 ] = WeakKeyDictionary()
 _EMPTY_PERSISTED_FIELDS: Mapping[str, object] = MappingProxyType({})
 
@@ -129,6 +148,24 @@ class FlowGenerationObservation(ContractModel):
         return _EMPTY_PERSISTED_FIELDS
 
 
+class FlowCandidateBaselineFailure(ContractModel):
+    """Bounded, non-sensitive facts explaining a rejected candidate baseline."""
+
+    phase: Literal["candidate_baseline"] = "candidate_baseline"
+    category: FlowCandidateBaselineFailureCategory
+    grid_count: SafeCardinality
+    listitem_count: SafeCardinality
+    visible_candidate_count: SafeCardinality
+    admissible_candidate_count: SafeCardinality
+    blocker_present: bool
+    loading_state_present: bool
+    duplicate_fingerprint_detected: bool
+    hidden_candidate_detected: bool
+    invalid_identity_detected: bool
+    incomplete_candidate_detected: bool
+    malformed_grid_detected: bool
+
+
 class FlowGenerationRuntimeError(RuntimeError):
     """Typed internal generation failure with allowlisted scalar fields only."""
 
@@ -138,13 +175,19 @@ class FlowGenerationRuntimeError(RuntimeError):
         failed_step: FlowGenerationFailedStep,
         failed_locator: FlowGenerationLocatorName | None = None,
         primary_failure: FlowPrimaryFailure | None = None,
+        candidate_baseline_failure: FlowCandidateBaselineFailure | None = None,
     ) -> None:
         if failed_step not in _FAILED_STEPS:
             raise ValueError("generation error requires an allowlisted failed step")
         if failed_locator is not None and failed_locator not in _LOCATOR_NAMES:
             raise ValueError("generation error requires an allowlisted locator")
         RuntimeError.__init__(self)
-        _ERROR_FACTS[self] = (failed_step, failed_locator, primary_failure)
+        _ERROR_FACTS[self] = (
+            failed_step,
+            failed_locator,
+            primary_failure,
+            candidate_baseline_failure,
+        )
 
     @property
     def failed_step(self) -> FlowGenerationFailedStep:
@@ -158,8 +201,17 @@ class FlowGenerationRuntimeError(RuntimeError):
     def primary_failure(self) -> FlowPrimaryFailure | None:
         return _ERROR_FACTS[self][2]
 
+    @property
+    def candidate_baseline_failure(self) -> FlowCandidateBaselineFailure | None:
+        return _ERROR_FACTS[self][3]
+
     def __setattr__(self, name: str, value: object) -> None:
-        if name in {"_failed_step", "_failed_locator", "_primary_failure"}:
+        if name in {
+            "_failed_step",
+            "_failed_locator",
+            "_primary_failure",
+            "_candidate_baseline_failure",
+        }:
             raise AttributeError("generation error facts are read-only")
         super().__setattr__(name, value)
 
@@ -173,11 +225,13 @@ class FlowGenerationUiContractError(FlowGenerationRuntimeError):
         failed_step: FlowGenerationFailedStep = "observe_candidates",
         failed_locator: FlowGenerationLocatorName | None = None,
         primary_failure: FlowPrimaryFailure | None = None,
+        candidate_baseline_failure: FlowCandidateBaselineFailure | None = None,
     ) -> None:
         super().__init__(
             failed_step=failed_step,
             failed_locator=failed_locator,
             primary_failure=primary_failure,
+            candidate_baseline_failure=candidate_baseline_failure,
         )
 
 

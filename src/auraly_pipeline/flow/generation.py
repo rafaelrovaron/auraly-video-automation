@@ -363,7 +363,9 @@ class FlowGenerationRuntime:
                 checkpoint_sink.record_inputs_verified(observation)
 
                 self._require_workspace_identity(session, request.workspace)
-                initial_results = self._completed_result_fingerprints(session.page)
+                initial_results = self._completed_result_fingerprints(
+                    session.page, capture_baseline_failure=True
+                )
 
                 intent_started = True
                 checkpoint_sink.record_dispatch_intent(request.workspace)
@@ -626,13 +628,19 @@ class FlowGenerationRuntime:
     ) -> Iterator[_AuthenticatedFlowSession]:
         """Keep the Goal 4B lock across authenticated browser open, work, and close."""
         if self._session_factory is not None:
+            pending: BaseException | None = None
             try:
                 with self._session_factory() as session:
                     if workspace is not None:
                         self._open_workspace(session, workspace)
-                    yield session
+                    try:
+                        yield session
+                    except BaseException as error:
+                        pending = error
+                        raise
             except FlowUnexpectedStateError as error:
                 if error.failed_step == "close_browser":
+                    self._raise_pending_candidate_baseline_failure(pending)
                     raise FlowGenerationRuntimeError(failed_step="close_browser") from None
                 raise FlowGenerationRuntimeError(failed_step="open_workspace") from None
             except FlowGenerationRuntimeError:
@@ -653,15 +661,21 @@ class FlowGenerationRuntime:
             raise FlowGenerationRuntimeError(failed_step="open_workspace")
         lock = BrowserRuntimeLock(self._runtime_config.lock_path)
         lock_acquired = False
+        pending = None
         try:
             lock.acquire()
             lock_acquired = True
             with FlowBrowserSession(self._runtime_config) as session:
                 if workspace is not None:
                     session.open_workspace(workspace)
-                yield session
+                try:
+                    yield session
+                except BaseException as error:
+                    pending = error
+                    raise
         except FlowUnexpectedStateError as error:
             if error.failed_step == "close_browser":
+                self._raise_pending_candidate_baseline_failure(pending)
                 raise FlowGenerationRuntimeError(failed_step="close_browser") from None
             raise FlowGenerationRuntimeError(failed_step="open_workspace") from None
         except FlowGenerationRuntimeError:
@@ -681,7 +695,16 @@ class FlowGenerationRuntime:
                 try:
                     lock.release()
                 except Exception:
+                    self._raise_pending_candidate_baseline_failure(pending)
                     raise FlowGenerationRuntimeError(failed_step="close_browser") from None
+
+    @staticmethod
+    def _raise_pending_candidate_baseline_failure(pending: BaseException | None) -> None:
+        if (
+            isinstance(pending, FlowGenerationUiContractError)
+            and pending.candidate_baseline_failure is not None
+        ):
+            raise pending from None
 
     def _prepare_inputs_in_session(
         self,
@@ -824,11 +847,17 @@ class FlowGenerationRuntime:
         except FlowGenerationUiContractError:
             return False
 
-    def _completed_result_fingerprints(self, page: Page) -> frozenset[str]:
+    def _completed_result_fingerprints(
+        self, page: Page, *, capture_baseline_failure: bool = False
+    ) -> frozenset[str]:
         try:
             return frozenset(
                 candidate.fingerprint
-                for candidate in observe_completed_candidate_slots(page, _target=self._locator_target)
+                for candidate in observe_completed_candidate_slots(
+                    page,
+                    _target=self._locator_target,
+                    _capture_baseline_failure=capture_baseline_failure,
+                )
             )
         except FlowGenerationUiContractError as error:
             if self._candidate_grid_is_absent(page, error):

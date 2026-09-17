@@ -23,6 +23,7 @@ from .runtime import GoogleFlowRuntime
 from .generation import FlowGenerationCheckpointSink, FlowGenerationRequest, FlowGenerationRuntime
 from .service import FlowPreflightService
 from .generation_domain import (
+    FlowCandidateBaselineFailure,
     FlowCandidateObservation,
     FlowDispatchAmbiguousError,
     FlowDownloadCorrelationError,
@@ -67,6 +68,7 @@ __all__ = [
     "FlowDiagnosticSanitizationError",
     "FlowDiagnosticWriter",
     "FlowCandidateObservation",
+    "FlowCandidateBaselineFailure",
     "FlowDispatchAmbiguousError",
     "FlowDownloadCorrelationError",
     "FlowGenerationFailedStep",

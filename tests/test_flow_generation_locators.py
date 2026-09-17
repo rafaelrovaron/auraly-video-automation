@@ -513,6 +513,118 @@ def test_candidate_grid_rejects_zero_multiple_hidden_disabled_and_blocking_slots
             observe_local_candidates(flow_generation_page)
 
 
+@pytest.mark.parametrize(
+    ("mutation", "category", "flags"),
+    (
+        (
+            "document.querySelector('ul').remove(); document.body.insertAdjacentHTML('beforeend', '<dialog open aria-label=\"Blocking\"></dialog>')",
+            "grid_absent_blocked",
+            {"blockerPresent": True, "malformedGridDetected": True},
+        ),
+        (
+            "document.body.insertAdjacentHTML('beforeend', document.querySelector('ul').outerHTML)",
+            "grid_ambiguous",
+            {"malformedGridDetected": True},
+        ),
+        (
+            "document.querySelectorAll('[role=listitem]')[1].hidden = true",
+            "candidate_hidden",
+            {"hiddenCandidateDetected": True},
+        ),
+        (
+            "document.querySelectorAll('[role=listitem]')[1].setAttribute('aria-disabled', 'true')",
+            "candidate_disabled",
+            {},
+        ),
+        (
+            "document.querySelectorAll('[role=listitem]')[1].removeAttribute('data-flow-candidate-id')",
+            "candidate_identity_missing",
+            {"invalidIdentityDetected": True},
+        ),
+        (
+            "document.querySelectorAll('[role=listitem]')[1].setAttribute('data-flow-candidate-id', 'https://private.invalid/person@example.com')",
+            "candidate_identity_invalid",
+            {"invalidIdentityDetected": True},
+        ),
+        (
+            "document.querySelectorAll('[role=listitem]')[1].setAttribute('data-flow-completion-role', 'loading')",
+            "candidate_incomplete",
+            {"incompleteCandidateDetected": True},
+        ),
+        (
+            "document.querySelectorAll('[role=listitem]')[1].setAttribute('data-flow-candidate-id', 'candidate-a')",
+            "candidate_duplicate_fingerprint",
+            {"duplicateFingerprintDetected": True},
+        ),
+        (
+            "document.querySelectorAll('[role=listitem]').forEach(item => item.remove())",
+            "candidate_cardinality_invalid",
+            {"malformedGridDetected": True},
+        ),
+        (
+            "document.querySelectorAll('[role=listitem]').forEach(item => item.remove()); document.body.insertAdjacentHTML('beforeend', '<flow-loading-page role=\"status\" aria-label=\"Carregando…\">Carregando…</flow-loading-page>')",
+            "loading_state_present",
+            {"loadingStatePresent": True, "malformedGridDetected": True},
+        ),
+    ),
+)
+def test_candidate_baseline_failure_reports_only_safe_bounded_facts(
+    flow_generation_page: Page,
+    mutation: str,
+    category: str,
+    flags: dict[str, bool],
+) -> None:
+    flow_generation_page.goto(fake_generation_url("grid-two.html"))
+    flow_generation_page.evaluate(mutation)
+
+    with pytest.raises(FlowGenerationUiContractError) as caught:
+        observe_completed_candidate_slots(
+            flow_generation_page,
+            _target=LOCAL_FLOW_TARGET,
+            _capture_baseline_failure=True,
+        )
+
+    failure = caught.value.candidate_baseline_failure
+    assert failure is not None
+    payload = failure.model_dump(by_alias=True, mode="json")
+    assert payload["phase"] == "candidate_baseline"
+    assert payload["category"] == category
+    assert all(payload[name] in {0, 1, "2+"} for name in (
+        "gridCount",
+        "listitemCount",
+        "visibleCandidateCount",
+        "admissibleCandidateCount",
+    ))
+    assert payload | flags == payload
+    serialized = str(payload)
+    assert "private.invalid" not in serialized
+    assert "person@example.com" not in serialized
+
+
+def test_candidate_baseline_diagnostic_failure_preserves_safe_contract_error(
+    flow_generation_page: Page,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    flow_generation_page.goto(fake_generation_url("ambiguous-grid.html"))
+
+    def fail_diagnostic(*_args: object, **_kwargs: object) -> object:
+        raise RuntimeError("private DOM detached at https://private.invalid/person@example.com")
+
+    monkeypatch.setattr(locator_module, "_candidate_baseline_failure", fail_diagnostic)
+
+    with pytest.raises(FlowGenerationUiContractError) as caught:
+        observe_completed_candidate_slots(
+            flow_generation_page,
+            _target=LOCAL_FLOW_TARGET,
+            _capture_baseline_failure=True,
+        )
+
+    failure = caught.value.candidate_baseline_failure
+    assert failure is not None
+    assert failure.category == "other_contract_failure"
+    assert "private.invalid" not in str(failure.model_dump(mode="json"))
+
+
 def test_candidate_2k_action_rejects_zero_multiple_hidden_disabled_and_blocking_matches(
     flow_generation_page: Page,
 ) -> None:

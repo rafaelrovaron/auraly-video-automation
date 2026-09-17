@@ -32,6 +32,7 @@ from auraly_pipeline.flow.generation import (
     FlowGenerationRuntime,
 )
 from auraly_pipeline.flow.generation_domain import (
+    FlowCandidateBaselineFailure,
     FlowCandidateObservation,
     FlowDispatchAmbiguousError,
     FlowDownloadCorrelationError,
@@ -707,6 +708,38 @@ def test_dispatch_confirms_attributable_completed_result_transition(
     assert flow_generation_page.evaluate("window.generateClicks") == 1
 
 
+def test_dispatch_accepts_clean_admissible_historical_baseline(
+    flow_generation_page: Page,
+    reference_png: Path,
+) -> None:
+    runtime = _runtime_for_fixture("ready.html", flow_generation_page)
+    flow_generation_page.evaluate(
+        """() => {
+            document.querySelector('main').insertAdjacentHTML(
+                'beforeend',
+                '<ul aria-label="Generated candidates">'
+                + '<li role="listitem" data-flow-candidate-id="historical" data-flow-completion-role="completed"><button>Request 2K</button></li>'
+                + '</ul>',
+            );
+            window.generateClicks = 0;
+            document.querySelector('button').addEventListener('click', () => {
+                window.generateClicks += 1;
+                document.querySelector('[aria-label="Generated candidates"]').insertAdjacentHTML(
+                    'beforeend',
+                    '<li role="listitem" data-flow-candidate-id="result-a" data-flow-completion-role="completed"><button>Request 2K</button></li>'
+                    + '<li role="listitem" data-flow-candidate-id="result-b" data-flow-completion-role="completed"><button>Request 2K</button></li>',
+                );
+            });
+        }"""
+    )
+    checkpoint_sink = _CheckpointSink(flow_generation_page)
+
+    runtime.prepare_and_dispatch(_prepared_request(reference_png), checkpoint_sink)
+
+    assert checkpoint_sink.events[-1] == "dispatch_confirmed"
+    assert flow_generation_page.evaluate("window.generateClicks") == 1
+
+
 @pytest.mark.parametrize("post_click_state", ("ready", "empty_grid"))
 def test_dispatch_rejects_nonpositive_click_return_confirmation(
     flow_generation_page: Page,
@@ -764,8 +797,72 @@ def test_dispatch_requires_a_trustworthy_result_baseline_before_attribution(
         runtime.prepare_and_dispatch(_prepared_request(reference_png), checkpoint_sink)
 
     assert raised.value.failed_step == "observe_candidates"
+    assert raised.value.candidate_baseline_failure is not None
+    assert (
+        raised.value.candidate_baseline_failure.category
+        == "candidate_duplicate_fingerprint"
+    )
     assert flow_generation_page.evaluate("window.generateClicks || 0") == 0
     assert checkpoint_sink.events == ["inputs_verified"]
+
+
+def test_candidate_baseline_cause_survives_browser_close_failure(
+    flow_generation_page: Page,
+    reference_png: Path,
+) -> None:
+    class FailingCloseSession(_LocalAuthenticatedSession):
+        def __enter__(self) -> "FailingCloseSession":
+            return self
+
+        def __exit__(self, *_args: object) -> Literal[False]:
+            raise FlowUnexpectedStateError(failed_step="close_browser")
+
+    runtime = _runtime_for_fixture(
+        "ready.html", flow_generation_page, generation_timeout_seconds=0
+    )
+    runtime._session_factory = lambda: FailingCloseSession(  # type: ignore[assignment]
+        flow_generation_page, LOCAL_TARGET
+    )
+    flow_generation_page.evaluate(
+        """document.querySelector('main').insertAdjacentHTML(
+            'beforeend',
+            '<ul aria-label="Generated candidates">'
+            + '<li role="listitem" data-flow-candidate-id="same" data-flow-completion-role="completed"></li>'
+            + '<li role="listitem" data-flow-candidate-id="same" data-flow-completion-role="completed"></li>'
+            + '</ul>',
+        )"""
+    )
+
+    with pytest.raises(FlowGenerationUiContractError) as caught:
+        runtime.prepare_and_dispatch(_prepared_request(reference_png), _CheckpointSink(flow_generation_page))
+
+    failure = caught.value.candidate_baseline_failure
+    assert failure is not None
+    assert failure.category == "candidate_duplicate_fingerprint"
+
+
+def test_unrelated_ui_error_does_not_override_browser_close_failure(
+    flow_generation_page: Page,
+) -> None:
+    class FailingCloseSession(_LocalAuthenticatedSession):
+        def __enter__(self) -> "FailingCloseSession":
+            return self
+
+        def __exit__(self, *_args: object) -> Literal[False]:
+            raise FlowUnexpectedStateError(failed_step="close_browser")
+
+    runtime = _runtime_for_fixture("ready.html", flow_generation_page)
+    runtime._session_factory = lambda: FailingCloseSession(  # type: ignore[assignment]
+        flow_generation_page, LOCAL_TARGET
+    )
+
+    with pytest.raises(FlowGenerationRuntimeError) as caught:
+        with runtime._open_authenticated_session():
+            raise FlowGenerationUiContractError(
+                failed_step="upload_reference", failed_locator="REFERENCE_INPUT"
+            )
+
+    assert caught.value.failed_step == "close_browser"
 
 
 def test_dispatch_rejects_workspace_identity_mismatch_before_click(
@@ -1100,6 +1197,67 @@ def test_production_session_holds_goal_4b_lock_through_session_close(
         "session_closed",
         "lock_released",
     ]
+
+
+def test_candidate_baseline_cause_survives_lock_release_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    class FailingLock:
+        def __init__(self, _path: Path) -> None:
+            pass
+
+        def acquire(self) -> None:
+            pass
+
+        def release(self) -> None:
+            raise RuntimeError("private cleanup failure")
+
+    class FakeSession:
+        def __enter__(self) -> "FakeSession":
+            return self
+
+        def __exit__(self, *_args: object) -> Literal[False]:
+            return False
+
+    runtime_config = FlowRuntimeConfig(
+        profile_dir=tmp_path / "profile",
+        diagnostics_dir=tmp_path / "diagnostics",
+        lock_path=tmp_path / "flow.lock",
+        staging_root=tmp_path / "staging",
+        login_timeout_seconds=1,
+        navigation_timeout_seconds=1,
+    )
+    monkeypatch.setattr(generation_module, "BrowserRuntimeLock", FailingLock)
+    monkeypatch.setattr(generation_module, "FlowBrowserSession", lambda _config: FakeSession())
+    runtime = FlowGenerationRuntime(
+        FlowGenerationConfig(generation_timeout_seconds=1, download_timeout_seconds=1),
+        runtime_config=runtime_config,
+    )
+    failure = FlowCandidateBaselineFailure(
+        category="grid_ambiguous",
+        grid_count="2+",
+        listitem_count=0,
+        visible_candidate_count=0,
+        admissible_candidate_count=0,
+        blocker_present=False,
+        loading_state_present=False,
+        duplicate_fingerprint_detected=False,
+        hidden_candidate_detected=False,
+        invalid_identity_detected=False,
+        incomplete_candidate_detected=False,
+        malformed_grid_detected=True,
+    )
+    original = FlowGenerationUiContractError(
+        failed_locator="CANDIDATE_GRID", candidate_baseline_failure=failure
+    )
+
+    with pytest.raises(FlowGenerationUiContractError) as caught:
+        with runtime._open_authenticated_session():
+            raise original
+
+    assert caught.value is original
+    assert caught.value.candidate_baseline_failure is failure
 
 
 def test_observe_binds_first_two_validated_semantic_slots(
