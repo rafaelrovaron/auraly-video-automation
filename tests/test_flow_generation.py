@@ -312,6 +312,178 @@ def test_prepare_live_upload_uses_one_filechooser_and_scoped_prompt(
     ).inner_text() == ""
 
 
+@pytest.mark.parametrize("show_loading", (False, True))
+def test_prepare_waits_for_live_workspace_controls_before_upload_resolution(
+    flow_generation_page: Page,
+    reference_png: Path,
+    show_loading: bool,
+) -> None:
+    runtime = _runtime_for_fixture("live-preflight.html", flow_generation_page)
+    flow_generation_page.evaluate(
+        """showLoading => {
+            const main = document.querySelector('main');
+            const upload = document.getElementById('upload-menu');
+            const prompt = document.querySelector('flow-rich-text-editor');
+            upload.remove();
+            prompt.remove();
+            if (showLoading) {
+                main.insertAdjacentHTML(
+                    'afterbegin',
+                    '<flow-loading-page role="status">Loading</flow-loading-page>',
+                );
+            }
+            setTimeout(() => {
+                document.querySelector('flow-loading-page')?.remove();
+                main.prepend(upload);
+                main.insertBefore(prompt, document.getElementById('generate-live'));
+            }, 100);
+        }""",
+        show_loading,
+    )
+
+    observed = runtime.prepare_inputs(
+        reference_path=reference_png,
+        reference_sha256=_sha256(reference_png),
+        prompt_snapshot="private prompt",
+        prompt_sha256=_sha256_text("private prompt"),
+    )
+
+    assert observed.reference_verified is True
+    assert observed.prompt_verified is True
+    assert flow_generation_page.evaluate("window.uploadMenuClicks") == 1
+    assert flow_generation_page.evaluate("window.sendClicks") == 1
+    assert flow_generation_page.evaluate("window.generateClicks") == 0
+
+
+@pytest.mark.parametrize(
+    ("mutation", "expected_step", "expected_control"),
+    (
+        (
+            "document.querySelector('main').insertAdjacentHTML('afterbegin', '<flow-loading-page role=\"status\">Loading</flow-loading-page>')",
+            "upload_reference",
+            None,
+        ),
+        (
+            "document.getElementById('upload-menu').remove()",
+            "upload_reference",
+            "flow.upload_menu_button",
+        ),
+        (
+            "document.querySelector('flow-rich-text-editor').remove()",
+            "fill_prompt",
+            "flow.prompt_host",
+        ),
+    ),
+)
+def test_generation_workspace_readiness_times_out_with_safe_root_cause(
+    flow_generation_page: Page,
+    reference_png: Path,
+    mutation: str,
+    expected_step: str,
+    expected_control: str | None,
+) -> None:
+    runtime = _runtime_for_fixture(
+        "live-preflight.html",
+        flow_generation_page,
+        generation_timeout_seconds=0,
+    )
+    flow_generation_page.evaluate(mutation)
+
+    with pytest.raises(FlowGenerationUiContractError) as raised:
+        runtime.prepare_inputs(
+            reference_path=reference_png,
+            reference_sha256=_sha256(reference_png),
+            prompt_snapshot="private prompt",
+            prompt_sha256=_sha256_text("private prompt"),
+        )
+
+    assert raised.value.failed_step == expected_step
+    assert (
+        None if raised.value.primary_failure is None else raised.value.primary_failure.control
+    ) == expected_control
+    assert flow_generation_page.evaluate("window.uploadMenuClicks") == 0
+    assert flow_generation_page.evaluate("window.sendClicks") == 0
+    assert flow_generation_page.evaluate("window.generateClicks") == 0
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    (
+        "document.querySelector('main').insertAdjacentHTML('afterbegin', document.getElementById('upload-menu').outerHTML)",
+        "document.querySelector('main').insertAdjacentHTML('beforeend', document.querySelector('flow-rich-text-editor').outerHTML)",
+        "document.querySelector('flow-rich-text-editor').insertAdjacentHTML('beforeend', '<div contenteditable=\"true\"></div>')",
+    ),
+)
+def test_generation_workspace_readiness_rejects_ambiguous_controls_without_interaction(
+    flow_generation_page: Page,
+    reference_png: Path,
+    mutation: str,
+) -> None:
+    runtime = _runtime_for_fixture("live-preflight.html", flow_generation_page)
+    flow_generation_page.evaluate(mutation)
+
+    with pytest.raises(FlowGenerationUiContractError) as raised:
+        runtime.prepare_inputs(
+            reference_path=reference_png,
+            reference_sha256=_sha256(reference_png),
+            prompt_snapshot="private prompt",
+            prompt_sha256=_sha256_text("private prompt"),
+        )
+
+    assert raised.value.primary_failure is not None
+    assert raised.value.primary_failure.category == "ambiguous"
+    assert raised.value.primary_failure.ambiguity_detected is True
+    assert flow_generation_page.evaluate("window.uploadMenuClicks") == 0
+    assert flow_generation_page.evaluate("window.sendClicks") == 0
+    assert flow_generation_page.evaluate("window.generateClicks") == 0
+
+
+@pytest.mark.parametrize("role", ("dialog", "alertdialog"))
+def test_generation_workspace_readiness_rejects_persistent_blocker_without_interaction(
+    flow_generation_page: Page,
+    reference_png: Path,
+    role: str,
+) -> None:
+    runtime = _runtime_for_fixture(
+        "live-preflight.html",
+        flow_generation_page,
+        generation_timeout_seconds=0,
+    )
+    flow_generation_page.evaluate(
+        "role => document.body.insertAdjacentHTML('beforeend', `<div role=\"${role}\">Blocking</div>`)",
+        role,
+    )
+
+    with pytest.raises(FlowGenerationUiContractError) as raised:
+        runtime.prepare_inputs(
+            reference_path=reference_png,
+            reference_sha256=_sha256(reference_png),
+            prompt_snapshot="private prompt",
+            prompt_sha256=_sha256_text("private prompt"),
+        )
+
+    assert raised.value.failed_step == "upload_reference"
+    assert flow_generation_page.evaluate("window.uploadMenuClicks") == 0
+    assert flow_generation_page.evaluate("window.sendClicks") == 0
+    assert flow_generation_page.evaluate("window.generateClicks") == 0
+
+
+def test_generation_workspace_readiness_is_observation_only(
+    flow_generation_page: Page,
+) -> None:
+    runtime = _runtime_for_fixture("live-preflight.html", flow_generation_page)
+    session = _LocalAuthenticatedSession(flow_generation_page, LOCAL_TARGET)
+
+    runtime._wait_for_workspace_readiness(session, None)
+
+    assert flow_generation_page.evaluate("window.uploadMenuClicks") == 0
+    assert flow_generation_page.evaluate("window.sendClicks") == 0
+    assert flow_generation_page.evaluate("window.generateClicks") == 0
+    assert flow_generation_page.locator(
+        "flow-rich-text-editor [contenteditable=true]"
+    ).inner_text() == ""
+
+
 def test_prepare_rejects_wrong_reference_hash_before_browser_upload(
     flow_generation_page: Page,
     reference_png: Path,

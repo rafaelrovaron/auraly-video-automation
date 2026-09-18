@@ -716,6 +716,7 @@ class FlowGenerationRuntime:
         workspace: FlowWorkspaceIdentity | None = None,
     ) -> FlowGenerationObservation:
         self._require_session_page(session, workspace)
+        self._wait_for_workspace_readiness(session, workspace)
         try:
             upload_control = resolve_reference_upload_control(
                 session.page,
@@ -767,6 +768,69 @@ class FlowGenerationRuntime:
                 failed_step="verify_prompt", failed_locator="GENERATION_PROMPT"
             )
         return FlowGenerationObservation(reference_verified=True, prompt_verified=True)
+
+    def _wait_for_workspace_readiness(
+        self,
+        session: _AuthenticatedFlowSession,
+        workspace: FlowWorkspaceIdentity | None,
+    ) -> None:
+        timeout_seconds = (
+            self._runtime_config.navigation_timeout_seconds
+            if self._runtime_config is not None
+            else self._config.generation_timeout_seconds
+        )
+        deadline = self._monotonic() + timeout_seconds
+        pending: FlowGenerationUiContractError | None = None
+        while True:
+            self._require_session_page(session, workspace)
+            if blocking_overlay_present(session.page):
+                pending = FlowGenerationUiContractError(
+                    failed_step="upload_reference",
+                    failed_locator="REFERENCE_INPUT",
+                )
+            elif self._workspace_loading_present(session.page):
+                pending = FlowGenerationUiContractError(
+                    failed_step="upload_reference",
+                    failed_locator="REFERENCE_INPUT",
+                )
+            else:
+                try:
+                    resolve_reference_upload_control(
+                        session.page,
+                        _target=self._locator_target,
+                    )
+                    resolve_generation_prompt(
+                        session.page,
+                        _target=self._locator_target,
+                    )
+                except FlowGenerationUiContractError as error:
+                    if (
+                        error.primary_failure is not None
+                        and error.primary_failure.category == "ambiguous"
+                    ):
+                        raise
+                    pending = error
+                else:
+                    self._require_session_page(session, workspace)
+                    if not blocking_overlay_present(
+                        session.page
+                    ) and not self._workspace_loading_present(session.page):
+                        return
+            remaining_seconds = deadline - self._monotonic()
+            if remaining_seconds <= 0:
+                if pending is not None:
+                    raise pending
+                raise FlowGenerationUiContractError(
+                    failed_step="upload_reference",
+                    failed_locator="REFERENCE_INPUT",
+                )
+            wait_milliseconds = min(500, int(remaining_seconds * 1000))
+            if wait_milliseconds > 0:
+                session.page.wait_for_timeout(wait_milliseconds)
+
+    @staticmethod
+    def _workspace_loading_present(page: Page) -> bool:
+        return any(candidate.is_visible() for candidate in page.locator("flow-loading-page").all())
 
     def _fresh_generate_control_after_intent(
         self,
