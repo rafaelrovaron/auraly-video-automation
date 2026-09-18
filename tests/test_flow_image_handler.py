@@ -343,6 +343,107 @@ def test_flow_handler_upload_request_keeps_exact_bytes_and_maps_runtime_failures
     images.close()
 
 
+@pytest.mark.parametrize("structured_baseline", (True, False))
+def test_flow_worker_persists_only_produced_candidate_baseline_failure(
+    tmp_path: Path, structured_baseline: bool
+) -> None:
+    database = tmp_path / f"worker-baseline-{structured_baseline}.db"
+    work_root = tmp_path / "work"
+    campaigns = CampaignService.for_database(database)
+    campaign = campaigns.create_campaign(CampaignCreate.model_validate(valid_campaign_data()))
+    campaigns.close()
+    reference = work_root / "references" / "avatar.png"
+    reference.parent.mkdir(parents=True)
+    _write_reference(reference)
+    workspace_path = "fx/tools/flow/worker-baseline"
+    images = ImageService.for_database(database, work_root=work_root)
+    submission = images.generate(
+        ImageGenerateRequest(
+            campaign_id=campaign.campaign_id,
+            scene_variant_id=campaign.scene_variants[0].scene_variant_id,
+            idempotency_key=f"worker-baseline-{structured_baseline}",
+            prompt_snapshot="prompt",
+            reference_image_path="references/avatar.png",
+            reference_image_sha256=hashlib.sha256(reference.read_bytes()).hexdigest(),
+            executor="playwright_python",
+            generation_contract_version="flow-generation-v1",
+            provider_action_confirmed=True,
+            provider_action_approved_by="operator",
+            provider_workspace_path=workspace_path,
+            provider_workspace_fingerprint=hashlib.sha256(workspace_path.encode()).hexdigest(),
+        )
+    )
+    baseline_failure = (
+        FlowCandidateBaselineFailure(
+            category="candidate_identity_invalid",
+            grid_count=1,
+            listitem_count="2+",
+            visible_candidate_count="2+",
+            admissible_candidate_count=1,
+            blocker_present=False,
+            loading_state_present=False,
+            duplicate_fingerprint_detected=False,
+            hidden_candidate_detected=False,
+            invalid_identity_detected=True,
+            incomplete_candidate_detected=False,
+            malformed_grid_detected=False,
+        )
+        if structured_baseline
+        else None
+    )
+
+    class RejectingRuntime:
+        generate_clicks = 0
+
+        def prepare_and_dispatch(self, _request: object, _sink: object) -> None:
+            raise FlowGenerationUiContractError(
+                failed_step="observe_candidates" if structured_baseline else "upload_reference",
+                failed_locator="CANDIDATE_SLOT" if structured_baseline else "REFERENCE_INPUT",
+                candidate_baseline_failure=baseline_failure,
+            )
+
+    def runtime_factory(_context: object) -> Any:
+        return RejectingRuntime()
+
+    images._jobs._handlers["image.generate"] = FlowImageGenerateHandler(
+        images._sessions,
+        work_root=work_root,
+        _runtime_factory=runtime_factory,
+    )
+
+    persisted = images.worker_once("flow-worker")
+
+    assert persisted is not None and persisted.status == "blocked"
+    assert persisted.next_retry_at is None
+    assert len(persisted.attempts) == 1
+    attempt = persisted.attempts[0]
+    assert attempt.status == "blocked"
+    if structured_baseline:
+        assert baseline_failure is not None
+        assert attempt.error_code == "flow_candidate_grid_ambiguous"
+        assert attempt.result == {
+            "candidateBaselineFailure": baseline_failure.model_dump(
+                by_alias=True, mode="json"
+            )
+        }
+    else:
+        assert attempt.error_code == "flow_input_verification_failed"
+        assert attempt.result is None
+    with images._sessions() as session:
+        run = session.scalar(
+            select(FlowGenerationRunRow).where(
+                FlowGenerationRunRow.image_generation_id
+                == submission.generation.image_generation_id
+            )
+        )
+        assert run is not None and run.stage == "blocked"
+        assert run.last_failure_code == attempt.error_code
+        assert run.dispatch_intent_at is None
+        assert run.dispatch_confirmed_at is None
+    assert RejectingRuntime.generate_clicks == 0
+    images.close()
+
+
 @pytest.mark.parametrize(
     "corruption",
     [

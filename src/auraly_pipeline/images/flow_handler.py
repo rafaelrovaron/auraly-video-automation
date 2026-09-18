@@ -349,17 +349,23 @@ class FlowImageGenerateHandler:
             self._set_run_failure(run.id, "ambiguous", expected_stage=sink.run_stage)
             return self._blocked("flow_dispatch_ambiguous")
         except FlowGenerationUiContractError as error:
+            if error.candidate_baseline_failure is None:
+                return self._block_runtime_failure(
+                    run.id,
+                    sink,
+                    self._generation_runtime_failure_code(error),
+                )
             self._set_run_failure(
                 run.id,
                 "blocked",
                 "flow_candidate_grid_ambiguous",
                 expected_stage=sink.run_stage,
             )
-            result: dict[str, JsonValue] = {}
-            if error.candidate_baseline_failure is not None:
-                result["candidateBaselineFailure"] = error.candidate_baseline_failure.model_dump(
+            result: dict[str, JsonValue] = {
+                "candidateBaselineFailure": error.candidate_baseline_failure.model_dump(
                     by_alias=True, mode="json"
                 )
+            }
             return self._blocked("flow_candidate_grid_ambiguous", result=result)
         except FlowDownloadCorrelationError:
             self._set_run_failure(
@@ -425,20 +431,26 @@ class FlowImageGenerateHandler:
             )
             return self._block_runtime_failure(run.id, sink, code)
         except FlowGenerationRuntimeError as error:
-            if error.failed_step in {
-                "upload_reference",
-                "verify_reference",
-                "fill_prompt",
-                "verify_prompt",
-            }:
-                code = "flow_input_verification_failed"
-            elif error.failed_step == "capture_grid_evidence":
-                code = "flow_diagnostic_sanitization_failed"
-            elif error.failed_step == "close_browser":
-                code = "flow_browser_close_failed"
-            else:
-                code = "flow_ui_contract_failed"
-            return self._block_runtime_failure(run.id, sink, code)
+            return self._block_runtime_failure(
+                run.id,
+                sink,
+                self._generation_runtime_failure_code(error),
+            )
+
+    @staticmethod
+    def _generation_runtime_failure_code(error: FlowGenerationRuntimeError) -> str:
+        if error.failed_step in {
+            "upload_reference",
+            "verify_reference",
+            "fill_prompt",
+            "verify_prompt",
+        }:
+            return "flow_input_verification_failed"
+        if error.failed_step == "capture_grid_evidence":
+            return "flow_diagnostic_sanitization_failed"
+        if error.failed_step == "close_browser":
+            return "flow_browser_close_failed"
+        return "flow_ui_contract_failed"
 
     def _block_runtime_failure(
         self,
