@@ -188,6 +188,43 @@ def test_already_ready_workspace_preflight_does_not_wait(tmp_path: Path) -> None
     assert page.waits == []
 
 
+@pytest.mark.parametrize("redirect_after", ("menu_click", "escape"))
+def test_workspace_preflight_refuses_project_change_during_menu_interaction(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    redirect_after: str,
+) -> None:
+    page = _WorkspacePage(clock=_Clock(), upload_after_seconds=0.0)
+    other_project = "https://flow.google.com/project/4f4aeb44-ea73-43f9-b622-77080a525fe9"
+    if redirect_after == "menu_click":
+        original_click = page._open_upload_menu
+
+        def redirected_click() -> None:
+            original_click()
+            page.url = other_project
+
+        monkeypatch.setattr(page, "_open_upload_menu", redirected_click)
+    else:
+        original_press = page.keyboard.press
+
+        def redirected_escape(key: str) -> None:
+            original_press(key)
+            page.url = other_project
+
+        monkeypatch.setattr(page.keyboard, "press", redirected_escape)
+
+    with pytest.raises(FlowUnexpectedStateError) as caught:
+        GoogleFlowRuntime(
+            config(tmp_path, workspace_path=_PROJECT_WORKSPACE_PATH),
+            _playwright_factory=_playwright_factory(_FakeContext(page=page)),
+        ).run()
+
+    assert caught.value.primary_failure is not None
+    assert caught.value.primary_failure.category == "workspace_mismatch"
+    assert page.upload_menu_clicks == 1
+    assert page.escape_presses == 1
+
+
 def test_workspace_preflight_retries_overlay_that_appears_during_upload_resolution(
     tmp_path: Path,
 ) -> None:

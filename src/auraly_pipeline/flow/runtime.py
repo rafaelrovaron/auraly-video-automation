@@ -462,6 +462,10 @@ class GoogleFlowRuntime:
         session.require_current_flow_page()
         resolve_preflight_generate_control(page, _target=self._locator_target)
         session.require_current_flow_page()
+        if session.workspace_identity() != workspace:
+            raise FlowUnexpectedStateError(
+                failed_step="navigate_flow", failure_category="workspace_mismatch"
+            )
 
     def run(self) -> FlowRuntimeObservation:
         """Run observation-only preflight, close all browser resources, or raise a typed failure."""
