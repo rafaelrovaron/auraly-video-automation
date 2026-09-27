@@ -425,12 +425,17 @@ def test_workspace_locator_root_survives_failed_trusted_evidence_capture(
         login_urls=(fake_flow_url("login-required.html"),),
         workspace_urls={workspace_path: workspace_url},
     )
+    clock = _Clock()
+    page = _WorkspacePage(clock=clock, upload_after_seconds=None)
+    page._account_mask_count = 0
 
     with pytest.raises(FlowUnexpectedStateError) as caught:
         GoogleFlowRuntime(
             config(tmp_path, workspace_path=workspace_path),
             _target=target,
             _locator_target=local_locator_target(workspace_url),
+            _playwright_factory=_playwright_factory(_FakeContext(page=page)),
+            _monotonic=clock,
         ).run()
 
     assert caught.value.primary_failure is not None
