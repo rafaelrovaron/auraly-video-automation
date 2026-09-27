@@ -1,1495 +1,785 @@
-# PRD — MVP Auraly Mass Video Pipeline
+# PRD — Auraly Delivery-First Video Automation MVP
 
-**Versão:** 1.0
-**Status:** pronto para planejamento técnico e implementação
-**Data:** 2026-08-09
-**Responsável de produto:** Rafael Rovaron
-**Repositório:** `<AURALY_ROOT>/pipeline`
-**Documento de contexto:** `docs/PROJECT-MEMORY.md`
-
----
+**Versão:** 2.0
+**Data:** 2026-09-27
+**Status:** aprovado para planejamento incremental
 
 ## 1. Resumo executivo
 
-O MVP ampliará o Auraly Video Pipeline existente de uma ferramenta de ingestão/pós-produção para uma aplicação local capaz de produzir, de forma resumível e auditável, múltiplas variantes de Reels a partir de uma única copy aprovada.
+O MVP transforma uma Copy Master em múltiplos vídeos verticais com o mínimo de trabalho manual
+repetitivo. Ele reutiliza a Voice Master já automatizada, recebe imagens geradas manualmente,
+automatiza HeyGen em lote e permite criar variações editoriais — especialmente testes A/B de
+headline — sem pagar novamente por voz, imagem ou vídeo.
 
-O fluxo-alvo do piloto será:
+A operação acontece em uma interface local simples. Ela gerencia campanhas, assets, HeyGen,
+profiles, variants e renders e oferece preview aproximado do layout. Não é um editor de vídeo
+genérico e não terá timeline estilo CapCut ou preview frame-perfect.
 
-```text
-1 Copy Master aprovada
-→ 1 Voice Master via ElevenLabs API
-→ 3 prompts/cenas
-→ 3 imagens 2K via Google Flow + Playwright
-→ revisão e aprovação das imagens
-→ 3 looks HeyGen com suporte a Avatar III
-→ 3 vídeos via HeyGen MCP/OAuth
-→ 3 edições determinísticas
-→ QC técnico + revisão humana
-→ entrega local versionada
-```
+## 2. Separação entre presente e alvo
 
-Para imagens, a sequência normativa é `AI/Hermes prompt → Google Flow → Playwright Python →
-2K image → QC → review → approve/reject/regenerate`. A IA/Hermes cria prompts e decide o que
-aprovar, rejeitar ou regenerar; a aplicação executa mecanicamente, registra evidências e retoma
-o workflow. Google Flow é o único provider de imagens do MVP, sem alternativa paralela.
+### 2.1 Capacidade entregue
 
-O MVP terá backend e workers em Python, persistência SQLite, CLI, API FastAPI e uma interface web local mínima para gestão da campanha, acompanhamento e gates de aprovação.
+- Campaign, CopyMaster e SceneVariant persistentes;
+- Jobs locais retomáveis e auditáveis;
+- Voice Master via ElevenLabs API;
+- WAV processado com trim de silêncio nas bordas, normalização e QC;
+- domínio/review de imagens;
+- automação Google Flow implementada e localmente verificada;
+- contrato `edit.json` legado, ingestão e inspeção de mídia;
+- CLI e harness de verificação.
 
----
+### 2.2 Capacidade alvo deste PRD
 
-## 2. Problema
+- importação batch de imagens manuais;
+- uploads e geração HeyGen em batch;
+- polling retomável e download dos MP4;
+- EditProfile + EditManifest + overrides;
+- headline/captions/music/framing configuráveis;
+- A/B de headline downstream;
+- API FastAPI e UI React local;
+- preview aproximado;
+- render, QC, review e entrega local.
 
-A produção atual exige que a IA ou um operador execute manualmente dezenas de operações:
+### 2.3 Capacidade preservada, mas fora do caminho crítico
 
-- navegar no Google Flow;
-- inserir prompts;
-- escolher e baixar imagens 2K;
-- gerar e baixar voz;
-- tratar áudio;
-- descobrir/chamar ferramentas HeyGen;
-- fazer uploads assinados;
-- criar look e vídeo;
-- acompanhar polling;
-- baixar MP4;
-- gerar captions;
-- renderizar;
-- executar ffprobe, hashes e QC;
-- copiar para entrega.
+Google Flow/Playwright permanece no código, sem expansão e sem canário no MVP delivery-first.
+Imagens manuais são o único caminho obrigatório de aceitação.
 
-Isso cria:
+## 3. Problema
 
-- alto consumo de tempo e tokens;
-- dependência de contexto conversacional;
-- risco de repetir operações pagas;
-- dificuldade para retomar após falhas;
-- inconsistência de configurações;
-- baixa capacidade de produzir muitas variantes;
-- pouca visibilidade consolidada do estado da campanha.
+O fluxo atual exige muitas operações repetidas e desconectadas:
 
----
+- associar imagens a variações;
+- subir as mesmas classes de assets;
+- criar vários vídeos no HeyGen;
+- acompanhar status e baixar resultados;
+- repetir configurações de headline, legenda, música e enquadramento;
+- produzir variações simples de texto sem refazer etapas caras;
+- lembrar em qual estágio cada campanha está.
 
-## 3. Hipótese de produto
+Automatizar geração de imagem antes de fechar esse caminho não resolve o maior gargalo. O MVP
+precisa primeiro entregar vídeos utilizáveis de forma rápida e repetível.
 
-Se transformarmos as operações mecânicas em uma aplicação local orientada a campanhas e variantes, então será possível produzir três ou mais vídeos a partir de uma única copy/voz com menos intervenção manual, sem repetir ações pagas, mantendo controle humano sobre qualidade visual e publicação.
+## 4. Usuário e contexto
 
----
+### Operador primário
 
-## 4. Objetivos do MVP
+Rafael, em uma máquina Windows local, operando campanhas Auraly pessoalmente.
 
-### O1 — Campanha com fan-out
+### Agente assistivo
 
-Criar uma campanha com uma copy, uma Voice Master e três Scene Variants independentes.
+Codex/Hermes pode preparar manifests, consultar status e recomendar ações, mas decisões criativas
+e aprovações continuam explícitas.
 
-### O2 — Voice Master programática
+### Contexto operacional
 
-Gerar voz exclusivamente pela API oficial do ElevenLabs, tratar, validar e aprovar um áudio master reutilizável.
+- uma pessoa;
+- localhost;
+- SQLite + filesystem;
+- providers oficiais;
+- volume inicial pequeno/moderado;
+- prioridade em throughput operacional, não disponibilidade 24/7.
 
-### O3 — Imagens automatizadas
+## 5. Objetivos do MVP
 
-Gerar e baixar imagens do Google Flow por Playwright, sempre em 2K, com evidências e retomada.
+### O1 — Reutilizar o que é caro
 
-### O4 — HeyGen oficial e verificável
+Uma Copy Master e uma Voice Master por campanha. Cada imagem gera no máximo um source MP4 por
+configuração HeyGen, e várias versões editoriais reutilizam esse source.
 
-Gerar talking avatars exclusivamente pelo MCP oficial do HeyGen com OAuth, usando explicitamente Avatar III.
+### O2 — Automatizar HeyGen em escala
 
-### O5 — Pós-produção determinística
+Preparar uploads, gerar lote, acompanhar status, retomar após restart e baixar outputs sem repetir
+ações pagas concluídas.
 
-Renderizar três vídeos com headline, captions, movimento e música usando manifests versionados.
+### O3 — Tornar edição configurável
 
-### O6 — Qualidade e auditabilidade
+Separar defaults reutilizáveis de overrides por campanha, vídeo e output variant.
 
-Executar QC técnico, manter hashes, IDs, logs e status persistentes e impedir entrega quando checks P0 falharem.
+### O4 — Tornar testes A/B baratos
 
-### O7 — Gestão local
+Trocar texto de headline e outros campos editoriais sem regenerar Voice Master, imagem ou HeyGen.
 
-Oferecer uma interface web mínima para visualizar campanhas, aprovar imagens/voz/vídeos e acompanhar a fila.
+### O5 — Centralizar a operação
 
----
+Oferecer uma interface local simples com status, ações e preview aproximado.
 
-## 5. Métricas de sucesso
+### O6 — Entregar outputs confiáveis
 
-O MVP será aceito quando o piloto real comprovar:
+Renderizar, medir, revisar e copiar masters sem sobrescrever sources ou versões anteriores.
 
-| Métrica | Critério |
-|---|---:|
-| Copy Masters | 1 aprovada |
-| Voice Masters | 1 gerada pela API e aprovada |
-| Variantes | 3 locais distintos |
-| Imagens Flow | 3 imagens 2K aprovadas |
-| HeyGen | 3 vídeos concluídos com Avatar III verificado |
-| Renders finais | 3 masters 1080×1920 com QC P0 aprovado |
-| Duplicação paga | 0 retries pagos cegos |
-| Retomada | pelo menos 1 interrupção simulada retomada com sucesso |
-| Reprodutibilidade | mesmo manifest e inputs produzem output funcionalmente equivalente |
-| Secrets em logs/manifests | 0 |
-| Operações ElevenLabs via web | 0 |
-| Operações HeyGen via web | 0 |
-| Downloads Flow | 100% em 2K |
+## 6. Não objetivos
 
-Meta adicional: reduzir significativamente o número de interações manuais em comparação com o processo Eight of Cups/Laundromat.
-
----
-
-## 6. Usuários
-
-### U1 — Rafael / operador de produção
-
-Precisa:
-
-- criar campanhas;
-- revisar copy e voz;
-- revisar imagens em lote;
-- acompanhar custos/status;
-- aprovar vídeos;
-- entregar masters.
-
-### U2 — Agente de IA/Hermes
-
-Precisa:
-
-- criar parâmetros e prompts;
-- chamar a aplicação por contrato estável;
-- consultar status compacto;
-- receber paths de artifacts para análise;
-- registrar recomendações/aprovações;
-- tratar exceções.
-
-### U3 — Worker local
-
-Executa jobs sem contexto conversacional, respeitando estado, locks, retries e limites.
-
----
-
-## 7. Escopo do MVP
-
-### 7.1 Incluído — P0
-
-- Campaign, Copy Master, Voice Master e Scene Variant;
-- SQLite + migrações;
-- fila local persistente;
-- state machine;
-- CLI Typer;
-- FastAPI local;
-- UI web mínima;
-- ElevenLabs TTS por API;
-- tratamento/QC de áudio;
-- Google Flow por Playwright;
-- perfil persistente separado;
-- download 2K;
-- ingest/QC técnico de imagens;
-- gate de aprovação de imagens;
-- HeyGen MCP/OAuth preflight;
-- upload de imagem e áudio;
-- criação/polling de photo avatar look;
-- validação de `avatar_iii`;
-- criação/polling/download de vídeo;
-- ingest/QC do MP4-fonte;
-- captions usando copy aprovada e timing disponível;
-- headline visual;
-- música e zoom sutil;
-- render 1080×1920;
-- QC final;
-- revisão/aprovação final;
-- entrega em pasta local configurada;
-- logs sanitizados;
-- dry-run;
-- retomada por etapa.
-
-### 7.2 Incluído — P1, se não comprometer P0
-
-- geração de duas candidatas por local;
-- galeria comparativa;
-- geração de duas vozes e comparação;
-- proxy 540×960;
-- contact sheet acessível pela UI;
-- reprocessamento automático de erro de mixagem;
-- ferramenta Hermes via HTTP local.
-
-### 7.3 Fora do MVP
-
+- timeline ou NLE completo;
+- preview frame-perfect;
+- edição frame a frame ou keyframes livres;
+- automação ativa do Google Flow;
+- multiusuário, autenticação, RBAC ou acesso LAN;
+- cloud hosting ou sync engine próprio;
 - publicação automática em redes sociais;
-- coleta de performance do Reel;
-- múltiplos usuários;
-- acesso remoto à interface;
-- PostgreSQL/Redis;
-- execução distribuída;
-- aplicativo móvel;
-- timeline NLE completa;
-- seleção visual totalmente autônoma;
-- microserviços;
-- troca automática para Avatar IV/V;
-- automação web do ElevenLabs;
-- automação web do HeyGen;
-- uso de Google Flow por coordenadas rígidas sem seletor verificável.
+- geração automática de copy;
+- decisão criativa totalmente autônoma;
+- microservices, Redis, broker externo ou storage remoto obrigatório;
+- suporte especulativo a múltiplos providers.
 
----
+## 7. Métricas de sucesso
+
+O MVP é aceito quando:
+
+- uma campanha real com três imagens manuais produz três MP4 HeyGen;
+- cada MP4 gera três headlines, totalizando nove renders locais;
+- criar as nove versões editoriais não dispara nenhuma nova ação paga HeyGen;
+- restart durante polling não duplica geração;
+- Rafael completa o fluxo principal pela UI;
+- o preview é suficiente para escolher posição/estilo antes do render;
+- sources e versões anteriores permanecem intactos;
+- cada output pode ser rastreado aos seus inputs e configuração;
+- três masters escolhidos passam QC e são entregues com hash verificado.
+
+Métricas secundárias a registrar no piloto:
+
+- minutos de operação humana por campanha;
+- taxa de reuso de assets remotos;
+- número de ações pagas evitadas por idempotência;
+- tempo do submit ao download;
+- quantidade de renders editoriais por source MP4;
+- falhas recuperadas sem intervenção manual.
 
 ## 8. Jornada principal
 
-### Etapa 1 — Criar campanha
+### 8.1 Criar campanha e aprovar copy
 
-O operador/IA informa:
+O operador cria ou abre uma campanha, confere Copy Master e variantes. A headline é visual-only;
+hook, body e CTA formam o texto falado.
 
-- identificador;
-- personagem;
-- copy;
-- headline;
-- carta/objeto;
-- lista de três locais;
-- preset de voz;
-- preset de edição;
-- orçamento.
+### 8.2 Gerar e aprovar Voice Master
 
-Resultado: campanha `draft` com três variantes `not_started`.
+O sistema usa ElevenLabs, preserva o raw, produz WAV mono/48 kHz, remove silêncio nas bordas,
+normaliza e executa QC. A versão aprovada vira o único áudio upstream da campanha.
 
-### Etapa 2 — Aprovar Copy Master
+### 8.3 Gerar imagens manualmente
 
-O sistema valida formato e separa:
+O operador usa a ferramenta que preferir fora do sistema. A pipeline não depende de como a imagem
+foi criada.
 
-- headline visual;
-- hook;
-- body;
-- CTA;
-- spoken text.
+### 8.4 Importar imagens em batch
 
-Resultado: Copy Master imutável com versão e hash.
+O operador escolhe um manifest/pasta, confere dry-run e importa. Cada arquivo é validado, copiado
+e associado explicitamente a uma variante.
 
-### Etapa 3 — Gerar Voice Master
+### 8.5 Preparar HeyGen
 
-- chama ElevenLabs API;
-- salva raw;
-- trata áudio;
-- mede duração, WPM, silêncios, LUFS e true peak;
-- transcreve/compara;
-- apresenta player/relatório;
-- aguarda aprovação.
+O sistema faz preflight, reutiliza remote assets por hash e sobe apenas imagens/WAV ausentes.
 
-### Etapa 4 — Gerar imagens
+### 8.6 Gerar lote HeyGen
 
-Para cada variante:
+O operador confere quantidade/custo, aprova o batch e acompanha submissão, polling e download. O
+progresso de cada variante é independente.
 
-- monta job com prompt já fornecido pela IA;
-- Playwright abre Flow;
-- gera candidatas;
-- captura grid;
-- seleciona/download 2K;
-- salva artifacts;
-- executa image preflight;
-- envia para revisão.
+### 8.7 Configurar edição
 
-### Etapa 5 — Aprovar imagens
+O operador seleciona um EditProfile, ajusta headline, captions, music e framing e cria output
+variants. O preview mostra composição aproximada.
 
-Operador/IA visualiza imagem e crops, registra:
+### 8.8 Renderizar e revisar
 
-- aprovada;
-- aprovada com desvios;
-- rejeitada;
-- regenerar.
+O sistema resolve um EditManifest por output, renderiza, executa QC e apresenta os arquivos para
+approve/reject.
 
-### Etapa 6 — Gerar HeyGen
+### 8.9 Entregar
 
-Para imagens aprovadas:
-
-- autenticação MCP/OAuth;
-- reutiliza audio asset da Voice Master;
-- envia imagem;
-- cria look;
-- verifica Avatar III;
-- solicita vídeo explicitamente com Avatar III;
-- acompanha status;
-- baixa MP4;
-- executa QC.
-
-### Etapa 7 — Renderizar
-
-- produz captions;
-- gera headline;
-- aplica preset;
-- adiciona música;
-- renderiza proxy/master;
-- executa QC.
-
-### Etapa 8 — Revisar e entregar
-
-- player e relatório;
-- aprovar/rejeitar;
-- copiar master aprovado para destino;
-- comparar SHA-256;
-- registrar Delivery.
-
----
+Masters aprovados são copiados para uma pasta configurada e verificados por hash.
 
 ## 9. Requisitos funcionais
 
-### FR-001 — Criar campanha
+### FR-001 — Preservar Voice Master automatizada
 
 **Prioridade:** P0
 
-O sistema deve criar campanha a partir da UI, CLI ou API.
+- API oficial ElevenLabs;
+- texto sem headline;
+- raw imutável;
+- WAV processado mono/48 kHz;
+- trim de silêncio no início e no fim;
+- loudness/transcript/QC;
+- aprovação humana;
+- um asset de áudio reutilizável por campanha.
 
-**Campos mínimos:**
-
-- `campaign_id`;
-- conta/personagem;
-- copy/headline;
-- card/proof object;
-- voice preset;
-- edit preset;
-- budget;
-- três ou mais scene variants.
-
-**Aceitação:**
-
-- rejeita ID duplicado;
-- valida slug e paths;
-- persiste no SQLite;
-- cria diretório sem sobrescrever;
-- registra evento `campaign.created`.
-
-### FR-002 — Versionar e aprovar Copy Master
+### FR-002 — Importar imagens em batch
 
 **Prioridade:** P0
 
-- preservar source;
-- gerar spoken text sem headline;
-- calcular SHA-256;
-- bloquear edição de versão aprovada;
-- criar nova versão para mudanças.
+- manifest versionado com campaign ID e items;
+- associação explícita variant ID → path;
+- dry-run sem mutação;
+- validação de path, mídia real, dimensão e orientação;
+- hash e deduplicação;
+- cópia não destrutiva para path versionado;
+- falha atômica por default em batch inválido;
+- provenance de importação;
+- aprovação/seleção explícita;
+- replay idempotente.
 
-**Aceitação:** headline nunca aparece em `spoken_text` por default.
-
-### FR-003 — Gerenciar variantes
-
-**Prioridade:** P0
-
-Cada variante contém local, horário, ação, prompt, objeto e estado independente.
-
-**Aceitação:** falha em uma variante não bloqueia as demais.
-
-### FR-004 — Gerar voz por ElevenLabs API
+### FR-003 — Executar preflight HeyGen
 
 **Prioridade:** P0
 
-- usar API oficial;
-- voice ID/model ID explícitos;
-- secrets fora do projeto;
-- salvar raw e metadata sanitizada;
-- permitir pelo menos uma geração;
-- nunca usar Playwright/computer-use no ElevenLabs.
+- integração oficial MCP/OAuth ou API disponível;
+- status de conexão e capabilities;
+- engine/configuração suportada;
+- erro sanitizado e ação recomendada;
+- sem automação web.
 
-### FR-005 — Processar áudio
-
-**Prioridade:** P0
-
-- trim inicial/final;
-- clamp conservador de pausas longas;
-- tempo máximo configurável;
-- loudness e true peak;
-- 48 kHz;
-- hash e ffprobe;
-- preservar raw.
-
-**Aceitação:** output não substitui raw e possui relatório JSON.
-
-### FR-006 — Verificar narração
+### FR-004 — Fazer upload/reuso de assets HeyGen
 
 **Prioridade:** P0
 
-- gerar transcript/timestamps via API ou faster-whisper;
-- alinhar com copy;
-- listar diferenças;
-- bloquear quando a divergência exceder limite configurado;
-- bloquear se headline/direções forem faladas.
+- imagens selecionadas e Voice Master WAV;
+- upload batch;
+- dedupe por provider + kind + hash;
+- persistir remote ID;
+- reutilizar uma Voice Master entre variantes;
+- não persistir signed URLs ou tokens;
+- reconciliar estado ambíguo antes de retry.
 
-### FR-007 — Aprovar Voice Master
-
-**Prioridade:** P0
-
-- player;
-- métricas;
-- transcript diff;
-- approve/reject;
-- versão aprovada imutável.
-
-### FR-008 — Operar Google Flow por Playwright
+### FR-005 — Planejar geração HeyGen
 
 **Prioridade:** P0
 
-- perfil persistente isolado;
-- nunca usar o perfil pessoal principal do Chrome;
-- login manual inicial;
-- browser worker separado;
-- concorrência inicial igual a 1;
-- preencher prompt;
-- iniciar geração;
-- esperar resultado;
-- capturar screenshots;
-- selecionar candidata configurada;
-- aprimorar/download em 2K;
-- capturar download via Playwright;
-- detectar slots/estado e preservar screenshot/evidência da grade visível;
-- preservar, sem overwrite, toda candidata intencionalmente baixada e toda versão baixada
-  rejeitada; baixar todas as candidatas visíveis não é requisito P0;
-- timeout e erro estruturado.
+- dry-run com variantes, assets, reuso e paid actions;
+- configuração de avatar/engine explícita;
+- limite de renders pagos por campanha;
+- confirmação antes do primeiro batch real;
+- um logical render por variante/configuração.
 
-Seletores devem priorizar roles, labels, texto e atributos DOM verificáveis. Coordenadas cegas
-não são um mecanismo de continuidade aceitável.
-
-**Aceitação:** não aceitar arquivo 1K quando `require_2k=true`; uma UI não reconhecida para
-antes de qualquer ação irreversível e deixa screenshot/trace auditável.
-
-### FR-009 — Detectar mudança da UI do Flow
+### FR-006 — Gerar vídeos em batch
 
 **Prioridade:** P0
 
-Se elementos necessários não forem encontrados, o sistema deve:
+- submissão por variante;
+- concorrência configurável, default 2;
+- persistir video ID antes do polling;
+- falha isolada por variante;
+- sem retry cego de create-video.
 
-- parar a variante;
-- salvar screenshot;
-- salvar trace;
-- retornar `human_intervention_required`;
-- não clicar por coordenadas incertas.
-
-### FR-010 — Ingest/QC técnico da imagem
+### FR-007 — Poll e retomar
 
 **Prioridade:** P0
 
-- validar JPEG/PNG e decodificação;
-- dimensões/proporção;
-- hash;
-- crops de face, mãos e proof object quando configurados;
-- contact sheet;
-- OCR/face count como indicadores, sem aprovação automática semântica.
+- backoff e timeout configuráveis;
+- polling pelo video ID persistido;
+- resume após restart;
+- status claro para queued/processing/completed/failed/blocked;
+- reconciliation para resultado ambíguo.
 
-### FR-011 — Revisar imagem
-
-**Prioridade:** P0
-
-- approve;
-- approve with known deviations;
-- reject;
-- regenerate;
-- registrar operador, timestamp e comentário;
-- não excluir rejeitadas.
-
-### FR-012 — HeyGen MCP/OAuth preflight
+### FR-008 — Baixar e validar MP4
 
 **Prioridade:** P0
 
-Antes do lote:
-
-- verificar servidor MCP;
-- verificar OAuth sem expor token;
-- verificar ferramentas obrigatórias;
-- retornar relatório sanitizado.
-
-### FR-013 — Upload de assets HeyGen
-
-**Prioridade:** P0
-
-- criar upload;
-- fazer PUT com headers exatos;
-- completar upload;
-- verificar asset;
-- persistir asset ID e hash;
-- reutilizar audio asset por campanha;
-- não persistir URL assinada.
-
-### FR-014 — Criar e verificar Photo Avatar Look
-
-**Prioridade:** P0
-
-- criar/reutilizar avatar group;
-- criar look por imagem aprovada;
-- poll com timeout;
-- persistir look ID;
-- bloquear se `supported_api_engines` não incluir `avatar_iii`.
-
-### FR-015 — Criar vídeo Avatar III
-
-**Prioridade:** P0
-
-Request deve conter explicitamente:
-
-```json
-{"engine":{"type":"avatar_iii"}}
-```
-
-- usar look concluído;
-- usar audio asset aprovado;
-- solicitar 1080p 9:16;
-- solicitar SRT sidecar quando suportado;
-- persistir video ID imediatamente;
-- nunca repetir POST pago de estado ambíguo.
-
-### FR-016 — Poll e download HeyGen
-
-**Prioridade:** P0
-
-- polling com backoff;
-- timeout configurável;
-- retomada pelo video ID;
 - download atômico `.part` → final;
+- output versionado sem overwrite;
 - hash;
-- nunca registrar URL assinada.
+- `ffprobe` e full decode;
+- vídeo vertical, streams H.264/AAC aceitos e duração plausível;
+- signed URL apenas em memória.
 
-### FR-017 — QC do source MP4
-
-**Prioridade:** P0
-
-- full decode;
-- 1080×1920;
-- H.264/AAC aceitos;
-- áudio presente;
-- duração compatível;
-- contact sheet;
-- relatório.
-
-### FR-018 — Construir captions
+### FR-009 — Gerenciar EditProfile
 
 **Prioridade:** P0
 
-Preferência de timing:
+- create/list/get/update-as-new-version;
+- defaults de output, headline, captions, music, framing e safe zones;
+- nome/versão imutáveis após uso;
+- sem texto específico de campanha ou source path.
 
-1. sidecar do HeyGen;
-2. timing ElevenLabs validado contra source;
-3. ASR do MP4 final;
-4. forced-alignment fallback.
-
-Texto final sempre vem da Copy Master aprovada.
-
-- máximo duas linhas;
-- safe zone;
-- sem headline;
-- validar sequência de palavras;
-- sem eventos fora da duração.
-
-### FR-019 — Gerar headline
+### FR-010 — Resolver EditManifest
 
 **Prioridade:** P0
 
-- visual-only;
-- presets permitidos;
-- wrap e font fit;
-- position/duration no manifest;
-- style-frame de verificação.
+- inputs e hashes;
+- profile version;
+- campaign defaults;
+- video override;
+- output variant override;
+- precedência determinística;
+- provenance por seção/campo;
+- manifest resolvido imutável e hashável;
+- somente campos tipados conhecidos.
 
-### FR-020 — Render editorial
-
-**Prioridade:** P0
-
-- manifest renderer-neutral;
-- zoom sutil;
-- captions;
-- headline;
-- música;
-- 1080×1920;
-- H.264/AAC;
-- faststart;
-- output versionado;
-- nunca sobrescrever final.
-
-### FR-021 — Mixagem segura
+### FR-011 — Configurar headline
 
 **Prioridade:** P0
 
-- voz preservada;
-- música em nível configurável;
-- `amix normalize=0` ou compensação documentada;
+- text;
+- style/preset;
+- font, weight, size e line height;
+- color, stroke/shadow/background;
+- anchor/position e safe zone;
+- max lines e fit policy;
+- start/end;
+- sempre visual-only.
+
+### FR-012 — Configurar captions
+
+**Prioridade:** P0
+
+- texto da Copy Master aprovada;
+- timing com provenance;
+- font/style/color/highlight;
+- position/safe zone;
+- máximo de linhas;
+- headline excluída.
+
+### FR-013 — Configurar music
+
+**Prioridade:** P0
+
+- asset local aprovado;
+- volume;
+- loop/trim;
+- fade-in/fade-out;
+- voz como referência de mix.
+
+### FR-014 — Configurar framing
+
+**Prioridade:** P0
+
+- fit/crop;
+- scale;
+- x/y position;
+- zoom sutil opcional;
+- sem timeline ou keyframes livres.
+
+### FR-015 — Criar A/B de headline
+
+**Prioridade:** P0
+
+- múltiplas output variants para um source MP4;
+- headline text independente por output;
+- IDs/filenames determinísticos;
+- contador e limite de combinações;
+- nenhum job de Voice, image ou HeyGen;
+- dry-run lista todos os outputs.
+
+### FR-016 — Renderizar
+
+**Prioridade:** P0
+
+- renderer inicial FFmpeg/ASS;
+- master 1080×1920, H.264/AAC, yuv420p, faststart;
+- headline, captions, music e framing;
+- `amix normalize=0` ou compensação equivalente documentada;
 - limiter;
-- loudness medido no output final;
-- falhar quando voz estiver baixa ou clipping ocorrer.
+- output versionado;
+- idempotência por manifest hash.
 
-### FR-022 — QC final
-
-**Prioridade:** P0
-
-Checks:
-
-- existência/tamanho;
-- hash;
-- ffprobe;
-- full decode;
-- duração;
-- resolução/FPS;
-- áudio;
-- LUFS/true peak;
-- black/freeze indicators;
-- captions/headline bounds;
-- source/input hashes;
-- contact sheet;
-- proxy.
-
-### FR-023 — Aprovar render
+### FR-017 — Executar QC final
 
 **Prioridade:** P0
 
-- approve/reject;
-- comentário;
+- existência/tamanho/hash;
+- `ffprobe` e full decode;
+- duração, resolução, FPS e streams;
+- loudness, true peak e clipping;
+- voz audível;
+- bounds de headline/captions;
+- contact sheet/proxy.
+
+### FR-018 — Revisar e entregar
+
+**Prioridade:** P0
+
+- approve/reject + comentário;
 - master aprovado imutável;
-- rejeição pode criar nova versão de edit manifest.
+- nova revisão em vez de overwrite;
+- delivery para pasta local configurada;
+- hash origem/destino;
+- não chamar cópia local de upload cloud.
 
-### FR-024 — Entregar
-
-**Prioridade:** P0
-
-- copiar para pasta configurada;
-- filename determinístico/versionado;
-- verificar hash origem/destino;
-- registrar Delivery;
-- distinguir pasta sincronizada de cloud upload confirmado.
-
-### FR-025 — Fila persistente
+### FR-019 — Operar pela API e UI
 
 **Prioridade:** P0
 
-- queued/running/completed/failed/cancelled;
-- attempts;
-- lock e heartbeat;
-- timeout;
-- retry policy;
-- priority;
-- concurrency por adapter;
-- retomada após restart.
+- API e CLI compartilham application services;
+- UI nunca chama provider/FFmpeg ou banco diretamente;
+- operações longas criam Jobs;
+- status agregado e próximo bloqueio;
+- polling HTTP simples suficiente para o MVP.
 
-### FR-026 — Dry-run
+### FR-020 — Oferecer preview aproximado
 
 **Prioridade:** P0
 
-Dry-run deve mostrar:
+- canvas 9:16;
+- frame/poster do source;
+- overlays HTML/CSS para headline/captions;
+- aproximação de framing, font, size, color, wrap e position;
+- atualização rápida ao editar;
+- label permanente “preview aproximado”;
+- render final é a referência autoritativa.
 
-- jobs planejados;
-- ações pagas;
-- recursos reutilizados;
-- arquivos a criar;
-- bloqueios;
-- estimativa de variantes;
-- sem executar geração/download pago.
+## 10. Interface local
 
-### FR-027 — Budget gate
+### 10.1 Campaigns
 
-**Prioridade:** P0
-
-- limite de renders HeyGen;
-- aprovação antes do primeiro paid render do piloto;
-- bloquear acima do limite;
-- registrar decisão.
-
-### FR-028 — API e CLI compartilhadas
-
-**Prioridade:** P0
-
-CLI e UI devem chamar os mesmos application services. Nenhuma regra de negócio exclusiva na UI.
-
-### FR-029 — Eventos em tempo real
-
-**Prioridade:** P0
-
-SSE deve transmitir:
-
-- job queued/started/progress/completed/failed;
-- state changed;
-- review required;
-- campaign summary changed.
-
-### FR-030 — Ferramenta Hermes
-
-**Prioridade:** P1
-
-Oferecer endpoint/wrapper com ações compactas:
-
-- create_campaign;
-- run_campaign;
-- get_status;
-- approve/reject;
-- resume/pause/cancel.
-
----
-
-## 10. Requisitos da interface MVP
-
-### UI-001 — Dashboard
-
-- campanhas;
+- lista de campanhas;
 - progresso agregado;
-- jobs ativos;
-- reviews pendentes;
-- falhas;
-- filtros simples.
+- próximo bloqueio;
+- jobs/falhas/reviews pendentes.
 
-### UI-002 — Campaign Detail
+### 10.2 Campaign Detail
 
-- Copy Master;
-- Voice Master;
-- lista de variantes;
-- estado por estágio;
-- budget;
-- ações run/pause/resume.
+- Copy Master e Voice Master;
+- variantes;
+- assets locais/remotos;
+- status HeyGen;
+- edit variants e renders.
 
-### UI-003 — Voice Review
+### 10.3 Image Import
 
-- player;
-- duração/WPM/LUFS/peak;
-- transcript diff;
-- approve/reject.
+- selecionar manifest/pasta;
+- dry-run;
+- mostrar cobertura e erros por variante;
+- confirmar importação.
 
-### UI-004 — Image Gallery
+### 10.4 HeyGen
 
-- candidatas por variante;
-- preview/crops;
-- prompt;
-- metadata;
-- approve/reject/regenerate;
-- comentário de desvios.
+- preflight;
+- assets reused/uploaded;
+- batch planned/submitted;
+- status por variante;
+- resume e download.
 
-### UI-005 — HeyGen Queue
+### 10.5 Editing
 
-- MCP/OAuth status sanitizado;
-- look/video status;
-- engine;
-- IDs remotos não sensíveis;
-- retry/resume seguro;
-- paid action gate.
+- escolher EditProfile;
+- editar overrides;
+- criar/reordenar/remover output variants;
+- duplicar headline variant;
+- preview aproximado;
+- contador de renders planejados.
 
-### UI-006 — Video Review
+### 10.6 Renders
 
-- player;
-- contact sheet;
-- technical QC;
+- queue/progress;
+- player/proxy;
+- QC;
 - approve/reject;
-- path do master.
+- path e delivery.
 
-### UI-007 — Logs e erros
-
-- eventos filtrados por campanha/variante;
-- mensagem humana;
-- detalhes técnicos expansíveis;
-- paths de screenshot/trace;
-- secrets redigidos.
-
----
-
-## 11. Arquitetura técnica
+## 11. Arquitetura
 
 ```text
-React/TypeScript UI
-        │ HTTP + SSE
-        ▼
-FastAPI
-        │
-        ▼
-Application Services
-        │
-        ├── Domain + State Machine
-        ├── Job Queue (SQLite)
-        └── Approval/Cost Policies
-                │
-                ▼
-Workers
-  ├── FlowPlaywrightWorker
-  ├── ElevenLabsWorker
-  ├── HeyGenMcpWorker
-  ├── MediaWorker
-  ├── RenderWorker
-  └── DeliveryWorker
-                │
-                ▼
-Adapters
-  ├── Google Flow / Playwright
-  ├── ElevenLabs API
-  ├── HeyGen MCP/OAuth
-  ├── FFmpeg/ffprobe
-  ├── Filesystem
-  └── Drive Desktop folder
+React/TypeScript
+      │ HTTP polling
+      ▼
+FastAPI routes
+      │
+      ▼
+Application services
+      │
+      ├── Domain/Pydantic contracts
+      ├── SQLite repositories
+      ├── persistent Jobs
+      └── filesystem workspaces
+             │
+             ├── ElevenLabs adapter (existing)
+             ├── HeyGen official adapter
+             └── FFmpeg/ffprobe renderer
 ```
 
-### Regra arquitetural
+Google Flow existe como adapter legado pausado e não aparece no happy path obrigatório.
 
-UI, CLI e Hermes adapter nunca executam FFmpeg, Playwright ou APIs diretamente. Eles solicitam application services que criam jobs persistentes.
+### Regras arquiteturais
 
----
+- modular monolith;
+- routes/components finos;
+- provider calls somente em workers/handlers;
+- filesystem contém mídia, SQLite contém metadados;
+- nenhum framework novo sem necessidade demonstrada;
+- reuse dos helpers e domínios existentes antes de criar novos módulos;
+- fakes no limite de provider;
+- contratos versionados e schemas gerados.
 
-## 12. Estrutura de código alvo
+## 12. Modelo de dados alvo
 
-```text
-src/auraly_pipeline/
-  api/
-    app.py
-    routes/
-    sse.py
+### Já existente e reutilizado
 
-  cli/
-    campaign.py
-    jobs.py
-    providers.py
+- Campaign;
+- CopyMaster;
+- SceneVariant;
+- VoiceMaster;
+- ImageGeneration/ImageCandidate;
+- Job/Attempt/Event;
+- approval/audit metadata já disponível.
 
-  domain/
-    campaign.py
-    copy_master.py
-    voice_master.py
-    scene_variant.py
-    assets.py
-    states.py
-    events.py
+### A introduzir
 
-  application/
-    commands/
-    queries/
-    services/
-    policies/
+#### ImageImportBatch
 
-  orchestration/
-    scheduler.py
-    worker.py
-    state_machine.py
-    retry.py
-    locks.py
-
-  adapters/
-    elevenlabs/
-    google_flow/
-    heygen_mcp/
-    media/
-    delivery/
-    persistence/
-
-  qc/
-    audio.py
-    image.py
-    video.py
-    render.py
-
-  manifests/
-    models.py
-    schema.py
-
-frontend/
-  src/
-    api/
-    components/
-    pages/
-    features/
-```
-
----
-
-## 13. Modelo de dados inicial
-
-### campaigns
-
-- id;
-- slug;
-- character;
+- id/schema_version/campaign_id;
+- source manifest hash;
 - status;
-- copy_master_id;
-- voice_master_id;
-- edit_preset;
-- budget_json;
-- created_at/updated_at.
+- items e errors;
+- created_at/completed_at.
 
-### copy_masters
+#### RemoteAsset
 
-- id/version;
-- campaign_id;
-- source_path;
-- spoken_text_path;
-- headline;
-- sha256;
-- approval status/by/at.
+- provider/kind/local hash;
+- remote ID;
+- status;
+- sanitized metadata.
 
-### voice_masters
+#### HeyGenRender
 
-- id/version;
-- campaign_id;
-- provider;
-- voice_id/model_id;
-- raw_path/processed_path;
-- transcript_path;
-- duration/wpm/lufs/peak;
-- sha256;
+- campaign/variant IDs;
+- image/audio remote asset IDs;
+- engine/config hash;
+- remote video ID;
+- source MP4 path/hash;
+- status and timestamps.
+
+#### EditProfile
+
+- id/name/version;
+- typed defaults;
+- schema version;
+- created_at.
+
+#### EditVariant
+
+- id/source video ID;
+- label;
+- typed override sections;
+- planned manifest hash;
 - status.
 
-### scene_variants
+#### EditRender
 
-- id;
-- campaign_id;
-- slug;
-- location/time/action/object;
-- prompt_path;
-- status;
-- selected_image_id;
-- look_id;
-- video_render_id.
+- edit variant ID;
+- resolved manifest path/hash;
+- renderer version;
+- proxy/master path/hash;
+- QC/review/delivery status.
 
-### image_candidates
+O design de cada Goal decide se uma entidade requer tabela própria. Não criar tabelas apenas por
+constarem neste modelo conceitual.
 
-- id/version;
-- variant_id;
-- source_path;
-- prompt_hash;
-- width/height;
-- sha256;
-- review status/comment;
-- deviations_json.
-
-### remote_assets
-
-- id;
-- provider;
-- kind;
-- local_sha256;
-- remote_id;
-- status;
-- metadata_json sanitizado.
-
-### avatar_looks
-
-- id;
-- variant_id;
-- remote_id;
-- group_id;
-- status;
-- supported_engines_json.
-
-### video_renders
-
-- id;
-- variant_id;
-- provider;
-- remote_id;
-- engine;
-- source_path;
-- sha256;
-- status.
-
-### edit_renders
-
-- id/version;
-- variant_id;
-- manifest_path/hash;
-- proxy_path/master_path;
-- status.
-
-### qc_reports
-
-- id;
-- subject_type/id;
-- report_path;
-- result;
-- failures_json.
-
-### jobs / job_attempts / job_events
-
-- tipo, payload, status, priority;
-- lock/heartbeat;
-- attempts;
-- error code/message;
-- timestamps.
-
-### approvals
-
-- subject;
-- decision;
-- actor;
-- comment;
-- known deviations;
-- timestamp.
-
-### deliveries
-
-- render_id;
-- source/destination;
-- hashes;
-- status;
-- timestamp.
-
----
-
-## 14. Contrato de diretórios
+## 13. Diretórios alvo
 
 ```text
 campaigns/<campaign-id>/
-  campaign.yaml
   shared/
     copy/
     voice/
     music/
     fonts/
   variants/<variant-id>/
-    flow/
-    source/
-    heygen/
-    edit/
-    render/
+    images/imported/
+    heygen/assets/
+    heygen/source/
+    edit/manifests/
+    edit/renders/
     qc/
-    manifests/
   reports/
   delivery/
-  logs/
 ```
 
-Regras:
+Regras: paths relativos em manifests, files versionados, writes atômicos, sources imutáveis e
+nenhum secret.
 
-- sources imutáveis;
-- outputs versionados;
-- writes atômicos;
-- paths relativos no manifest;
-- nenhum secret;
-- nada é sobrescrito por default.
+## 14. Requisitos não funcionais
 
----
+### NFR-001 — Uso local
 
-## 15. API mínima
+FastAPI escuta apenas em `127.0.0.1`. Sem autenticação no MVP enquanto não houver exposição de
+rede.
 
-### Campaigns
+### NFR-002 — Retomada
 
-```text
-POST /api/campaigns
-GET  /api/campaigns
-GET  /api/campaigns/{id}
-POST /api/campaigns/{id}/run
-POST /api/campaigns/{id}/pause
-POST /api/campaigns/{id}/resume
-POST /api/campaigns/{id}/dry-run
-```
+Restart não duplica uploads, gerações pagas, downloads íntegros ou renders pelo mesmo manifest.
 
-### Voice
+### NFR-003 — Idempotência
 
-```text
-POST /api/campaigns/{id}/voice/generate
-GET  /api/campaigns/{id}/voice
-POST /api/voice/{id}/approve
-POST /api/voice/{id}/reject
-```
+Keys incluem os inputs que materialmente mudam a operação. Configuração HeyGen diferente cria um
+logical render diferente; headline diferente cria apenas outro EditVariant.
 
-### Variants/images
+### NFR-004 — Não destrutivo
 
-```text
-POST /api/campaigns/{id}/variants
-POST /api/variants/{id}/flow/generate
-GET  /api/variants/{id}/images
-POST /api/images/{id}/approve
-POST /api/images/{id}/reject
-POST /api/variants/{id}/flow/regenerate
-```
+Nunca mover source do usuário, sobrescrever media existente ou reutilizar filename como identidade
+sem hash/ID persistido.
 
-### HeyGen
+### NFR-005 — Segurança mínima obrigatória
 
-```text
-GET  /api/providers/heygen/status
-POST /api/variants/{id}/heygen/submit
-GET  /api/variants/{id}/heygen
-POST /api/variants/{id}/heygen/resume
-```
-
-### Render/QC/delivery
-
-```text
-POST /api/variants/{id}/render
-GET  /api/variants/{id}/qc
-POST /api/renders/{id}/approve
-POST /api/renders/{id}/reject
-POST /api/renders/{id}/deliver
-```
-
-### Jobs/events
-
-```text
-GET  /api/jobs
-GET  /api/jobs/{id}
-POST /api/jobs/{id}/cancel
-GET  /api/events/stream
-```
-
----
-
-## 16. Segurança e privacidade
-
-### Secrets
-
-- ElevenLabs API key em secret store local ou ambiente seguro fora do repo;
-- OAuth HeyGen no Hermes/MCP;
-- cookies Flow no perfil Playwright ignorado pelo Git;
-- nenhum secret no SQLite, campaign YAML, manifests ou logs;
-- sanitizer obrigatório para payloads e erros.
-
-### Rede
-
-- API e UI em `127.0.0.1`;
-- sem exposição LAN no MVP;
-- CORS apenas para o frontend local;
-- downloads remotos somente dos providers configurados.
-
-### Filesystem
-
-- validar paths sob roots aprovados;
-- prevenir path traversal;
-- finals imutáveis;
-- download atômico;
-- verificar hash antes/depois de delivery.
-
-### Ações pagas
-
+- secrets fora de Git/SQLite/manifests/logs;
+- trusted roots e path containment;
+- signed URLs efêmeras;
+- sanitização de erros;
 - budget gate;
-- IDs remotos persistidos;
-- sem retry cego;
-- dry-run;
-- confirmação antes do primeiro lote pago.
+- no blind retry para ação paga ambígua.
 
----
+### NFR-006 — Performance percebida
 
-## 17. Requisitos não funcionais
+- consultas locais comuns abaixo de 500 ms como alvo;
+- operação longa vira Job;
+- UI atualiza por polling em intervalo curto;
+- preview responde sem render real.
 
-### NFR-001 — Retomada
+### NFR-007 — Testabilidade
 
-Após restart do processo ou PC, jobs `running` sem heartbeat tornam-se `recoverable` e retomam a partir de IDs/artifacts persistidos.
+- unit tests para contratos e resolução;
+- integration tests com fake HeyGen e mídia sintética;
+- nenhuma chamada paga em CI;
+- canaries separados e aprovados.
 
-### NFR-002 — Idempotência
+### NFR-008 — Compatibilidade
 
-Reexecutar comando não deve:
+- Windows 10/11 x64;
+- Python 3.11;
+- versões travadas do ambiente existente;
+- paths Windows tratados explicitamente.
 
-- duplicar campanhas;
-- reenviar asset com mesmo hash quando reutilizável;
-- recriar look concluído;
-- repetir vídeo pago existente;
-- sobrescrever render final.
+## 15. Políticas de retry
 
-### NFR-003 — Observabilidade
-
-Todo job registra:
-
-- correlation ID;
-- campaign/variant IDs;
-- stage;
-- tentativa;
-- timestamps;
-- duration;
-- status;
-- erro sanitizado;
-- paths de relatório.
-
-### NFR-004 — Performance
-
-- UI deve responder em menos de 500 ms para consultas locais comuns;
-- operações longas sempre em worker;
-- progresso visível em até 2 segundos após evento persistido.
-
-### NFR-005 — Concorrência
-
-Defaults:
-
-```text
-Flow: 1
-ElevenLabs: 1
-HeyGen: 2
-Render: 2
-```
-
-Configuráveis sem alterar código.
-
-### NFR-006 — Reprodutibilidade
-
-Manifest deve registrar:
-
-- hashes dos inputs;
-- versões de presets;
-- parâmetros;
-- versões de FFmpeg/renderer;
-- timestamps e approval hashes.
-
-### NFR-007 — Compatibilidade
-
-- Windows 10 x64;
-- Python 3.11.15;
-- FFmpeg 8.1.1 ou versão validada;
-- paths Windows e MSYS tratados corretamente.
-
-### NFR-008 — Testabilidade
-
-Adapters devem ser substituíveis por fakes. Testes de unidade não fazem chamadas pagas.
-
----
-
-## 18. Políticas de retry
-
-### Seguro para retry automático
+### Retry automático permitido
 
 - GET/status;
-- download incompleto com mesma URL ainda válida;
 - polling;
-- ffprobe/QC local;
+- download incompleto quando a mesma referência ainda é válida;
+- QC local;
 - render local para novo path versionado;
-- Flow antes da confirmação de geração somente quando não houver evidência de submissão.
+- upload somente quando o provider garante idempotência ou a ausência foi reconciliada.
 
-### Não repetir automaticamente em estado ambíguo
+### Retry automático proibido em estado ambíguo
 
-- ElevenLabs TTS POST;
-- Flow generate click;
-- HeyGen create look;
-- HeyGen create video;
-- qualquer paid action.
+- ElevenLabs generation;
+- HeyGen asset creation;
+- HeyGen create-video;
+- qualquer paid action;
+- Google Flow Generate legado.
 
-Nesses casos, reconciliar provider/state antes de retry.
-
----
-
-## 19. Estratégia de captions
-
-Ordem de preferência:
-
-1. SRT sidecar do HeyGen;
-2. timestamps ElevenLabs, após medir drift do MP4 HeyGen;
-3. faster-whisper no source MP4;
-4. forced alignment.
-
-Regras:
-
-- copy aprovada fornece texto e pontuação;
-- ASR fornece timing;
-- headline não entra nas captions;
-- validar token sequence;
-- máximo 2 linhas;
-- estilo/preset versionado;
-- style-frame obrigatório para um novo preset.
-
----
-
-## 20. Estratégia de render
-
-### Input
-
-- source MP4 HeyGen;
-- EditManifest;
-- captions;
-- headline;
-- música aprovada;
-- fonts job-local.
-
-### Output
-
-- proxy opcional 540×960;
-- master 1080×1920;
-- H.264 high profile;
-- yuv420p;
-- AAC 48 kHz;
-- CFR;
-- faststart.
-
-### Mixagem
-
-- voz como referência;
-- música inicialmente 16–20 dB abaixo da narração, ajustada por medição;
-- `amix normalize=0`;
-- limiter;
-- medir final.
-
----
-
-## 21. Estratégia de testes
+## 16. Estratégia de testes
 
 ### Unitários
 
-- state transitions;
-- manifest validation;
-- header dedup case-insensitive;
-- path safety;
-- copy/headline separation;
-- budget policy;
-- retry policy;
-- caption token alignment;
-- filename/versioning;
+- image batch validation/idempotency;
+- asset dedupe;
+- budget e retry policy;
+- EditProfile/Manifest validation;
+- override precedence;
+- A/B planning sem upstream jobs;
+- filename/hash/versioning;
 - log redaction.
 
-### Integração sem custo
+### Integração local
 
-- fake ElevenLabs server;
-- fake HeyGen MCP responses;
-- local HTTP presigned-upload simulator;
-- Playwright em página mock do Flow;
-- FFmpeg synthetic media;
-- SQLite restart/recovery.
+- fake HeyGen;
+- simulated upload endpoint;
+- polling/restart;
+- synthetic MP4/WAV/images;
+- FFmpeg render + full decode;
+- FastAPI test client;
+- React tests para principais estados e preview controls.
 
 ### Canary real
 
-1. ElevenLabs: geração curta aprovada;
-2. Flow: uma imagem 2K;
-3. HeyGen: uma variante real Avatar III;
-4. render/QC/delivery local.
+1. ElevenLabs curto, caso ainda não esteja provider-verified;
+2. HeyGen com uma imagem/Voice Master;
+3. piloto de três variantes;
+4. nove renders locais e três deliveries.
 
-### E2E do piloto
-
-- três variantes reais;
-- pausa/restart simulada;
-- uma rejeição/regeneração de imagem;
-- uma falha de worker recuperada;
-- três renders aprovados.
-
----
-
-## 22. Plano de implementação
-
-O PRD especifica o produto-alvo, mas não mantém uma segunda sequência operacional. A ordem,
-os limites, as dependências, os critérios de saída e os comandos de verificação ficam em
-`docs/GOAL-ROADMAP.md`:
-
-1. Goal 0 — Repository Alignment;
-2. Goal 1 — Campaign Foundation;
-3. Goal 2 — Persistent Job Orchestration;
-4. Goal 3 — Voice Master;
-5. Goal 4 — Google Flow Campaign Integration;
-6. Goal 5 — HeyGen;
-7. Goal 6 — Deterministic Editing;
-8. Goal 7 — End-to-End Canary;
-9. Goal 8 — Local API/UI.
-
-Essa separação impede que capacidades planejadas no PRD sejam interpretadas como já
-implementadas. O roadmap pode decompor requisitos em Goals menores sem alterar o escopo do MVP
-estabelecido neste documento.
-
----
-
-## 23. Riscos e mitigação
-
-### R1 — Mudança na UI do Google Flow
-
-**Probabilidade:** alta.
-**Mitigação:** selectors versionados, roles/labels, screenshots, trace, stop-safe e canary diário/manual.
-
-### R2 — OAuth/MCP indisponível
-
-**Mitigação:** preflight antes do lote, status claro e bloqueio; não usar fallback web silencioso.
-
-### R3 — Duplicação de ações pagas
-
-**Mitigação:** persistência de IDs antes de polling, reconciliation, budget gate e sem retry cego.
-
-### R4 — Inconsistência visual do personagem/carta
-
-**Mitigação:** gate por imagem, crops e revisão semântica; preservar versões rejeitadas.
-
-### R5 — Drift de timing do HeyGen
-
-**Mitigação:** timing do MP4 final ou medir drift antes de reutilizar timestamps.
-
-### R6 — Mixagem baixa/inaudível
-
-**Mitigação:** `amix normalize=0`, final loudness QC e blocker automático.
-
-### R7 — Application Control do Windows
-
-**Mitigação:** usar Python 3.11 validado, executáveis aprovados, comandos isolados e testes de instalação.
-
-### R8 — Escopo grande demais
-
-**Mitigação:** piloto de três variantes, P0 rigoroso, sem publicação automática/timeline completa.
-
-### R9 — HyperFrames vulnerabilities
-
-**Mitigação:** localhost, inputs aprovados, versão fixada e adapter substituível; FFmpeg pode ser renderer inicial.
-
----
-
-## 24. Critérios de aceite do MVP
+## 17. Critérios de aceite
 
 ### Produto
 
-- [ ] campanha criada por UI/API;
-- [ ] Copy Master aprovada e imutável;
-- [ ] Voice Master via ElevenLabs API;
-- [ ] três variantes configuradas;
-- [ ] três imagens Flow 2K aprovadas;
-- [ ] três looks com suporte Avatar III;
-- [ ] três vídeos gerados via MCP/OAuth;
-- [ ] três masters renderizados;
-- [ ] três QCs P0 aprovados;
-- [ ] gates e histórico visíveis na UI;
-- [ ] entrega com hash verificado.
+- [ ] batch de três imagens importado e associado corretamente;
+- [ ] Voice Master WAV reutilizada como asset HeyGen;
+- [ ] assets remotos deduplicados por hash;
+- [ ] três gerações HeyGen reais concluídas e baixadas;
+- [ ] três headlines planejadas para cada MP4;
+- [ ] nove manifests/renders sem paid actions extras;
+- [ ] headline/captions/music/framing configuráveis;
+- [ ] preview aproximado útil e claramente rotulado;
+- [ ] três masters aprovados e entregues.
+
+### Operação
+
+- [ ] happy path operável pela UI;
+- [ ] restart durante polling recuperado;
+- [ ] erro isolado por variante;
+- [ ] próximo bloqueio visível;
+- [ ] CLI suficiente para diagnóstico;
+- [ ] nenhum JSON precisa ser editado manualmente no happy path.
 
 ### Técnico
 
-- [ ] `pytest`, Ruff e mypy aprovados;
-- [ ] migrações do banco testadas;
-- [ ] restart/recovery testado;
-- [ ] duplicate-paid-action testado;
-- [ ] secrets ausentes de logs/manifests;
-- [ ] Flow UI failure produz screenshot/trace;
-- [ ] Avatar III explícito e verificado;
-- [ ] render final full-decode;
-- [ ] loudness QC bloqueia mixagem baixa;
-- [ ] sources/finals não são sobrescritos.
+- [ ] full verification green;
+- [ ] schema drift check green;
+- [ ] frontend lint/typecheck/test/build green;
+- [ ] secrets ausentes dos artifacts;
+- [ ] duplicate-paid-action coberto;
+- [ ] sources/finals não sobrescritos;
+- [ ] render full-decode e loudness QC;
+- [ ] provider canary separado de testes determinísticos.
 
-### Operacional
+## 18. Riscos e respostas
 
-- [ ] Rafael consegue iniciar, pausar e retomar campanha;
-- [ ] consegue aprovar/rejeitar voz, imagens e vídeos;
-- [ ] erros apresentam ação recomendada;
-- [ ] IA consegue consultar status em JSON compacto;
-- [ ] documentação de instalação/operação atualizada.
+### R1 — Integração oficial HeyGen difere do contrato esperado
 
----
+Começar por preflight/adapter estreito e validar uma geração real antes de expandir batch.
 
-## 25. Definition of Done por feature
+### R2 — Ações pagas duplicadas
 
-Uma feature só está concluída quando:
+Persistir remote IDs cedo, usar logical keys completas e reconciliar antes de retry.
 
-1. código implementado;
-2. schema/migração criados quando necessário;
-3. unit tests;
-4. integration test com fake;
-5. log sanitizado;
-6. erro e retry documentados;
-7. API/CLI atualizadas;
-8. UI atualizada quando aplicável;
-9. docs atualizados;
-10. canary real executado quando envolver provider;
-11. artifact real verificado, não apenas mock.
+### R3 — Timing de captions não acompanha MP4
 
----
+Registrar provenance; preferir sidecar confiável e medir drift antes de reutilizar timing da voz.
 
-## 26. Decisões que precisam de Rafael antes/durante a implementação
+### R4 — Preview diverge do render
 
-Não bloqueiam Goals 0–2, mas devem ser decididas antes dos respectivos adapters:
+Declarar preview aproximado, manter controles equivalentes e usar proxy renderizado para review
+final.
 
-1. limite de renders pagos HeyGen no piloto;
-2. número de candidatas Flow por local;
-3. settings iniciais oficiais do Michael C. Vincent;
-4. renderer MVP: FFmpeg/ASS como default ou HyperFrames;
-5. pasta final de entrega;
-6. porta local da interface;
-7. retenção de imagens rejeitadas e traces;
-8. música default por conta/campanha;
-9. se a IA pode aprovar imagens sozinha ou apenas recomendar;
-10. se o primeiro wrapper Hermes será CLI JSON ou endpoint HTTP.
+### R5 — Explosão de variantes
 
-Defaults propostos, caso não haja decisão:
+Mostrar cardinalidade, impor limite configurável e exigir confirmação acima do default.
+
+### R6 — Escopo de UI cresce para editor genérico
+
+Manter telas orientadas ao workflow, inputs tipados e ausência deliberada de timeline/canvas livre.
+
+### R7 — Google Flow volta a consumir o roadmap
+
+Manter Goals 4B–4D pausados até o piloto demonstrar que geração manual é gargalo real.
+
+## 19. Defaults do piloto
 
 ```yaml
-pilot:
-  heygen_render_limit: 3
-  flow_candidates_per_location: 2
-  renderer: ffmpeg_ass
-  ui_port: 8742
-  flow_trace_retention_days: 30
-  rejected_image_retention: permanent
-  image_approval: human_required
-  hermes_integration: http_local
+campaign_variants: 3
+headline_variants_per_video: 3
+heygen_paid_render_limit: 3
+heygen_concurrency: 2
+renderer: ffmpeg_ass
+ui_host: 127.0.0.1
+ui_port: 8742
+preview: approximate
+image_approval_on_import: true
 ```
 
----
+Esses valores destravam desenvolvimento. Podem virar configuração no Goal responsável, sem criar
+uma camada genérica antes de existir necessidade.
 
-## 27. Sequenciamento da implementação
+## 20. Ordem de entrega
 
-O PRD define o alvo do MVP; `docs/GOAL-ROADMAP.md` é a fonte operacional para sequenciar
-Codex Goals estreitos e verificáveis. O alinhamento do repositório é o Goal 0. Depois que seus
-checks e commit forem concluídos, o próximo trabalho será `Goal 1 — Campaign Foundation`:
+A sequência executável é mantida exclusivamente em `docs/GOAL-ROADMAP.md`:
 
-1. modelos Pydantic de `Campaign`, `CopyMaster` e `SceneVariant`;
-2. SQLite, SQLAlchemy 2 e Alembic;
-3. repositories e application service;
-4. CLI create/get/list;
-5. persistência após restart;
-6. testes de criação, duplicidade, paths, migrations e restart.
+1. D1 Manual Image Batch Intake;
+2. D2A/D2B/D2C HeyGen;
+3. D3A/D3B edição e A/B;
+4. D4A/D4B API/UI e preview;
+5. D5A/D5B render/QC/delivery;
+6. D6 piloto end-to-end.
 
-Goal 1 não inclui providers externos, job orchestrator completo, edição, FastAPI ou frontend.
-Cada Goal posterior deve obedecer aos limites, dependências e critérios de saída do roadmap.
-Nenhuma chamada paga é necessária para Goals 0–2.
+O primeiro trabalho de implementação deve ser o design do D1. Nenhuma decisão de D2–D6 precisa
+ser antecipada para iniciar esse Goal.
