@@ -151,12 +151,33 @@ class FlowBrowserSession:
 
     def open(self) -> Page:
         """Launch only Playwright's headed persistent context and await manual authentication."""
-        self._manager = self._playwright_factory()
-        self._playwright = self._manager.__enter__()
-        self._context = self._playwright.chromium.launch_persistent_context(
-            user_data_dir=self._config.profile_dir,
-            headless=False,
-        )
+        for attempt in range(2):
+            manager: AbstractContextManager[Playwright] | None = None
+            manager_entered = False
+            try:
+                manager = self._playwright_factory()
+                playwright = manager.__enter__()
+                manager_entered = True
+                context = playwright.chromium.launch_persistent_context(
+                    user_data_dir=self._config.profile_dir,
+                    headless=False,
+                )
+            except Exception:
+                cleanup_failed = False
+                if manager_entered and manager is not None:
+                    try:
+                        manager.__exit__(None, None, None)
+                    except Exception:
+                        cleanup_failed = True
+                if attempt == 1 or cleanup_failed:
+                    raise
+            else:
+                self._manager = manager
+                self._playwright = playwright
+                self._context = context
+                break
+        if self._context is None:
+            raise FlowBrowserLaunchError()
         self._context.set_default_navigation_timeout(self._config.navigation_timeout_seconds * 1000)
         self._page = self._context.pages[0] if self._context.pages else self._context.new_page()
         self._navigation_started = True

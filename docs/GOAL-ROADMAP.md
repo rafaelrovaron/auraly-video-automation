@@ -1,922 +1,495 @@
-# Auraly Codex Goal Roadmap
+# Auraly Delivery-First Goal Roadmap
 
-**Purpose:** sequence narrow, independently verifiable implementation Goals for Codex.
+**Roadmap vigente:** 2026-09-27
 
-This is not a second PRD. Durable decisions live in `PROJECT-MEMORY.md`; target requirements
-live in `PRD-MVP-MASS-VIDEO-AUTOMATION.md`; repository instructions live in `../AGENTS.md`.
-Every Goal must remain inside its stated boundary and leave the repository green.
+Este documento é a ordem operacional dos próximos Goals. O PRD define o produto; este roadmap
+define como chegar a ele sem transformar cada Goal em um projeto grande demais.
 
-## Execution model
+## 1. Regra de execução
 
-From Goal 4 onward, significant subgoals use this sequence:
-
-```text
-design/spec
-→ user review
-→ implementation plan
-→ small independently testable tasks
-→ TDD
-→ small task-level commits
-→ full verification
-→ independent review
-```
-
-Approved specs live under `docs/superpowers/specs/`; plans live under
-`docs/superpowers/plans/`. A task is an independently reviewable deliverable, not an individual
-line of code. Prefer the cycle: failing focused test, confirmed expected failure, minimal
-implementation, focused verification, then commit. Run the full applicable baseline before
-closing a subgoal.
-
-## Verification terminology and current status
-
-- `IMPLEMENTED`: required production code and tests exist.
-- `LOCAL_VERIFIED`: the required deterministic/local verification baseline executed
-  successfully; no real external provider is implied.
-- `PROVIDER_VERIFIED`: an explicitly approved real provider canary completed successfully.
-
-Provider verification is never inferred from mocks, local tests, or a commit name containing
-`[verified]`. No independent GitHub verification is claimed without separate evidence.
-
-| Goal | IMPLEMENTED | LOCAL_VERIFIED | PROVIDER_VERIFIED |
-| --- | --- | --- | --- |
-| 0 — Repository Alignment | yes | yes | not applicable |
-| 1 — Campaign Foundation | yes | yes | not applicable |
-| 2 — Persistent Job Orchestration | yes | yes | not applicable |
-| 3 — Voice Master | yes | yes | pending/unproven |
-| 3C — ElevenLabs Provider Canary | pending | pending | pending |
-| 4A — Image Domain & Persistence | yes | yes | not applicable |
-| 4B — Google Flow Browser Runtime | yes | yes | not established by Goal 4B |
-| 4C — Flow Generation, Download & Recovery | yes | yes | not established by Goal 4C |
-
-## Resulting sequence
+Cada Goal significativo segue:
 
 ```text
-Goal 0   Repository Alignment                         IMPLEMENTED / LOCAL_VERIFIED
-Goal 1   Campaign Foundation                          IMPLEMENTED / LOCAL_VERIFIED
-Goal 2   Persistent Job Orchestration                 IMPLEMENTED / LOCAL_VERIFIED
-Goal 3   Voice Master                                 IMPLEMENTED / LOCAL_VERIFIED
-Goal 3C  ElevenLabs Provider Canary                   PENDING
-Goal 4A  Image Domain & Persistence                   IMPLEMENTED / LOCAL_VERIFIED / PROVIDER N/A
-Goal 4B  Google Flow Browser Runtime                 IMPLEMENTED / LOCAL_VERIFIED / PROVIDER NOT ESTABLISHED
-Goal 4C  Flow Generation, Download & Recovery        IMPLEMENTED / LOCAL_VERIFIED / PROVIDER NOT ESTABLISHED
-Goal 4D  Image QC, Review & Provider Canary          PENDING
-Goal 5A  HeyGen Preflight & Asset Upload
-Goal 5B  Avatar Look & Avatar III Verification
-Goal 5C  Video Generation, Polling & Source QC
-Goal 5D  HeyGen Provider Canary
-Goal 6A  Edit Manifest & Captions
-Goal 6B  Deterministic Rendering
-Goal 6C  Final QC & Delivery
-Goal 6.5 Approval Lifecycle Hardening
-Goal 7   End-to-End Canary
-Goal 8   Local API/UI
+design aprovado
+→ plano de implementação
+→ TDD em tarefas pequenas
+→ commits coerentes
+→ verificação local
+→ revisão independente
 ```
 
-This decomposition changes implementation granularity, not product architecture or sequence.
+Não misturar provider, edição e UI no mesmo Goal. Nenhuma chamada paga é necessária para testes
+locais. Canary real exige autorização explícita.
 
-## Common verification baseline
+## 2. Terminologia de status
 
-Unless a Goal explicitly adds another check, run:
+- `IMPLEMENTED`: código e testes requeridos existem;
+- `LOCAL_VERIFIED`: o harness determinístico aplicável passou;
+- `PROVIDER_VERIFIED`: um canário real autorizado passou;
+- `PAUSED`: trabalho preservado, fora do caminho crítico;
+- `PLANNED`: ainda não implementado.
 
-```bash
-uv sync --locked --all-groups
-uv run pytest
-uv run ruff check src tests
-uv run python -m mypy src
-uv run python -m auraly_pipeline.schema
-uv run python -m auraly_pipeline.cli export-image-generation-schema \
-  --output schemas/image-generation.schema.json
-uv pip check
-npm ci
-npm run hf:doctor
-npm audit --omit=dev --audit-level=high
-git diff --check
+## 3. Baseline já entregue
+
+| Goal | Capacidade | Estado |
+|---|---|---|
+| 0 | Repository Alignment | `IMPLEMENTED`, `LOCAL_VERIFIED` |
+| 1 | Campaign Foundation | `IMPLEMENTED`, `LOCAL_VERIFIED` |
+| 2 | Persistent Job Orchestration | `IMPLEMENTED`, `LOCAL_VERIFIED` |
+| 3 | Voice Master | `IMPLEMENTED`, `LOCAL_VERIFIED` |
+| 3C | ElevenLabs Provider Canary | `PLANNED`, não bloqueia desenvolvimento local |
+| 4A | Image Domain & Persistence | `IMPLEMENTED`, `LOCAL_VERIFIED` |
+| 4B | Google Flow Browser Runtime | `IMPLEMENTED`, `LOCAL_VERIFIED`, `PAUSED` |
+| 4C | Flow Generation, Download & Recovery | `IMPLEMENTED`, `LOCAL_VERIFIED`, `PAUSED` |
+| 4D | Flow QC/Review/Provider Canary | `PAUSED` |
+
+O código Flow permanece no repositório. Não removê-lo, reescrevê-lo ou expandi-lo durante o novo
+MVP sem um Goal específico aprovado.
+
+## 4. Sequência delivery-first
+
+```text
+D0  Documentation Alignment                    DONE
+D1  Manual Image Batch Intake                  NEXT
+D2A HeyGen Contract, Preflight & Asset Reuse
+D2B HeyGen Batch Generation, Polling & Download
+D2C HeyGen Real Canary
+D3A EditProfile, EditManifest & Override Resolution
+D3B Headline A/B Planning & Caption Inputs
+D4A FastAPI Operational API
+D4B React Operations UI & Approximate Preview
+D5A Deterministic Renderer
+D5B Render QC, Review & Delivery
+D6  End-to-End Personal Pilot
 ```
 
-Type-check tests with `MYPYPATH=src uv run python -m mypy tests` on POSIX. On Windows
-PowerShell, set `$env:MYPYPATH = "src"` and then run `uv run python -m mypy tests`.
+UI entra antes do renderer final. D4 pode disparar fakes e exibir dados persistidos de D1–D3;
+quando D5 chegar, a tela apenas conecta o novo job de render.
 
-External provider canaries require explicit approval and must never expose credentials or repeat
-paid actions blindly.
+## D0 — Documentation Alignment
 
-### Verification Harness (implemented infrastructure)
+**Status:** documentação implementada neste replanejamento.
 
-Before Goal 4A design, `scripts/verify.py` provides:
+### Objetivo
+
+Separar o estado entregue do novo roadmap e tornar o próximo slice inequívoco.
+
+### Incluído
+
+- README, PROJECT-MEMORY, PRD e roadmap alinhados;
+- Google Flow marcado como preservado/pausado;
+- Voice Master confirmada como capability reaproveitada;
+- ordem delivery-first e limites da UI definidos.
+
+### Saída
+
+- os quatro documentos não contradizem o estado do código;
+- D1 pode receber design e plano sem decisão arquitetural pendente.
+
+## D1 — Manual Image Batch Intake
+
+**Status:** `PLANNED` — próximo Goal.
+
+### Objetivo
+
+Transformar uma pasta de imagens criadas manualmente em assets de campanha prontos para HeyGen.
+
+### Incluído
+
+- contrato Pydantic `ImageImportBatch` versionado;
+- manifest explícito `variantId → relative image path`;
+- dry-run com cobertura, duplicidade, dimensões e erros;
+- validação de extensão, mídia real, orientação e trusted roots;
+- hash e cópia não destrutiva para paths versionados;
+- associação a SceneVariant e reutilização do domínio ImageCandidate existente;
+- seleção/aprovação explícita na importação;
+- idempotência por campaign + variant + content hash;
+- CLI JSON `image import-batch` e consultas existentes atualizadas;
+- migration somente se o modelo atual não conseguir representar provenance de importação.
+- atualização futura da boundary de imagens no `AGENTS.md` somente depois que D1 existir; este
+  replanejamento não altera esse arquivo.
+
+### Explicitamente excluído
+
+- gerar imagens;
+- Google Flow;
+- UI React;
+- HeyGen;
+- crop ou edição da imagem;
+- heurística de associação por ordem de arquivos.
+
+### Dependências
+
+- Campaign/SceneVariant existentes;
+- ImageCandidate existente;
+- helpers atuais de trusted roots, hash e paths.
+
+### Critérios de saída
+
+- um batch válido com três imagens deixa três variantes prontas para HeyGen;
+- rerun idêntico não duplica candidatos nem arquivos;
+- batch incompleto ou ambíguo falha antes de copiar/persistir;
+- source externo permanece intacto;
+- restart preserva associações e provenance;
+- schema gerado e docs do comando estão atualizados.
+
+### Verificação
 
 ```bash
-uv run python scripts/verify.py fast
-uv run python scripts/verify.py fast --pytest tests/test_verify_harness.py
+uv run python scripts/verify.py fast --pytest tests/test_image_import_batch.py
 uv run python scripts/verify.py full
 ```
 
-`fast` runs low-cost Ruff/mypy checks and only the pytest targets explicitly supplied. `full` runs
-the complete deterministic `AGENTS.md` baseline, including cross-platform test mypy and generated
-schema drift detection. `.github/workflows/verify.yml` provides one Linux full job and one focused
-Windows job. Local or CI evidence never implies provider verification, and the workflow invokes no
-ElevenLabs, Google Flow, HeyGen, or other paid provider.
+## D2A — HeyGen Contract, Preflight & Asset Reuse
 
----
+**Status:** `PLANNED`.
 
-## Goal 0 — Repository Alignment
+### Objetivo
 
-### Objective
+Criar a fronteira oficial HeyGen e garantir upload/reuso seguro de imagens e Voice Master.
 
-Establish one internally consistent source of truth before feature implementation.
+### Incluído
 
-### Included
+- adapter protocol pequeno para provider oficial MCP/OAuth ou API;
+- fake determinístico;
+- preflight sanitizado de conexão/capabilities;
+- `RemoteAsset` persistente para image e audio;
+- upload por hash;
+- uma Voice Master WAV reutilizada por todas as variantes;
+- persistência do remote ID antes de avançar;
+- idempotência e reconciliação de upload;
+- jobs `heygen.asset.upload`;
+- CLI batch para preparar assets de uma campanha.
 
-- Google Flow + Playwright Python as the sole image path;
-- removal of active Google AI Studio assumptions;
-- preservation of generic image-workflow security controls;
-- latest compatible stable HyperFrames pinned and validated;
-- truthful implemented/partial/planned status;
-- `AGENTS.md` and this Goal roadmap.
+### Explicitamente excluído
 
-### Explicitly excluded
+- automação do website HeyGen;
+- criação de vídeo;
+- polling/download;
+- UI;
+- retry cego de POST ambíguo.
 
-- Campaign persistence, orchestration, provider runtimes, editing pipeline, API, and UI.
+### Dependências
 
-### Dependencies
+- D1;
+- Voice Master aprovada;
+- Job orchestration existente.
 
-None.
+### Critérios de saída
 
-### Exit criteria
+- três imagens e um WAV resultam em quatro remote assets lógicos;
+- replay pelo mesmo hash reutiliza o remote asset;
+- secrets e URLs assinadas não entram no banco/logs;
+- provider fake cobre sucesso, falha, timeout e resultado ambíguo.
 
-- architecture and documentation agree;
-- Google Flow is the only active image architecture;
-- HyperFrames is pinned to the locally validated stable release;
-- browser runtime limitations are explicit;
-- `AGENTS.md` is usable by Codex;
-- complete existing suite is green;
-- independent diff review has no blocking findings.
+## D2B — HeyGen Batch Generation, Polling & Download
 
-### Verification
+**Status:** `PLANNED`.
 
-Run the common baseline plus:
+### Objetivo
 
-```bash
-npm run hf:lint -- work/install-smoke/hyperframes
-npm run hf:check -- --strict work/install-smoke/hyperframes
-npm run hf:render -- work/install-smoke/hyperframes \
-  --output work/install-smoke/hyperframes-canary.mp4 --quality draft
-ffprobe -v error -show_entries stream=codec_name,width,height,r_frame_rate \
-  -show_entries format=duration,size -of json work/install-smoke/hyperframes-canary.mp4
-```
+Gerar e baixar um MP4 HeyGen por variante, em lote retomável.
 
-The smoke composition is local/ignored; if absent, create an ignored minimal canary without
-adding media or generated output to Git.
+### Incluído
 
----
+- configuração explícita de avatar/engine;
+- dry-run com quantidade de paid renders e assets reutilizados;
+- budget gate antes da primeira submissão;
+- job lógico por variante e comando batch por campanha;
+- persistência de video ID antes do polling;
+- polling com backoff, timeout e resume;
+- limite de concorrência default 2;
+- download `.part` → final, hash e `ffprobe`;
+- validação de streams, orientação, resolução e duração plausível;
+- source MP4 versionado e imutável;
+- reconciliação antes de repetir create-video ambíguo.
 
-## Goal 1 — Campaign Foundation
+### Explicitamente excluído
 
-### Objective
+- captions/render final;
+- UI React;
+- publicação social;
+- download por browser.
 
-Persist the core campaign domain and expose deterministic CLI operations that survive restart.
+### Dependências
 
-### Included
+- D2A.
 
-- `Campaign`, `CopyMaster`, and `SceneVariant` contracts;
-- SQLite, SQLAlchemy 2, Alembic, repositories, and application service;
-- CLI create/get/list;
-- migrations, uniqueness rules, timestamps, and restart persistence tests.
+### Critérios de saída
 
-### Explicitly excluded
+- o fake executa lote de três variantes end-to-end;
+- restart durante polling retoma pelos video IDs existentes;
+- MP4 concluído não é gerado ou baixado novamente;
+- falha de uma variante não apaga progresso das demais;
+- budget acima do limite bloqueia antes de paid action.
 
-- job queue/state machine;
-- ElevenLabs, Google Flow runtime, HeyGen, rendering, FastAPI, and frontend;
-- any paid or external provider call.
+## D2C — HeyGen Real Canary
 
-### Dependencies
+**Status:** `PLANNED`, requer aprovação e crédito.
 
-Goal 0 complete.
+### Objetivo
 
-### Exit criteria
+Validar o adapter e as suposições de payload contra um render real pequeno.
 
-- migrations create a fresh database;
-- create/get/list operate through one application-service layer;
-- duplicate and invalid campaign inputs fail safely;
-- approved domain invariants are Pydantic-validated;
-- campaign data remains available after process restart;
-- CLI JSON output is tested and contains no secrets.
+### Incluído
 
-### Verification
+- preflight real;
+- upload/reuso de uma imagem e uma Voice Master aprovada;
+- uma geração real;
+- polling, download e QC do MP4;
+- registro sanitizado de IDs, custo e evidência.
 
-Run the common baseline plus Goal 1 migration and persistence tests, for example:
+### Saída
 
-```bash
-uv run alembic upgrade head
-uv run pytest tests/test_campaigns.py tests/test_campaign_domain.py tests/test_cli.py \
-  tests/test_migrations.py
-```
+- `PROVIDER_VERIFIED` somente após MP4 real íntegro;
+- diferenças de schema/capability voltam para um Goal corretivo estreito.
 
----
+## D3A — EditProfile, EditManifest & Override Resolution
 
-## Goal 2 — Persistent Job Orchestration
+**Status:** `PLANNED`.
 
-### Objective
+### Objetivo
 
-Provide durable, resumable, idempotent execution without integrating external providers.
+Separar estilo reutilizável de configuração resolvida por render.
 
-### Included
+### Incluído
 
-- `Job` model, explicit state machine, attempts, events/audit trail;
-- persistent local queue, cross-process migration lock, worker lease semantics, and attempt fencing;
-- idempotency keys and duplicate protection;
-- persisted retry-safety policy, resume, cancellation, retryable/terminal failure states;
-- deterministic fake handlers and restart/crash recovery tests.
+- `EditProfile` versionado;
+- evolução compatível ou migração explícita do `EditManifest` legado;
+- seções tipadas para headline, captions, music e framing;
+- precedência `profile < campaign < video < output variant`;
+- resolver puro/determinístico com provenance;
+- validação de fonts/assets/paths;
+- JSON Schemas e exemplos;
+- persistência de profile e manifest resolvido.
 
-### Explicitly excluded
+### Explicitamente excluído
 
-- ElevenLabs, Google Flow, HeyGen, final editing, API, and UI;
-- real network or paid operations.
+- renderer;
+- UI;
+- merge profundo arbitrário;
+- keyframes/timeline.
 
-### Dependencies
+### Critérios de saída
 
-Goals 0–1.
+- a mesma entrada sempre gera o mesmo manifest/hash;
+- override inválido falha com campo exato;
+- o manifest registra profile version e origem dos overrides;
+- configs legadas suportadas têm comportamento definido por teste.
 
-### Exit criteria
+## D3B — Headline A/B Planning & Caption Inputs
 
-- invalid transitions are rejected;
-- duplicate submission does not duplicate work;
-- interrupted jobs resume from persisted state;
-- attempts/events are auditable;
-- retries cannot silently repeat a non-idempotent action.
+**Status:** `PLANNED`.
 
-### Verification
+### Objetivo
 
-Run the common baseline plus:
+Criar output variants baratos sem refazer assets upstream.
 
-```bash
-uv run pytest tests/test_jobs.py tests/test_job_state_machine.py tests/test_job_handlers.py \
-  tests/test_job_service.py tests/test_job_concurrency.py tests/test_job_migrations.py \
-  tests/test_migration_lock.py tests/test_cli.py tests/test_migrations.py
-```
+### Incluído
 
----
+- coleção de `EditVariant` por source video;
+- override de `headline.text` e demais campos editoriais permitidos;
+- cálculo/limite de combinações antes do render;
+- IDs e filenames determinísticos;
+- captions usando texto da Copy Master aprovada;
+- escolha de timing disponível com provenance;
+- dry-run mostrando outputs planejados e assets reutilizados.
 
-## Goal 3 — Voice Master
+### Critérios de saída
 
-### Objective
+- 1 MP4 + 3 headlines planeja 3 outputs e zero jobs HeyGen;
+- headline continua fora da voz e das captions;
+- rerun do mesmo plano mantém IDs/hashes;
+- limite configurado bloqueia explosão combinatória.
 
-Create, validate, and approve one reusable Voice Master through the official ElevenLabs API.
+## D4A — FastAPI Operational API
 
-### Included
+**Status:** `PLANNED`.
 
-- ElevenLabs API adapter and secret boundary;
-- idempotent request/reconciliation behavior;
-- raw preservation and non-destructive audio processing;
-- transcript comparison, duration, WPM, LUFS, true peak, and format checks;
-- approval/rejection and reusable audio-asset metadata;
-- fake-server tests and deterministic/local verification.
+### Objetivo
 
-### Explicitly excluded
+Expor os application services existentes e planejados para uma UI local sem duplicar regra de
+negócio.
 
-- ElevenLabs web automation;
-- Google Flow, HeyGen, final rendering, API, and UI.
+### Incluído
 
-### Dependencies
+- FastAPI em `127.0.0.1`;
+- endpoints para campaigns, assets, voice, HeyGen, profiles, variants, jobs e renders;
+- ações de import, submit, resume, approve/reject e dry-run;
+- status agregado e próximo bloqueio por campanha;
+- OpenAPI gerado;
+- polling HTTP simples para progresso no primeiro MVP.
 
-Goals 0–2.
+### Explicitamente excluído
 
-### Exit criteria
+- autenticação, RBAC e acesso LAN;
+- WebSockets/SSE obrigatório;
+- regras de negócio nas routes;
+- execução direta de provider/FFmpeg nas requests.
 
-- one approved Voice Master can be reused by SceneVariants;
-- headline/directions are absent from narration;
-- raw and processed assets are immutable/versioned;
-- provider retries are reconciled and cost-safe.
+### Critérios de saída
 
-### Verification
+- todas as mutações delegam para application services;
+- operações longas apenas criam/retomam Jobs;
+- API pode operar o fluxo fake D1–D3;
+- erros têm mensagem humana e código estável.
 
-Run the common baseline plus:
+## D4B — React Operations UI & Approximate Preview
 
-```bash
-uv run pytest tests/test_elevenlabs_provider.py tests/test_voice_domain.py \
-  tests/test_voice_service.py tests/test_voice_audio.py tests/test_voice_retry_safety.py
-ffmpeg -v error -i <ignored-approved-voice> -f null -
-ffprobe -v error -show_streams -show_format -of json <ignored-approved-voice>
-```
+**Status:** `PLANNED`.
 
-A real ElevenLabs canary belongs to Goal 3C and is not implied by this local verification.
+### Objetivo
 
----
+Permitir que Rafael gerencie a pipeline sem editar JSON ou usar múltiplos comandos.
 
-## Goal 3C — ElevenLabs Provider Canary
+### Incluído
 
-### Objective
+- Vite + React + TypeScript;
+- Campaign list/detail;
+- import batch e cobertura de variantes;
+- Voice Master e HeyGen status/actions;
+- editor simples de profile e output variants;
+- preview 9:16 aproximado com frame/poster + overlays CSS;
+- controles para headline, captions, music e framing;
+- fila/status por polling;
+- acessibilidade básica e estados de loading/error/empty.
 
-Prove the implemented Goal 3 path with one explicitly approved real ElevenLabs request.
+### Explicitamente excluído
 
-### Included
+- timeline;
+- drag-and-drop livre;
+- preview frame-perfect;
+- edição frame a frame;
+- design system próprio;
+- login e multiusuário.
 
-- operator-approved budget and configured secret outside Git;
-- one real request through the official API path;
-- artifact inspection and sanitized canary evidence;
-- reconciliation and duplicate/cost review.
+### Critérios de saída
 
-### Explicitly excluded
+- o fluxo D1–D3 pode ser configurado e acompanhado pela UI;
+- preview mostra texto, quebra, fonte, cor, posição e framing de forma útil;
+- label informa que o preview é aproximado;
+- alterações persistem via API e sobrevivem a reload;
+- UI não acessa banco, filesystem ou provider diretamente.
 
-- ElevenLabs web automation;
-- feature development unrelated to canary findings;
-- automatic or unapproved paid calls.
+## D5A — Deterministic Renderer
 
-### Dependencies
+**Status:** `PLANNED`.
 
-Goal 3 `IMPLEMENTED` and `LOCAL_VERIFIED`.
+### Objetivo
 
-### Exit criteria
+Renderizar cada EditManifest resolvido em um MP4 vertical reproduzível.
 
-- a real Voice Master artifact completes the Goal 3 technical and human gates;
-- evidence contains no API key, signed URL, or private artifact;
-- no blind duplicate paid request occurs;
-- the durable Job/event and Voice Master manifest/QC records identify the canary without storing
-  credentials, signed URLs, or private media in Git;
-- Goal 3C becomes `IMPLEMENTED / LOCAL_VERIFIED / PROVIDER_VERIFIED`, and its evidence establishes
-  Goal 3 `PROVIDER_VERIFIED`.
+### Incluído
 
-### Scheduling and verification
+- renderer inicial FFmpeg/ASS, salvo restrição técnica demonstrada;
+- headline, captions, music e framing;
+- voice-preserving mix com `amix normalize=0` ou equivalente documentado;
+- proxy opcional e master 1080×1920 H.264/AAC;
+- outputs versionados, faststart e hashes;
+- job local idempotente por manifest hash;
+- renderer version registrada.
 
-Goal 3C does not block Goal 4 development. It may run before Goal 5 or at another appropriate
-integration checkpoint, but must complete before the end-to-end pipeline depends on a real Voice
-Master. Run the Goal 3 baseline and real canary only after explicit operator approval.
+### Explicitamente excluído
 
----
+- compositor genérico;
+- timeline/keyframes livres;
+- plugins de efeitos;
+- render distribuído.
 
-## Goal 4A — Image Domain & Persistence
+### Critérios de saída
 
-### Status
+- fixtures sintéticas cobrem todas as seções;
+- 1 MP4 + 3 headline variants produz 3 masters distintos;
+- nenhum input é alterado;
+- mesmo manifest reaproveita output íntegro existente;
+- output passa full decode e inspeção.
 
-`IMPLEMENTED` / `LOCAL_VERIFIED` / provider verification `N/A`.
+## D5B — Render QC, Review & Delivery
 
-Goal 4A uses a deterministic local fake handler and intentionally performs no browser or provider
-operation. Task 12 completed the full deterministic harness on local code HEAD `088d556`. Linux
-full and Windows focused GitHub Actions both succeeded for final commit `1a96525`, establishing
-separate independent CI evidence for Goal 4A closure. Neither local verification nor CI establishes
-provider verification.
+**Status:** `PLANNED`.
 
-### Objective
+### Objetivo
 
-Create durable campaign image-generation state and candidate history without browser execution.
+Fechar o ciclo local do render até entrega.
 
-### Included
+### Incluído
 
-- intentional `SceneVariant -> ImageGeneration -> 0..N ImageCandidate` model;
-- logical generation number, Campaign/SceneVariant/Job links, prompt snapshot/hash, reference
-  path/hash, provider/executor, provider state, dispatch timestamp, and audit timestamps;
-- per-downloaded-candidate path, SHA-256, dimensions, format, size, technical QC state, review
-  state, and approval/rejection metadata;
-- persistence invariants, migrations, repository/application service, CLI, and restart/security
-  regression coverage;
-- deterministic fake image Job handler where needed;
-- public orchestration/transaction contract when atomic domain entity + Job + audit creation
-  requires it.
+- QC de streams, duração, resolução, FPS, loudness e clipping;
+- bounds de headline/captions;
+- proxy/contact sheet;
+- approve/reject com comentário;
+- master aprovado imutável;
+- cópia para pasta de entrega com hash origem/destino.
 
-### Design rules
+### Critérios de saída
 
-`ImageGeneration` is the logical Flow operation; `ImageCandidate` is a resulting artifact. A
-generation must remain durable when Generate was dispatched but a browser crash prevented any
-candidate from being persisted, because blind regeneration is unsafe.
+- mix com voz baixa ou clipping bloqueia aprovação;
+- rejeição cria nova revisão, não sobrescreve master;
+- delivery é distinguido de upload cloud;
+- UI exibe QC e decisão.
 
-State ownership remains separate:
+## D6 — End-to-End Personal Pilot
+
+**Status:** `PLANNED`, requer paid-action approval.
+
+### Objetivo
+
+Provar o fluxo real mais curto para uso pessoal.
+
+### Piloto
 
 ```text
-Job.status                       = execution/orchestration state
-ImageGeneration.provider_state  = Google Flow operation state
-ImageCandidate.review_status    = artifact/review state
+1 Copy Master aprovada
+1 Voice Master real aprovada
+3 imagens criadas manualmente
+3 variantes importadas
+3 MP4 HeyGen reais
+3 headlines por MP4
+9 renders locais
+3 masters escolhidos e entregues
 ```
 
-Do not turn `SceneVariant.status` into a second detailed source of truth. A later global progress
-view should preferably derive from persisted entities. Do not duplicate current private Job
-repository access; the exact public coordination contract belongs to the Goal 4A design.
+### Cenários obrigatórios
 
-Introduce focused `images/` modules as required. Reuse compatible `image_generation.py` code
-incrementally; no big-bang rewrite.
+- restart durante polling HeyGen;
+- replay idempotente do batch;
+- uma variante HeyGen falha sem invalidar as outras;
+- alteração somente de headline não dispara paid action;
+- um render rejeitado gera nova revisão;
+- operação completa pela UI, com CLI disponível para diagnóstico.
 
-### Explicitly excluded
+### Saída
 
-- Playwright, browser launch, Flow selectors, login, or real generation;
-- image QC implementation or provider canary;
-- HeyGen, rendering, API, and UI.
+- Rafael consegue repetir a operação a partir da documentação;
+- tempos, custos e principais atritos são registrados;
+- somente problemas observados geram novos Goals.
 
-### Dependencies
+## 5. Baseline comum de verificação
 
-Goals 0–2 and approved Goal 4A design/plan. Goal 3C is not a dependency.
-
-### Exit criteria
-
-- generation state survives restart with zero candidates;
-- every intentionally persisted download has a distinct non-overwriting candidate record;
-- persistence constraints prevent ambiguous duplicate generation/candidate history;
-- fake/local job integration preserves idempotency, fencing, and audit invariants;
-- no new application-service dependency on private Job repository internals is added.
-
----
-
-## Goal 4B — Google Flow Browser Runtime
-
-**Status:** `IMPLEMENTED` / `LOCAL_VERIFIED`. `PROVIDER_VERIFIED` is not established by Goal 4B;
-`BROWSER_PREFLIGHT_VERIFIED` remains not run/not established pending a separately approved,
-operator-attended live preflight.
-
-### Objective
-
-Prove safe browser interaction and preflight without performing a complete generation lifecycle.
-
-### Included
-
-- dedicated persistent Chromium profile outside Git and manual login;
-- browser launch, Flow navigation, authentication detection, and UI verification;
-- centralized semantic locator contract;
-- local single-browser lock and concurrency 1;
-- sanitized diagnostic screenshot, Playwright trace, and stop-safe
-  `human_intervention_required`.
-
-### Explicitly excluded
-
-- Generate dispatch, candidate download, 2K finalization, or real generation;
-- blind coordinate clicks and the personal main Chrome profile;
-- Google AI Studio or another image provider.
-
-### Dependencies
-
-Goal 4A and approved Goal 4B design/plan.
-
-### Exit criteria
-
-The application can safely answer: Can Flow launch? Is the operator authenticated? Is the UI
-understood? Can execution safely continue? Unknown state stops without semantic-locator fallback
-to coordinates, and profile/session artifacts remain outside Git.
-
-### Verification
-
-Run the common baseline plus Goal-created local browser/preflight tests and:
+Durante TDD:
 
 ```bash
-uv run playwright install --dry-run chromium
+uv run python scripts/verify.py fast
+uv run python scripts/verify.py fast --pytest <focused-test>
 ```
 
-No real generation is required.
-
----
-
-## Goal 4C — Flow Generation, Download & Recovery
-
-### Status
-
-```text
-IMPLEMENTED       YES
-LOCAL_VERIFIED    YES
-PROVIDER_VERIFIED NOT ESTABLISHED
-
-BROWSER_PREFLIGHT_VERIFIED NOT RUN / NOT ESTABLISHED
-```
-
-### Objective
-
-Connect the durable image domain to the verified browser runtime for resumable generation and
-download.
-
-### Included
-
-- reference upload and verification;
-- persisted prompt insertion and verification;
-- Generate dispatch with provider state persisted at the safety boundary;
-- candidate slot/state detection and screenshot/grid evidence;
-- required-candidate selection, 2K request, deterministic download correlation, and artifact
-  ingestion;
-- restart/resume and ambiguous post-dispatch recovery.
-
-The implemented P0 contract is fixed at exactly two intentionally selected semantic candidates,
-each downloaded as 2K. P0 does not require downloading every visible candidate. Every intentional
-download is preserved in its own `ImageCandidate` and never overwrites another.
-
-### Explicitly excluded
-
-- blind resubmission after ambiguous post-dispatch failure;
-- image semantic approval or provider canary;
-- requirement to download all visible candidates unless mechanically necessary.
-
-### Dependencies
-
-Goals 4A–4B and approved Goal 4C design/plan.
-
-### Exit criteria
-
-- upload/prompt/dispatch verification is evidence-backed and explicit provider authorization is
-  immutable/audited;
-- one Job owns one durable Flow run and exactly two durable candidate slots;
-- a crash after dispatch intent cannot authorize a blind second generation;
-- the exact semantic 2K action is the only operation inside its Playwright `expect_download`
-  scope, and both downloads ingest non-destructively;
-- restart recovery follows persisted evidence or stops for intervention without losing prior
-  generation/download evidence;
-- manual no-dispatch resolution requires an allowlisted operator and sanitized reason, preserves
-  prior attempt evidence, and cannot rewrite a confirmed dispatch.
-
-### Verification
-
-The Task 14 independent review covered `1772957..d103366` and reported 2 Critical, 3 High, and 3
-Medium findings. All eight were accepted and fixed; the final scoped re-review of `5493121..03cc130`
-left no Critical/High finding open. The final technical chain ends with:
-
-```text
-d103366  ci: verify Flow generation recovery
-5493121  fix: enforce reviewed Goal 4C invariants
-03cc130  fix: align public Flow CLI contract
-```
-
-The fresh complete local gate on technical HEAD `03cc130` passed 13/13 steps with 1,110 tests
-approved and 17 skipped. Task 13 preserves Linux full and extends Windows focused with local-only
-Flow persistence, browser, synthetic-download, recovery, and security coverage. Those workflows
-contain no Google/provider route; Task 14 still requires both jobs to pass on the exact final
-documentation SHA after push, so this document does not pre-claim that result.
-
-No live Google Flow preflight or generation was executed, no provider credit was consumed, and no
-provider/browser canary was established. Goal 4D remains pending and owns image QC/review hardening
-plus the explicitly approved real Flow canary.
-
----
-
-## Goal 4D — Image QC, Review & Provider Canary
-
-### Objective
-
-Validate image artifacts, provide durable review history, and prove one approved real Flow
-generation.
-
-### Included
-
-- format, dimensions, 9:16, required 2K, corruption/decode, and SHA-256 checks;
-- approve, reject, regenerate, and `approved_for_scene_variant` lifecycle;
-- preservation of approved/rejected and downloaded-candidate history;
-- one explicitly approved single-scene Google Flow provider canary.
-
-Semantic and creative review remains human/AI.
-
-### Explicitly excluded
-
-- autonomous semantic approval;
-- automatic multi-scene paid generation;
-- downloading every visible candidate as a P0 requirement.
-
-### Dependencies
-
-Goals 4A–4C and approved Goal 4D design/plan.
-
-### Exit criteria
-
-- 1K, unverified, corrupt, or wrong-aspect artifacts cannot satisfy the 2K image gate;
-- every downloaded candidate has independent durable QC/review state;
-- approved/rejected history is immutable and restart-safe;
-- one real canary completes only with explicit operator/budget approval and sanitized evidence.
-
-### Verification
-
-Run the common baseline plus focused image QC/review tests. The approved canary must verify 2K
-dimensions, screenshot/grid evidence, non-overwriting candidate history, recovery behavior, and
-absence of browser profile/cookies/secrets from Git.
-
----
-
-## Goal 5A — HeyGen Preflight & Asset Upload
-
-### Objective
-
-Verify official MCP/OAuth capabilities and complete durable, cost-safe asset upload.
-
-### Included
-
-- sanitized MCP/OAuth preflight and capability checks;
-- reusable audio/image asset upload lifecycle;
-- exact preservation of signed upload headers;
-- durable remote IDs before advancing;
-- idempotency and ambiguous-request reconciliation.
-
-### Explicitly excluded
-
-- HeyGen web automation;
-- avatar look creation, video generation, final editing, API, and UI;
-- real paid canary.
-
-### Dependencies
-
-Goal 4D, an approved Voice Master, and approved Goal 5A design/plan. Goal 3C must complete before
-this sequence relies on a real Voice Master, but it does not block local/fake design work.
-
-### Exit criteria
-
-- tokens and signed URLs never reach persistence/logs;
-- signed upload headers are used exactly and duplicate-safe;
-- remote asset IDs persist before dependent operations.
-
----
-
-## Goal 5B — Avatar Look & Avatar III Verification
-
-### Objective
-
-Create a durable photo-avatar look and prove it supports Avatar III before video creation.
-
-### Included
-
-- photo-avatar look creation and polling;
-- durable look/provider states and remote IDs;
-- `supported_api_engines` verification;
-- explicit stop when `avatar_iii` is unavailable.
-
-### Explicitly excluded
-
-- silent engine fallback, video generation, source QC, and provider canary.
-
-### Dependencies
-
-Goal 5A and approved Goal 5B design/plan.
-
-### Exit criteria
-
-- look creation/polling is restart-safe and duplicate-protected;
-- Avatar III support is verified before any video request.
-
----
-
-## Goal 5C — Video Generation, Polling & Source QC
-
-### Objective
-
-Create, retrieve, and technically validate durable Avatar III source videos.
-
-### Included
-
-- explicit `engine.type = avatar_iii` request;
-- durable dispatch state/remote ID before polling;
-- idempotency, ambiguous-response reconciliation, download, and source-video QC;
-- fake MCP coverage for restart and failure handling.
-
-### Explicitly excluded
-
-- provider canary, final editing, API, and UI.
-
-### Dependencies
-
-Goal 5B and approved Goal 5C design/plan.
-
-### Exit criteria
-
-- ambiguous paid requests are reconciled rather than blindly repeated;
-- downloaded source passes format, decode, duration, audio, and visual technical checks;
-- provider state survives restart without duplicate video creation.
-
----
-
-## Goal 5D — HeyGen Provider Canary
-
-### Objective
-
-Prove the Goal 5 path with one explicitly approved real Avatar III request.
-
-### Included
-
-- real MCP/OAuth preflight, asset/look/video lifecycle, download, and source QC;
-- budget approval, duplicate review, and sanitized evidence;
-- explicit human review with approve/reject evidence for the first campaign source-video canary.
-
-### Explicitly excluded
-
-- HeyGen web automation and automatic batch generation.
-
-### Dependencies
-
-Goals 3C and 5A–5C.
-
-### Exit criteria
-
-- one approved canary downloads and passes source QC;
-- Avatar III use and durable remote IDs are evidenced;
-- no credential, signed URL, private artifact, or blind duplicate is persisted;
-- later campaign video generation remains blocked until the first source-video canary is human
-  approved.
-
-### Verification
-
-Run the common baseline plus Goal 5 fake/local tests. With explicit approval only, run full
-ffmpeg/ffprobe inspection against the ignored canary artifact. Real MCP/OAuth and paid actions
-are never part of deterministic CI.
-
----
-
-## Goal 6A — Edit Manifest & Captions
-
-### Objective
-
-Create the versioned renderer-neutral edit contract and deterministic captions from approved
-spoken copy.
-
-### Included
-
-- immutable/versioned edit manifest;
-- headline as visual text only;
-- caption text/timing and safe-zone validation;
-- input hashes and deterministic editorial parameters.
-
-### Explicitly excluded
-
-- rendering, provider generation, publishing, API, and UI.
-
-### Dependencies
-
-Goal 5D and approved source assets.
-
-### Exit criteria
-
-- headline cannot enter narration;
-- caption text derives from approved spoken copy and respects safe zones;
-- manifest validation and hashes are deterministic.
-
----
-
-## Goal 6B — Deterministic Rendering
-
-### Objective
-
-Render an immutable 1080×1920 Reel deterministically from approved inputs and manifest.
-
-### Included
-
-- subtle zoom, approved music, captions, headline, and renderer adapter;
-- H.264/AAC 1080×1920 master and non-destructive artifact handling;
-- deterministic audio mix including `amix ... normalize=0`.
-
-### Explicitly excluded
-
-- final delivery, publishing/social APIs, FastAPI, and React UI.
-
-### Dependencies
-
-Goal 6A.
-
-### Exit criteria
-
-- same inputs/manifest render functionally equivalent output;
-- reruns never overwrite an immutable final;
-- composition-specific lint/check/draft-render passes when HyperFrames is selected.
-
----
-
-## Goal 6C — Final QC & Delivery
-
-### Objective
-
-Technically validate immutable final artifacts and deliver them non-destructively.
-
-### Included
-
-- full decode, resolution, FPS, codec, duration, loudness, true peak, and hash checks;
-- proxy/contact-sheet/QC report as required;
-- durable final review lifecycle `review_required -> approved | rejected`, including operator,
-  comment/reason, and timestamps;
-- verified copy to the local synchronized delivery folder only after human approval.
-
-### Explicitly excluded
-
-- claim of cloud upload without sync/API evidence;
-- automatic social publishing, API, and UI.
-
-### Dependencies
-
-Goal 6B.
-
-### Exit criteria
-
-- final full-decode, FPS, loudness, true peak, and duration checks pass;
-- rejected or not-yet-approved renders cannot be delivered;
-- master and delivery copy have verified size/SHA-256;
-- immutable artifacts are not overwritten.
-
-### Verification
-
-Run the common baseline plus focused edit/caption/renderer/final-QC tests and full ffmpeg/ffprobe
-inspection of ignored final artifacts. If HyperFrames is selected, run its composition-specific
-lint/check/draft render required by `AGENTS.md`.
-
----
-
-## Goal 6.5 — Approval Lifecycle Hardening
-
-### Objective
-
-Ensure the end-to-end canary exercises real application approval workflows rather than inferred
-approval state.
-
-### Included
-
-- CopyMaster lifecycle `draft -> human review -> approved`;
-- approval-gate audit and regression coverage needed before Goal 7.
-
-### Explicitly excluded
-
-- Goal 4 image work, broad domain redesign, provider calls, API, and UI.
-
-### Dependencies
-
-Goals 1–6C.
-
-### Exit criteria
-
-- CopyMaster no longer effectively starts approved;
-- Goal 7 cannot bypass copy, voice, image, canary, or final-video approval gates.
-
----
-
-## Goal 7 — End-to-End Canary
-
-### Objective
-
-Prove the CLI pipeline with one campaign and three resumable SceneVariants.
-
-### Included
-
-```text
-1 Copy Master
-→ 1 Voice Master
-→ 3 SceneVariants
-→ 3 approved Flow images
-→ 3 Avatar III HeyGen videos
-→ 3 final renders
-```
-
-Also included: one simulated interruption/resume, audit review, cost/duplicate review, and final
-artifact QC.
-
-### Explicitly excluded
-
-- FastAPI, React UI, automatic publishing, performance optimization, and distributed workers.
-
-### Dependencies
-
-Goals 3C, 4D, 5D, 6C, and 6.5 (and their prerequisite subgoals).
-
-### Exit criteria
-
-- all three variants complete with required approvals and immutable artifacts;
-- simulated interruption resumes successfully;
-- zero blind duplicate paid actions;
-- every paid action has durable IDs/reconciliation evidence;
-- all masters pass technical and human review gates.
-
-### Verification
-
-Run the common baseline plus:
+Antes de `LOCAL_VERIFIED`:
 
 ```bash
-uv run pytest tests/test_e2e_fake_pipeline.py tests/test_e2e_resume.py
-uv run auraly campaign status <canary-campaign-id>
+uv run python scripts/verify.py full
 ```
 
-Then inspect sanitized campaign/job/QC manifests and run full ffmpeg/ffprobe validation on all
-three ignored final masters. Real provider execution requires explicit budget approval.
+Quando frontend existir, o harness deve incorporar lint, typecheck, tests e build usando scripts
+npm estáveis. Quando um Goal alterar render, executar render sintético + `ffprobe` + full decode.
 
----
+## 6. Não-goals globais
 
-## Goal 8 — Local API/UI
-
-### Objective
-
-Expose the proven CLI/application-service pipeline through a local-only operator interface.
-
-### Included
-
-- FastAPI bound to `127.0.0.1`;
-- React/TypeScript local UI;
-- campaign/job status, QC evidence, logs, and approval gates;
-- voice/image/video review actions;
-- API/UI use of existing application services, not duplicate provider logic.
-
-### Explicitly excluded
-
-- public hosting, multi-user auth, mobile app, distributed execution, automatic social posting,
-  and a full NLE timeline.
-
-### Dependencies
-
-Goals 0–7; CLI end-to-end canary must be proven first.
-
-### Exit criteria
-
-- normal pilot operations can be completed through the local UI;
-- local-only binding is verified;
-- approval gates cannot be bypassed by API or UI;
-- UI/API restart preserves campaign/job state;
-- provider and deterministic logic remain in shared application services.
-
-### Verification
-
-Run the common baseline plus the Goal-created checks, expected to include:
-
-```bash
-uv run pytest tests/test_api.py tests/test_api_approval_gates.py
-npm test -- --run
-npm run build
-```
-
-Verify the server listens only on `127.0.0.1` and complete an operator smoke test against the
-already proven canary data without repeating paid operations.
+- reativar ou ampliar Google Flow antes do D6;
+- timeline tipo CapCut;
+- preview frame-perfect;
+- plataforma multiusuário;
+- microservices, filas externas ou containers obrigatórios;
+- publicação social;
+- automação de websites ElevenLabs/HeyGen;
+- hardening para internet pública;
+- abstrações para providers hipotéticos.

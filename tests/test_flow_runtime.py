@@ -425,12 +425,17 @@ def test_workspace_locator_root_survives_failed_trusted_evidence_capture(
         login_urls=(fake_flow_url("login-required.html"),),
         workspace_urls={workspace_path: workspace_url},
     )
+    clock = _Clock()
+    page = _WorkspacePage(clock=clock, upload_after_seconds=None)
+    page._account_mask_count = 0
 
     with pytest.raises(FlowUnexpectedStateError) as caught:
         GoogleFlowRuntime(
             config(tmp_path, workspace_path=workspace_path),
             _target=target,
             _locator_target=local_locator_target(workspace_url),
+            _playwright_factory=_playwright_factory(_FakeContext(page=page)),
+            _monotonic=clock,
         ).run()
 
     assert caught.value.primary_failure is not None
@@ -736,6 +741,37 @@ def test_launch_exception_before_trust_is_sanitized_browser_launch_failure(tmp_p
 
     assert caught.value.failed_step == "launch_browser"
     assert caught.value.evidence == FlowFailureEvidence()
+
+
+def test_transient_browser_launch_failure_retries_once(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = local_target("ready.html")
+    context = _FakeContext(page=_FakePage(url=target.flow_url, ready=True))
+    original_launch = _FakeChromium.launch_persistent_context
+    attempts = 0
+
+    def launch_once_then_succeed(
+        chromium: _FakeChromium, **kwargs: object
+    ) -> _FakeContext:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise RuntimeError("transient launch failure")
+        return original_launch(chromium, **kwargs)
+
+    monkeypatch.setattr(_FakeChromium, "launch_persistent_context", launch_once_then_succeed)
+
+    observation = GoogleFlowRuntime(
+        config(tmp_path),
+        _target=target,
+        _playwright_factory=_playwright_factory(context),
+    ).run()
+
+    assert observation.status == "ready"
+    assert attempts == 2
+    assert context.manager_exit_calls == 2
 
 
 def test_exception_after_trust_requires_human_intervention(tmp_path: Path) -> None:

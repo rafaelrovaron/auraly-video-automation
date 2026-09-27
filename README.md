@@ -1,476 +1,172 @@
-# Auraly Video Pipeline
+# Auraly Video Automation
 
-Pipeline local, determinística, retomável e auditável para produção em massa de Reels do Auraly.
+Pipeline local para transformar uma Copy Master em vários vídeos verticais com a mesma voz,
+imagens diferentes, geração HeyGen em lote e edição configurável.
 
-## Estado atual
+O projeto agora segue um MVP **delivery-first**: chegar rapidamente a vídeos utilizáveis para o
+Rafael, aproveitando o que já está pronto e evitando que automações não essenciais bloqueiem a
+entrega.
 
-### Implementado hoje
+## Estado do produto
 
-- contrato Pydantic do `edit.json`;
-- JSON Schema versionado;
-- parser das copies canônicas;
-- inspeção de mídia com `ffprobe` JSON;
-- ingestão que copia, mas nunca move ou sobrescreve, os arquivos originais;
-- base de conhecimento local pesquisável;
-- CLI `auraly` e testes unitários/smoke;
-- domínio `Campaign`, `CopyMaster` versionado e `SceneVariant` com invariantes Pydantic;
-- persistência local SQLite em WAL via SQLAlchemy 2 e migrações Alembic;
-- camada repository/application service e CLI JSON `campaign create/get/list`;
-- proteção de imutabilidade para CopyMaster aprovado e persistência após restart;
-- orquestração local durável com `Job`, tentativas imutáveis após finalização e eventos append-only;
-- fila SQLite, idempotência, claim atômico, leases renováveis, retries e recuperação auditável;
-- CLI JSON `job submit/get/list/worker-once/cancel/resume/recover` e handlers fake determinísticos;
-- Voice Master persistente com API oficial ElevenLabs, processamento/QC local, aprovação humana,
-  budget gate, reconciliação e proteção contra geração paga duplicada;
-- contratos Google Flow v1.1, schema de manifesto e fronteira browser do Goal 4B;
-- trusted roots, validação canônica de contexto e paths, lock global do browser, locators
-  semânticos e diagnósticos sanitizados;
-- Goal 4A: `ImageGeneration` e `ImageCandidate` persistentes, migrations, invariantes de
-  histórico/review e serviço de aplicação;
-- submissão atômica de `ImageGeneration` e `Job` vinculado, com idempotência, concorrência e
-  recuperação local;
-- handler local determinístico `image.generate`, que cria exatamente duas candidatas PNG sem
-  browser ou provider;
-- CLI JSON `image generate/regenerate/generation/candidate`, incluindo approve, reject e replace;
-- Goal 4C: execução explicitamente autorizada de `image.generate` por Google Flow/Playwright,
-  com um run durável, exatamente dois slots semânticos, dois downloads 2K correlacionados às
-  ações exatas e ingestão exclusiva sem overwrite;
-- recuperação orientada por evidências, checkpoints transacionais e resolução auditada de
-  não-dispatch, sem retry cego após uma intenção de Generate ambígua.
+### Entregue hoje
 
-### Limites ainda pendentes
+- contratos Pydantic e JSON Schema do `edit.json` legado;
+- parser de Copy Master que mantém a headline fora da narração;
+- inspeção de mídia por `ffprobe`, ingestão não destrutiva e base de conhecimento local;
+- domínio e persistência SQLite para Campaign, CopyMaster, SceneVariant, Jobs e eventos;
+- fila local retomável com idempotência, leases, retries e recuperação;
+- Voice Master automatizado pela API oficial da ElevenLabs, com processamento, QC, review e
+  aprovação humana;
+- WAV processado em mono/48 kHz, normalizado e com silêncio removido nas duas bordas;
+- domínio de imagens, candidatas, review e histórico persistente;
+- runtime Google Flow/Playwright, geração, correlação de downloads e recuperação implementados e
+  verificados com fixtures locais;
+- CLI JSON e harness de verificação para as capacidades acima.
 
-O Goal 4C implementa o caminho mecânico de geração, correlação, download e recuperação, mas não
-executou uma operação ao vivo no Google Flow. QC semântico/técnico completo, review integrado e
-o canário real pertencem ao Goal 4D. Portanto, a existência do runtime não prova que uma imagem
-real foi gerada no provider nem autoriza inferir aprovação visual.
+### Não entregue ainda
 
-### Planejado
+- importação batch de imagens manuais ligada às variantes da campanha;
+- integração HeyGen para upload batch de imagens e do Voice Master, geração, polling e download;
+- `EditProfile` reutilizável e resolução de overrides por vídeo/variante;
+- render final com headline, captions, música e framing configuráveis;
+- variações A/B de headline sem regenerar voz, imagem ou HeyGen;
+- API FastAPI e interface React local;
+- preview aproximado e fluxo end-to-end operável pela interface.
 
-Image QC/review e canário Google Flow, HeyGen MCP/OAuth, edição final, canário end-to-end e API/UI
-local estão sequenciados em `docs/GOAL-ROADMAP.md`. Captions, B-roll, música e render editorial
-também permanecem planejados; a integração oficial ElevenLabs, o processamento de Voice Master e
-transcript/QC já pertencem ao Goal 3 implementado. Nenhuma capacidade futura deve ser inferida
-apenas por constar no PRD.
+### Google Flow: preservado, mas pausado
 
-### Estado de verificação dos milestones
+A automação do Google Flow não será removida. Ela representa trabalho técnico relevante e pode
+voltar a ser usada como caminho opcional. Porém:
 
-O projeto usa termos separados:
+- nunca foi validada contra uma execução real do provider;
+- não está no caminho crítico do novo MVP;
+- não deve receber novos Goals antes do piloto delivery-first;
+- imagens serão geradas manualmente e importadas em batch no fluxo principal.
 
-- `IMPLEMENTED`: produção e testes requeridos existem;
-- `LOCAL_VERIFIED`: o baseline determinístico/local requerido foi executado com sucesso, sem
-  implicar provider real;
-- `PROVIDER_VERIFIED`: um canário real explicitamente aprovado foi concluído.
+Esse corte elimina o maior risco de manutenção de UI externa sem bloquear a produção.
 
-Goals 0–3 estão `IMPLEMENTED` e `LOCAL_VERIFIED`. O provider canary de ElevenLabs não foi
-demonstrado e permanece pendente como `Goal 3C`; portanto Goal 3 não é declarado
-`PROVIDER_VERIFIED`. Nomes históricos de commit com `[verified]` não são evidência independente
-de CI ou de provider.
-
-Goal 4A — Image Domain & Persistence está `IMPLEMENTED` e `LOCAL_VERIFIED`: a Task 12 concluiu o
-harness determinístico completo no HEAD local de código `088d556`. Os jobs Linux full e Windows
-focused do GitHub Actions executaram com sucesso para o commit final `1a96525`, fornecendo
-evidência independente de CI para o fechamento. Sua verificação de provider é `N/A`: a
-implementação usa somente o handler local determinístico e não executa browser, Google Flow ou
-qualquer chamada de provider.
-
-Goal 4B — Google Flow Browser Runtime está `IMPLEMENTED` e `LOCAL_VERIFIED`, sem preflight ao vivo.
-Goal 4C — Flow Generation, Download & Recovery também está `IMPLEMENTED` e `LOCAL_VERIFIED`. A
-revisão independente do intervalo completo encontrou 2 achados Critical, 3 High e 3 Medium; todos
-foram aceitos e corrigidos, com re-review final sem Critical/High pendente. A verificação local
-completa do HEAD técnico `03cc130` passou com 1.110 testes aprovados, 17 ignorados e 13/13 etapas do
-harness. O workflow determinístico mantém Linux full e Windows focused, ambos sem rota ao Google;
-a evidência remota deve ser vinculada ao SHA final da documentação depois do push, sem antecipar o
-resultado neste documento.
+## Fluxo alvo do MVP
 
 ```text
-Goal 4C — Flow Generation, Download & Recovery
-
-IMPLEMENTED       YES
-LOCAL_VERIFIED    YES
-PROVIDER_VERIFIED NOT ESTABLISHED
-
-BROWSER_PREFLIGHT_VERIFIED NOT RUN / NOT ESTABLISHED
+Copy Master aprovada
+        ↓
+Voice Master automatizado → processed/voice-master.wav
+        ↓
+imagens geradas manualmente → import batch → uma imagem por variante
+        ↓
+HeyGen: upload/reuso de imagem + Voice Master → generate batch
+        ↓
+polling retomável → download dos MP4
+        ↓
+EditProfile + overrides → EditManifest resolvido
+        ↓
+headline/captions/music/framing → render A/B
+        ↓
+review e entrega local
 ```
 
-## Arquitetura oficial de geração de imagens
+Uma variante A/B de headline começa no estágio de edição. Ela reutiliza o mesmo MP4 do HeyGen e
+os mesmos assets upstream.
 
-O único caminho suportado é:
+## Próximo slice de desenvolvimento
+
+O próximo Goal é **D1 — Manual Image Batch Intake**:
+
+1. importar uma pasta de imagens sem mover ou sobrescrever os originais;
+2. correlacionar arquivos com variantes por um manifest batch explícito;
+3. validar extensão, dimensão, orientação, hash, duplicidade e cobertura;
+4. persistir cada imagem importada como candidata selecionada/aprovada;
+5. expor dry-run e resumo JSON pela CLI;
+6. deixar a campanha pronta para o primeiro Goal HeyGen.
+
+O escopo completo e os critérios de saída estão em
+[`docs/GOAL-ROADMAP.md`](docs/GOAL-ROADMAP.md).
+
+## Princípios do MVP
+
+- uso local e pessoal primeiro;
+- modular monolith, SQLite e filesystem local;
+- UI e CLI chamam os mesmos application services;
+- ações pagas precisam de budget gate e proteção contra duplicação;
+- arquivos de origem nunca são alterados ou sobrescritos;
+- segurança de secrets e paths permanece obrigatória;
+- sem multiusuário, cloud sync próprio, publicação social ou infraestrutura distribuída;
+- sem timeline, drag-and-drop livre ou preview frame-perfect.
+
+## Contratos de edição planejados
+
+`EditProfile` guarda defaults reutilizáveis de estilo. `EditManifest` registra a configuração
+resolvida e imutável de cada render.
+
+Precedência:
 
 ```text
-Prompt criado pela IA/Hermes
-→ Google Flow
-→ Playwright Python
-→ candidatas
-→ download 2K
-→ QC
-→ review
-→ approve/reject/regenerate
+EditProfile < campaign defaults < video override < output variant override
 ```
 
-A IA/Hermes cria os prompts e toma decisões criativas. A aplicação executa o trecho implementado
-do workflow de forma mecânica, auditável e retomável. O browser usa perfil Chromium persistente
-dedicado, concorrência 1, seletores verificáveis por roles/labels/texto/DOM, screenshots e trace em
-falhas relevantes. Se a UI não puder ser confirmada, o worker para com segurança, sem cliques
-cegos por coordenadas. A grade visível tem evidência por screenshot; toda candidata
-intencionalmente baixada e toda versão baixada rejeitada serão preservadas sem overwrite. Baixar
-toda candidata visível não é requisito P0.
+Os overrides serão restritos a campos editoriais conhecidos. Uma variante de headline altera
+somente `headline.text` e recebe outro output/version ID; não cria nova Voice Master, imagem ou
+geração HeyGen.
 
-Google Flow + Playwright é o único provider/browser workflow ativo. Não há provider alternativo
-de geração de imagens. O runtime e a recuperação do Goal 4C estão implementados e verificados por
-fixtures locais determinísticas; QC/review completo e prova contra o provider real continuam
-pendentes no Goal 4D.
+## Interface local planejada
 
-## Documentação da automação em massa
+React + FastAPI em `127.0.0.1`, com telas simples para:
 
-- `docs/PROJECT-MEMORY.md` — visão consolidada, decisões duráveis, integrações, convenções e aprendizados do projeto;
-- `docs/PRD-MVP-MASS-VIDEO-AUTOMATION.md` — PRD completo do MVP end-to-end com ElevenLabs API, Google Flow por Playwright, HeyGen MCP/OAuth, pós-produção, QC e interface local.
-- `docs/GOAL-ROADMAP.md` — sequência de Goals estreitos e verificáveis para implementação com Codex;
-- `AGENTS.md` — limites, fontes de verdade, regras de engenharia e checks obrigatórios para agentes.
+- campanhas e assets;
+- importação de imagens;
+- Voice Master e status HeyGen;
+- profiles e variantes de edição;
+- preview 9:16 aproximado;
+- disparo e acompanhamento de renders;
+- revisão dos outputs.
 
-O PRD amplia o escopo futuro da pipeline para campanhas com uma Copy/Voice Master e múltiplas variantes visuais. As capacidades descritas ali são planejamento de produto e não devem ser confundidas com funcionalidades já implementadas.
+O preview serve para validar composição, posição, fonte, cor e hierarquia. O arquivo renderizado
+continua sendo a referência final.
 
-## Preparação
+## Preparação atual
 
-Defina `<AURALY_ROOT>` como a pasta raiz local do Auraly. O código usa
-`~/Documents/Auraly` por padrão; outro local pode ser definido com
-`AURALY_PROJECT_ROOT` ou `--project-root` em cada comando de geração de
-imagem. Todos os artefatos de campanha (incluindo Voice Master e preparação de
-imagem) usam `<AURALY_ROOT>/pipeline/work`; o SQLite permanece independente em
-`~/.auraly/auraly.db` por padrão. O diretório confiável de downloads usa
-`~/Downloads` por padrão e
-pode ser alterado com `AURALY_DOWNLOADS_DIR` ou com `--downloads-dir` em cada
-comando de geração de imagem. Os comandos de continuação rejeitam contextos
-que não correspondam a esses dois roots confiáveis.
+Requisitos do repositório existente:
+
+- Python 3.11;
+- `uv`;
+- Node/npm para o ambiente de renderer existente;
+- FFmpeg/ffprobe;
+- SQLite local.
 
 ```bash
-cd "<AURALY_ROOT>/pipeline"
 uv sync --all-groups
 npm ci
-```
-
-## Campaign Foundation
-
-O banco de metadados usa SQLite em modo WAL. Por padrão ele fica fora do repositório em
-`~/.auraly/auraly.db`; defina `AURALY_DATABASE_PATH` ou passe `--database` para escolher outro
-arquivo SQLite. Cada comando aplica as migrações Alembic pendentes antes de acessar os dados.
-Arquivos SQLite, WAL e SHM são ignorados pelo Git.
-
-Criar, consultar e listar uma campanha:
-
-```bash
-uv run auraly campaign create \
-  --input examples/campaign.request.json \
-  --database ~/.auraly/auraly.db
-
-uv run auraly campaign get eight-of-cups-pilot \
-  --database ~/.auraly/auraly.db
-
-uv run auraly campaign list \
-  --database ~/.auraly/auraly.db
-```
-
-As respostas são JSON estruturado. IDs duplicados falham sem overwrite; um `CopyMaster`
-aprovado não pode ser atualizado nem removido no banco e qualquer revisão é persistida como uma
-nova versão. As variantes exigem ao menos três locais distintos. A headline permanece visual-only
-e `spokenText` é derivado somente de hook, body e CTA. O banco armazena apenas estado e metadados
-— nunca mídia, cookies, tokens, profiles ou URLs assinadas.
-
-Para criar ou atualizar explicitamente um banco por Alembic:
-
-```bash
-AURALY_DATABASE_PATH=~/.auraly/auraly.db uv run alembic upgrade head
-```
-
-## Voice Master
-
-Goal 3 adds a campaign-level `VoiceMaster` linked to one approved `CopyMaster` version. A logical voice request creates one durable `voice.generate` Job with `reconcile_before_retry`; every SceneVariant reuses the approved processed artifact.
-
-```bash
-uv run auraly voice generate CAMPAIGN_ID --voice-id VOICE_ID --model-id eleven_multilingual_v2 --approve-paid-request --paid-request-approved-by OPERATOR --approved-budget-cents 1000
-uv run auraly job worker-once --worker-id voice-worker
-uv run auraly voice get VOICE_MASTER_ID
-uv run auraly voice list --campaign-id CAMPAIGN_ID
-uv run auraly voice approve VOICE_MASTER_ID --approved-by OPERATOR
-uv run auraly voice reject VOICE_MASTER_ID --rejected-by OPERATOR --reason "Pacing requires regeneration"
-uv run auraly voice resolve-no-artifact VOICE_MASTER_ID --resolved-by OPERATOR --reason "Provider history confirms no artifact"
-```
-
-`voice generate` requires a positive Campaign `budget.limitCents`, a valid uppercase three-letter
-Campaign `budget.currency`, explicit `--approve-paid-request`, an explicit operator, and
-`--approved-budget-cents` no greater than the Campaign limit. The append-only authorization event
-records operator, timestamp, approved ceiling, Campaign limit, and authoritative currency. Ambiguous
-or `dispatching` outcomes without a raw artifact whose digest was already persisted remain blocked
-until `resolve-no-artifact` records an operator-confirmed reconciliation; the same Job is then resumed
-without bypassing its attempt or fencing history. Provider MP3 is accepted only when Xing/Info/VBRI
-metadata supplies an independently checkable frame count; formats without declared frame count fail
-closed rather than treating a clean frame boundary as proof of completeness. Uma Campaign com VoiceMaster
-já aprovada rejeita qualquer nova logical generation antes de criar VoiceMaster, Job ou autorização
-paga; criação de VoiceMaster + Job + evento pago e a decisão concorrente com approval são serializadas
-em uma única transação SQLite. Replay exato da logical key existente continua idempotente. Replacement/supersede não faz
-parte deste Goal.
-
-`ELEVENLABS_API_KEY` is loaded only by the worker from the environment. It is never accepted as CLI/job input or persisted. The official `POST /v1/text-to-speech/{voice_id}/with-timestamps` API is the only TTS path. The exact persisted `CopyMaster.spoken_text` is sent; `headline` remains visual-only.
-
-Artifacts are non-destructive under the configured work root:
-
-```text
-campaigns/<campaign-id>/voice/<voice-master-id>/
-  raw/provider.mp3
-  processed/voice-master.wav
-  inspection/transcript.json
-  manifest/voice-master.json
-```
-
-The raw response is created exclusively and never overwritten. FFmpeg produces separate mono 48 kHz PCM WAV using `silenceremove=start_periods=1:start_duration=0.1:start_threshold=-50dB,areverse,silenceremove=start_periods=1:start_duration=0.1:start_threshold=-50dB,areverse,loudnorm=I=-16:TP=-1.5:LRA=11`. Final LUFS, true peak, silence, duration, hashes, WPM and transcript comparison are persisted. Human approval is mandatory.
-
-## Persistent Job Orchestration
-
-Goal 2 persiste toda a informação necessária para entender e retomar trabalho local sem contexto
-conversacional. Jobs podem ser globais, vinculados a uma campanha ou vinculados a uma
-`SceneVariant`. A mesma `idempotencyKey` retorna o job existente quando o contrato é idêntico e
-falha com conflito quando é reutilizada para outra operação.
-
-```bash
-uv run auraly job submit \
-  --input examples/job.request.json \
-  --database ~/.auraly/auraly.db
-
-uv run auraly job list --status queued --database ~/.auraly/auraly.db
-uv run auraly job get <job-id> --database ~/.auraly/auraly.db
-uv run auraly job worker-once --worker-id local-worker-1 \
-  --database ~/.auraly/auraly.db
-uv run auraly job cancel <job-id> --database ~/.auraly/auraly.db
-uv run auraly job resume <job-id> --database ~/.auraly/auraly.db
-uv run auraly job recover --database ~/.auraly/auraly.db
-```
-
-`worker-once` é deliberadamente limitado: recupera leases expirados, promove retries vencidos,
-faz claim atômico de no máximo um job e executa um handler local registrado. Enquanto o handler
-está ativo, um heartbeat interno renova aproximadamente a cada terço do lease e encerra antes da
-finalização; perda de worker/attempt fencing bloqueia completion com erro sanitizado. O número da
-tentativa é o fencing token: completion e renewal exigem o mesmo worker, a mesma tentativa e um
-lease ainda válido. Os handlers fake disponíveis são `fake.success`, `fake.retry-once`, `fake.retry-always`,
-`fake.permanent-failure`, `fake.blocked` e `fake.crash`; Goal 3 também registra o handler real
-`voice.generate`, cuja única chamada externa é a API oficial da ElevenLabs e cujo dispatch exige
-autorização paga persistida.
-
-Estados suportados:
-
-```text
-queued -> running | cancelled
-running -> completed | retry_scheduled | failed | blocked
-retry_scheduled -> queued | cancelled
-blocked -> queued | cancelled
-completed | failed | cancelled -> terminal
-```
-
-O contrato persiste `retrySafety`: `idempotent` autoriza retry automático, `manual_only` bloqueia
-até `job resume` explícito, e `reconcile_before_retry` permanece bloqueado até reconciliação humana.
-Para `voice.generate`, `voice resolve-no-artifact` registra operador e razão em evento append-only e
-retoma o mesmo Job somente após confirmação de que nenhum artifact foi criado. A capability declarada
-pelo handler precisa coincidir com a policy do job.
-
-O cancelamento de job `running` é rejeitado, pois este Goal não finge interromper uma operação em
-execução. O lease pode ser renovado pela camada de aplicação e, quando expira, a tentativa ativa é
-finalizada como `interrupted`; o job recebe `job.recovered` e vai para retry automático apenas se a
-policy for idempotente, fica blocked quando requer autorização/reconciliação, ou falha se o budget
-de tentativas foi esgotado. Migrations de startup usam lock de arquivo entre processos. A associação
-Campaign/SceneVariant também é validada por triggers SQLite. Inputs, outputs e eventos aceitam apenas metadados JSON seguros:
-secrets, cookies, profiles, URLs assinadas, data URLs e mídia/BLOB são rejeitados.
-
-## Ingestão
-
-```bash
-uv run auraly ingest \
-  --video "../05 HeyGen Inputs/Inbox/susan-sign.mp4" \
-  --copy "../01 Copies/susan-sign.md" \
-  --character susan-smith \
-  --work-root work \
-  --reel-id susan-sign-001
-```
-
-Personagens aceitos:
-
-- `susan-smith` → template `susan-hard-truth-v1`;
-- `soul-constellation` → template `soul-constellation-v1`.
-
-A ingestão cria:
-
-```text
-work/<reel-id>/
-├── source/
-│   ├── heygen.mp4
-│   └── copy.md
-├── manifest/
-│   └── edit.json
-└── probe.json
-```
-
-O vídeo e a copy de origem permanecem intactos. Um workspace existente nunca é sobrescrito.
-
-## Formato obrigatório da copy
-
-```markdown
-## Headline para tela
-**HEADLINE VISUAL**
-
-## Hook
-Texto falado do hook.
-
-## Body
-Texto falado do body.
-
-## CTA
-Texto falado do CTA.
-```
-
-A headline é excluída de `spokenText` por design e o contrato proíbe `headline.spoken=true`.
-
-## Validar um manifesto
-
-```bash
-uv run auraly validate work/<reel-id>/manifest/edit.json
-```
-
-## Regenerar o JSON Schema
-
-```bash
-uv run auraly export-schema
-```
-
-Arquivo gerado:
-
-```text
-schemas/edit.schema.json
-```
-
-## Base de vídeos validados
-
-A biblioteca somente leitura fica fora do repositório:
-
-```text
-<AURALY_ROOT>/07 Validated Ads Knowledge/Top Ads - Auraly
-```
-
-Verifique integridade e processamento:
-
-```bash
-uv run auraly knowledge-status
-```
-
-Pesquise hooks, CTAs, ângulos, claims, nomes de arquivos e documentos em texto integral:
-
-```bash
-uv run auraly knowledge-search "face reveal" --collection validated-ad --limit 5
-uv run auraly knowledge-search "horóscopo visual" --limit 5
-uv run auraly knowledge-search "hidden feelings return" --collection validated-ad
-```
-
-Guias:
-
-- `knowledge/guides/copy-playbook.md`;
-- `knowledge/guides/hook-cta-patterns.md`;
-- `knowledge/guides/editing-playbook.md`.
-
-Fluxo antes de criar um novo `edit.json`:
-
-1. pesquisar um ângulo e consultar de 3 a 5 referências validadas;
-2. selecionar um padrão narrativo, sem copiar frases literalmente;
-3. escolher um único objeto de prova conectado ao roteiro;
-4. aplicar beat map, ritmo e safe zones do playbook editorial;
-5. remover ou aprovar todos os claims sinalizados;
-6. ingerir no job somente assets novos/licenciados — nunca vídeos concorrentes da biblioteca;
-7. renderizar e executar o QC habitual.
-
-`validated-ad` identifica um anúncio usado por perfis de terceiros que vendeu muito bem — uma referência de desempenho comercial comprovado em outros perfis, não mera aprovação editorial. Isso não garante o mesmo resultado no perfil atual e não implica direito de publicação, aprovação jurídica ou licença do arquivo. `competitor-reference` serve somente como benchmark/inspiração.
-
-## Gates de qualidade
-
-```bash
 uv run python scripts/verify.py fast
-uv run python scripts/verify.py fast --pytest \
-  tests/test_job_service.py::test_submit_get_list_and_restart_persist_campaign_level_job
+```
+
+O banco fica em `~/.auraly/auraly.db` por padrão. O work root usa
+`~/Documents/Auraly/pipeline/work`, ou os valores de `AURALY_DATABASE_PATH` e
+`AURALY_PROJECT_ROOT`.
+
+## Verificação
+
+O projeto distingue:
+
+- `IMPLEMENTED`: código e testes existem;
+- `LOCAL_VERIFIED`: o baseline determinístico passou;
+- `PROVIDER_VERIFIED`: um canário real autorizado passou.
+
+Goals 0–3 e 4A–4C estão implementados e verificados localmente. ElevenLabs e Google Flow ainda
+não têm canário real registrado neste repositório. Nenhuma capacidade do novo roadmap deve ser
+tratada como entregue antes de código, testes e evidência correspondente.
+
+Gate local completo:
+
+```bash
 uv run python scripts/verify.py full
 ```
 
-`fast` fornece feedback barato para TDD: sempre roda Ruff e mypy de source e só executa os alvos
-pytest informados após `--pytest`. `full` é o gate local de `LOCAL_VERIFIED`: executa o baseline
-determinístico completo, para na primeira falha e detecta drift dos schemas gerados sem restaurar
-arquivos automaticamente.
+## Documentação
 
-O workflow `.github/workflows/verify.yml` usa o mesmo harness para evidência determinística
-independente em Linux e Windows. Para Goal 4A, os jobs Linux full e Windows focused foram aprovados
-no commit `1a96525`. Nem execução local nem CI estabelece `PROVIDER_VERIFIED`.
-
-## Garantias atuais do manifesto
-
-- `schemaVersion` deve ser `1.0`;
-- paths internos devem ser relativos ao workspace;
-- a headline não pode ser narrada;
-- eventos precisam ter `end > start`;
-- eventos não podem ultrapassar a duração da fonte;
-- todo B-roll precisa declarar licença;
-- `approved` e `rendered` exigem aprovação humana;
-- somente personagens e formatos suportados são aceitos;
-- campos desconhecidos são rejeitados.
-
-## Próximos passos
-
-A sequência imediata é:
-
-```text
-Goal 4C IMPLEMENTED / LOCAL_VERIFIED
-→ Goal 4D Image QC, Review & Provider Canary (pending)
-```
-
-Goal 4 foi decomposto em `4A Image Domain & Persistence`, `4B Google Flow Browser Runtime`,
-`4C Flow Generation, Download & Recovery` e `4D Image QC, Review & Provider Canary`. Goals 4A e
-4B–4C estão `IMPLEMENTED` e `LOCAL_VERIFIED`; 4D permanece pendente. Specs e planos vivem
-respectivamente em `docs/superpowers/specs/` e `docs/superpowers/plans/`; qualquer canário real
-continua exigindo aprovação explícita.
-
-### Goal 4B — Google Flow Browser Runtime
-
-`auraly flow preflight` é uma fronteira independente, somente de observação, para verificar o
-browser e a UI do Flow. Ele usa Chromium persistente e headed, gerenciado pelo Playwright, com um
-perfil dedicado fora do repositório; login e MFA permanecem exclusivamente manuais. O contrato
-semântico da UI falha fechado, o lock nativo limita o browser a uma execução concorrente, e os
-diagnósticos sanitizados são publicados de forma append-only. Browser e contexto são fechados antes
-do retorno, e a CLI sempre expõe JSON estável.
-
-Esta etapa não clica em Create/Generate, não insere prompt, não faz upload ou download, não
-inspeciona candidatas, não executa QC, não integra `ImageGeneration` e não realiza geração no
-provider. `PROVIDER_VERIFIED` não foi estabelecido; `BROWSER_PREFLIGHT_VERIFIED` permanece não
-executado/não estabelecido até um preflight ao vivo, explicitamente aprovado e acompanhado por um
-operador.
-
-### Goal 4C — Flow Generation, Download & Recovery
-
-O `image.generate` continua usando `local-fake` por padrão. O caminho público
-`playwright-python` exige autorização explícita e persistida, bytes da referência validados antes
-de abrir o browser e uma rota relativa de workspace Flow que satisfaça o contrato confiável. Um
-Job possui um `FlowGenerationRun` e exatamente dois `FlowCandidateSlot`; intenção e confirmação
-do Generate, identidades dos slots, evidência da grade, intenção/download 2K, ingestão e conclusão
-são checkpoints duráveis protegidos contra workers obsoletos.
-
-Cada download é correlacionado pelo escopo literal da ação semântica correspondente:
-
-```python
-with page.expect_download(...) as pending:
-    action.click()
-```
-
-O runtime seleciona exatamente duas candidatas semânticas, valida os bytes como PNG/JPEG/WebP com
-eixo máximo de pelo menos 2048 pixels e publica cada final de forma exclusiva. Recuperação usa
-evidências já persistidas e nunca clica em Generate; uma intenção ambígua somente avança com
-evidência positiva ou com `resolve-no-dispatch` explícito, auditado por operador e motivo.
-
-A faixa implementada e revisada é `1772957..03cc130`. A cadeia técnica de marcos termina em
-`d103366` (CI determinístico), `5493121` (correções dos achados aceitos) e `03cc130` (contrato
-público final da CLI). A revisão independente do intervalo integral foi seguida por correções com
-regressões e re-review sem Critical/High pendente.
-
-Nenhum comando de preflight ou geração ao vivo foi executado, nenhum crédito do Google Flow foi
-consumido e nenhum login/provider foi validado. O Goal 4D permanece pendente e é o único que poderá
-estabelecer QC/review completo e `PROVIDER_VERIFIED` para o ciclo de imagens.
+- [`docs/PROJECT-MEMORY.md`](docs/PROJECT-MEMORY.md) — decisões duráveis, estado entregue e
+  histórico técnico relevante;
+- [`docs/PRD-MVP-MASS-VIDEO-AUTOMATION.md`](docs/PRD-MVP-MASS-VIDEO-AUTOMATION.md) — produto
+  delivery-first e requisitos do MVP;
+- [`docs/GOAL-ROADMAP.md`](docs/GOAL-ROADMAP.md) — ordem executável dos próximos Goals;
+- [`AGENTS.md`](AGENTS.md) — regras de engenharia do repositório.
