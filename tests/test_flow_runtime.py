@@ -743,6 +743,37 @@ def test_launch_exception_before_trust_is_sanitized_browser_launch_failure(tmp_p
     assert caught.value.evidence == FlowFailureEvidence()
 
 
+def test_transient_browser_launch_failure_retries_once(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = local_target("ready.html")
+    context = _FakeContext(page=_FakePage(url=target.flow_url, ready=True))
+    original_launch = _FakeChromium.launch_persistent_context
+    attempts = 0
+
+    def launch_once_then_succeed(
+        chromium: _FakeChromium, **kwargs: object
+    ) -> _FakeContext:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise RuntimeError("transient launch failure")
+        return original_launch(chromium, **kwargs)
+
+    monkeypatch.setattr(_FakeChromium, "launch_persistent_context", launch_once_then_succeed)
+
+    observation = GoogleFlowRuntime(
+        config(tmp_path),
+        _target=target,
+        _playwright_factory=_playwright_factory(context),
+    ).run()
+
+    assert observation.status == "ready"
+    assert attempts == 2
+    assert context.manager_exit_calls == 2
+
+
 def test_exception_after_trust_requires_human_intervention(tmp_path: Path) -> None:
     """A raw error after route trust cannot be reported as a browser-launch failure."""
     target = local_target("ready.html")
