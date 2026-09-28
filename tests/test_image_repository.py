@@ -105,6 +105,8 @@ def _candidate(
 ) -> ImageCandidate:
     return ImageCandidate(
         image_candidate_id=str(uuid4()),
+        scene_variant_id=SCENE_ID,
+        source_kind="generated",
         image_generation_id=generation_id,
         candidate_index=index,
         source_path=f"campaigns/campaign-1/images/candidate-{index:04d}.png",

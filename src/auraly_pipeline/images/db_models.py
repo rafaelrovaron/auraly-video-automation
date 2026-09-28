@@ -11,6 +11,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -72,6 +73,17 @@ class ImageCandidateRow(Base):
     __table_args__ = (
         CheckConstraint("candidate_index >= 0", name="image_candidate_index"),
         CheckConstraint(
+            "source_kind IN ('generated','manual_import')",
+            name="image_candidate_source_kind",
+        ),
+        CheckConstraint(
+            "(source_kind = 'generated' AND image_generation_id IS NOT NULL "
+            "AND import_manifest_sha256 IS NULL AND import_source_path IS NULL) OR "
+            "(source_kind = 'manual_import' AND image_generation_id IS NULL "
+            "AND import_manifest_sha256 IS NOT NULL AND import_source_path IS NOT NULL)",
+            name="image_candidate_provenance",
+        ),
+        CheckConstraint(
             "width > 0 AND height > 0 AND size_bytes > 0", name="image_candidate_artifact_facts"
         ),
         CheckConstraint(
@@ -103,12 +115,25 @@ class ImageCandidateRow(Base):
             "ix_image_candidates_generation_index", "image_generation_id", "candidate_index"
         ),
         Index("ix_image_candidates_review_status", "review_status"),
+        Index(
+            "uq_manual_image_candidate_scene_sha",
+            "scene_variant_id",
+            "sha256",
+            unique=True,
+            sqlite_where=text("source_kind = 'manual_import'"),
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    image_generation_id: Mapped[str] = mapped_column(
-        ForeignKey("image_generations.id", ondelete="RESTRICT"), index=True
+    scene_variant_id: Mapped[str] = mapped_column(
+        ForeignKey("scene_variants.id", ondelete="RESTRICT"), index=True
     )
+    source_kind: Mapped[str] = mapped_column(String(32))
+    image_generation_id: Mapped[str | None] = mapped_column(
+        ForeignKey("image_generations.id", ondelete="RESTRICT"), index=True, nullable=True
+    )
+    import_manifest_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    import_source_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
     candidate_index: Mapped[int] = mapped_column(Integer)
     source_path: Mapped[str] = mapped_column(String(500))
     sha256: Mapped[str] = mapped_column(String(64))

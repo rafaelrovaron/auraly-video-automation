@@ -1127,6 +1127,8 @@ def test_completion_database_lock_returns_blocked_without_corrupting_committed_s
             expected_hashes.append(facts.sha256)
             candidate = ImageCandidate(
                 image_candidate_id=str(uuid4()),
+                scene_variant_id=generation.scene_variant_id,
+                source_kind="generated",
                 image_generation_id=generation.id,
                 candidate_index=index,
                 source_path=final.relative_to(work_root).as_posix(),

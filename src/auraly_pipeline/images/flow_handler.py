@@ -779,6 +779,8 @@ class FlowImageGenerateHandler:
             raise FlowArtifactConflictError()
         candidate = ImageCandidate(
             image_candidate_id=str(uuid4()),
+            scene_variant_id=generation.scene_variant_id,
+            source_kind="generated",
             image_generation_id=generation.id,
             candidate_index=index,
             source_path=final.relative_to(self._work_root).as_posix(),

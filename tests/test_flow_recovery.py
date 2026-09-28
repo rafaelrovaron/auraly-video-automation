@@ -231,6 +231,8 @@ def _seed_ingested_slot(
         assert generation is not None and slot is not None
         candidate = ImageCandidate(
             image_candidate_id=str(uuid4()),
+            scene_variant_id=generation.scene_variant_id,
+            source_kind="generated",
             image_generation_id=generation_id,
             candidate_index=index,
             source_path=final.relative_to(work_root).as_posix(),

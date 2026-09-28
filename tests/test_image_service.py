@@ -209,6 +209,8 @@ def test_get_and_list_candidate_contracts_and_not_found_errors(tmp_path: Path) -
     submitted = service.generate(_request(campaign_id, scene_variant_id, key="image-reads"))
     candidate = ImageCandidate(
         image_candidate_id="44444444-4444-4444-8444-444444444444",
+        scene_variant_id=scene_variant_id,
+        source_kind="generated",
         image_generation_id=submitted.generation.image_generation_id,
         candidate_index=0,
         source_path="campaigns/test/images/candidate-0000.png",

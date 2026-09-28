@@ -21,6 +21,7 @@ ImageProvider = Literal["google_flow"]
 ImageExecutor = Literal["local_fake", "playwright_python"]
 ImageGenerationState = Literal["created", "queued", "generating", "completed", "failed", "blocked"]
 ImageCandidateReviewStatus = Literal["pending_review", "approved", "rejected", "superseded"]
+ImageSourceKind = Literal["generated", "manual_import"]
 FlowGenerationStage = Literal[
     "prepared",
     "inputs_verified",
@@ -255,7 +256,11 @@ class ImageGeneration(ImageContract):
 
 class ImageCandidate(ImageContract):
     image_candidate_id: str = Field(pattern=_UUID_PATTERN, max_length=36)
-    image_generation_id: str = Field(pattern=_UUID_PATTERN, max_length=36)
+    scene_variant_id: str = Field(pattern=_UUID_PATTERN, max_length=36)
+    source_kind: ImageSourceKind
+    image_generation_id: str | None = Field(default=None, pattern=_UUID_PATTERN, max_length=36)
+    import_manifest_sha256: str | None = Field(default=None, pattern=_SHA256_PATTERN)
+    import_source_path: str | None = None
     candidate_index: int = Field(ge=0)
     source_path: str
     sha256: str = Field(pattern=_SHA256_PATTERN, max_length=64)
@@ -278,8 +283,24 @@ class ImageCandidate(ImageContract):
 
     _source_path = field_validator("source_path")(_validate_workspace_path)
 
+    @field_validator("import_source_path")
+    @classmethod
+    def validate_import_source_path(cls, value: str | None) -> str | None:
+        return None if value is None else _validate_workspace_path(value)
+
     @model_validator(mode="after")
     def validate_review_audit(self) -> Self:
+        if self.source_kind == "generated":
+            if self.image_generation_id is None:
+                raise ValueError("generated candidate requires image_generation_id")
+            if self.import_manifest_sha256 is not None or self.import_source_path is not None:
+                raise ValueError("generated candidate cannot contain import provenance")
+        elif (
+            self.image_generation_id is not None
+            or self.import_manifest_sha256 is None
+            or self.import_source_path is None
+        ):
+            raise ValueError("manual candidate requires only import provenance")
         if (self.approved_at is None) != (self.approved_by is None):
             raise ValueError("approval timestamp and actor must be supplied together")
         rejected = (self.rejected_at, self.rejected_by, self.rejection_reason)

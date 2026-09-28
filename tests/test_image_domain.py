@@ -119,6 +119,8 @@ def _generation() -> ImageGeneration:
 def _candidate(**changes: object) -> ImageCandidate:
     values: dict[str, object] = {
         "image_candidate_id": "44444444-4444-4444-8444-444444444444",
+        "scene_variant_id": SCENE_ID,
+        "source_kind": "generated",
         "image_generation_id": GENERATION_ID,
         "candidate_index": 0,
         "source_path": "campaigns/campaign-1/images/scene/generation-0001/candidate-0000.png",
@@ -133,6 +135,37 @@ def _candidate(**changes: object) -> ImageCandidate:
     }
     values.update(changes)
     return ImageCandidate.model_validate(values)
+
+
+def test_generated_candidate_requires_generation_and_forbids_import_metadata() -> None:
+    candidate = _candidate()
+
+    assert candidate.scene_variant_id == SCENE_ID
+    assert candidate.source_kind == "generated"
+    with pytest.raises(ValidationError):
+        _candidate(image_generation_id=None)
+    with pytest.raises(ValidationError):
+        _candidate(import_manifest_sha256="c" * 64, import_source_path="images/scene.png")
+
+
+def test_manual_candidate_requires_scene_manifest_and_source_path() -> None:
+    candidate = _candidate(
+        source_kind="manual_import",
+        image_generation_id=None,
+        import_manifest_sha256="c" * 64,
+        import_source_path="images/scene.png",
+    )
+
+    assert candidate.image_generation_id is None
+    assert candidate.import_source_path == "images/scene.png"
+    with pytest.raises(ValidationError):
+        _candidate(source_kind="manual_import", image_generation_id=None)
+    with pytest.raises(ValidationError):
+        _candidate(
+            source_kind="manual_import",
+            import_manifest_sha256="c" * 64,
+            import_source_path="images/scene.png",
+        )
 
 
 def test_generation_fingerprint_is_canonical_and_excludes_submission_identity() -> None:

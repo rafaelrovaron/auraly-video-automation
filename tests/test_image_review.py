@@ -13,6 +13,7 @@ from auraly_pipeline.campaigns.domain import CampaignCreate
 from auraly_pipeline.campaigns.persistence import create_sqlite_engine
 from auraly_pipeline.campaigns.service import CampaignService
 from auraly_pipeline.images.domain import ImageCandidate, ImageGenerateRequest
+from auraly_pipeline.images.db_models import ImageGenerationRow
 from auraly_pipeline.images.repository import ImageRepository
 from auraly_pipeline.images.service import (
     ImageApprovedCandidateExistsError,
@@ -56,8 +57,16 @@ def _generation(
 def _add_candidate(
     database: Path, image_generation_id: str, *, index: int, sha256: str | None = None
 ) -> ImageCandidate:
+    engine = create_sqlite_engine(database)
+    sessions = sessionmaker(engine, expire_on_commit=False, class_=Session)
+    with sessions() as session:
+        generation = session.get(ImageGenerationRow, image_generation_id)
+        assert generation is not None
+        scene_variant_id = generation.scene_variant_id
     candidate = ImageCandidate(
         image_candidate_id=str(uuid4()),
+        scene_variant_id=scene_variant_id,
+        source_kind="generated",
         image_generation_id=image_generation_id,
         candidate_index=index,
         source_path=f"campaigns/test/images/candidate-{index:04d}.png",
@@ -70,8 +79,6 @@ def _add_candidate(
         created_at=NOW,
         updated_at=NOW,
     )
-    engine = create_sqlite_engine(database)
-    sessions = sessionmaker(engine, expire_on_commit=False, class_=Session)
     with sessions() as session:
         ImageRepository.create_candidate_in_session(session, candidate)
         session.commit()
@@ -88,16 +95,21 @@ def _add_database_valid_domain_invalid_candidate(
     candidate_id = str(uuid4())
     engine = create_sqlite_engine(database)
     with engine.begin() as connection:
+        scene_variant_id = connection.execute(
+            text("SELECT scene_variant_id FROM image_generations WHERE id=:generation"),
+            {"generation": image_generation_id},
+        ).scalar_one()
         connection.execute(
             text(
                 "INSERT INTO image_candidates "
-                "(id,image_generation_id,candidate_index,source_path,sha256,width,height,"
+                "(id,scene_variant_id,source_kind,image_generation_id,candidate_index,source_path,sha256,width,height,"
                 "size_bytes,format,review_status,approved_at,approved_by,created_at,updated_at) "
-                "VALUES (:id,:generation,0,:source,:sha,16,16,128,'png',:status,"
+                "VALUES (:id,:scene,'generated',:generation,0,:source,:sha,16,16,128,'png',:status,"
                 ":approved_at,:approved_by,:now,:now)"
             ),
             {
                 "id": candidate_id,
+                "scene": scene_variant_id,
                 "generation": image_generation_id,
                 "source": r"C:\\outside\\candidate.png",
                 "sha": "a" * 64,

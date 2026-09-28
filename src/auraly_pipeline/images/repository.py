@@ -60,7 +60,11 @@ class ImageRepository:
     ) -> ImageCandidateRow:
         row = ImageCandidateRow(
             id=candidate.image_candidate_id,
+            scene_variant_id=candidate.scene_variant_id,
+            source_kind=candidate.source_kind,
             image_generation_id=candidate.image_generation_id,
+            import_manifest_sha256=candidate.import_manifest_sha256,
+            import_source_path=candidate.import_source_path,
             candidate_index=candidate.candidate_index,
             source_path=candidate.source_path,
             sha256=candidate.sha256,
@@ -104,35 +108,20 @@ class ImageRepository:
                 raise
 
     @staticmethod
-    def candidate_with_generation_in_session(
+    def candidate_in_session(
         session: Session, image_candidate_id: str
-    ) -> tuple[ImageCandidateRow, ImageGenerationRow] | None:
-        statement = (
-            select(ImageCandidateRow, ImageGenerationRow)
-            .join(
-                ImageGenerationRow,
-                ImageCandidateRow.image_generation_id == ImageGenerationRow.id,
-            )
-            .where(ImageCandidateRow.id == image_candidate_id)
-        )
-        return session.execute(statement).tuples().one_or_none()
+    ) -> ImageCandidateRow | None:
+        return session.get(ImageCandidateRow, image_candidate_id)
 
     @staticmethod
     def approved_candidate_for_scene_in_session(
         session: Session, scene_variant_id: str
-    ) -> tuple[ImageCandidateRow, ImageGenerationRow] | None:
-        statement = (
-            select(ImageCandidateRow, ImageGenerationRow)
-            .join(
-                ImageGenerationRow,
-                ImageCandidateRow.image_generation_id == ImageGenerationRow.id,
-            )
-            .where(
-                ImageGenerationRow.scene_variant_id == scene_variant_id,
-                ImageCandidateRow.review_status == "approved",
-            )
+    ) -> ImageCandidateRow | None:
+        statement = select(ImageCandidateRow).where(
+            ImageCandidateRow.scene_variant_id == scene_variant_id,
+            ImageCandidateRow.review_status == "approved",
         )
-        return session.execute(statement).tuples().one_or_none()
+        return session.scalar(statement)
 
     def get_generation(self, image_generation_id: str) -> ImageGenerationRow | None:
         with self._session_factory() as session:
@@ -159,3 +148,18 @@ class ImageRepository:
         )
         with self._session_factory() as session:
             return list(session.scalars(statement).all())
+
+    def list_candidates_for_scene(self, scene_variant_id: str) -> list[ImageCandidateRow]:
+        statement: Select[tuple[ImageCandidateRow]] = (
+            select(ImageCandidateRow)
+            .where(ImageCandidateRow.scene_variant_id == scene_variant_id)
+            .order_by(ImageCandidateRow.created_at, ImageCandidateRow.id)
+        )
+        with self._session_factory() as session:
+            return list(session.scalars(statement).all())
+
+    def get_approved_candidate_for_scene(
+        self, scene_variant_id: str
+    ) -> ImageCandidateRow | None:
+        with self._session_factory() as session:
+            return self.approved_candidate_for_scene_in_session(session, scene_variant_id)

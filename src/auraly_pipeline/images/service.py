@@ -58,6 +58,7 @@ from auraly_pipeline.images.domain import (
     ImageGenerationState,
     ImageGenerationSubmission,
     ImageProvider,
+    ImageSourceKind,
     generation_request_fingerprint,
 )
 from auraly_pipeline.images.flow_repository import (
@@ -426,6 +427,16 @@ class ImageService:
             for row in self._repository.list_candidates(image_generation_id)
         ]
 
+    def list_candidates_for_scene(self, scene_variant_id: str) -> list[ImageCandidate]:
+        return [
+            self._candidate_to_domain(row)
+            for row in self._repository.list_candidates_for_scene(scene_variant_id)
+        ]
+
+    def get_approved_candidate(self, scene_variant_id: str) -> ImageCandidate | None:
+        row = self._repository.get_approved_candidate_for_scene(scene_variant_id)
+        return None if row is None else self._candidate_to_domain(row)
+
     def recover_generation(
         self,
         image_generation_id: str,
@@ -505,15 +516,14 @@ class ImageService:
         now = self._utc(self._clock())
 
         def approve(session: Session) -> ImageCandidate:
-            ownership = self._repository.candidate_with_generation_in_session(session, candidate_id)
-            if ownership is None:
+            candidate = self._repository.candidate_in_session(session, candidate_id)
+            if candidate is None:
                 raise ImageCandidateNotFoundError
-            candidate, generation = ownership
             if candidate.review_status != "pending_review":
                 raise ImageTransitionError
             if (
                 self._repository.approved_candidate_for_scene_in_session(
-                    session, generation.scene_variant_id
+                    session, candidate.scene_variant_id
                 )
                 is not None
             ):
@@ -537,10 +547,9 @@ class ImageService:
         now = self._utc(self._clock())
 
         def reject(session: Session) -> ImageCandidate:
-            ownership = self._repository.candidate_with_generation_in_session(session, candidate_id)
-            if ownership is None:
+            candidate = self._repository.candidate_in_session(session, candidate_id)
+            if candidate is None:
                 raise ImageCandidateNotFoundError
-            candidate, _generation = ownership
             if candidate.review_status != "pending_review":
                 raise ImageTransitionError
             candidate.review_status = "rejected"
@@ -560,13 +569,12 @@ class ImageService:
         now = self._utc(self._clock())
 
         def replace(session: Session) -> ImageCandidate:
-            ownership = self._repository.candidate_with_generation_in_session(
+            new_candidate = self._repository.candidate_in_session(
                 session, new_candidate_id
             )
-            if ownership is None:
+            if new_candidate is None:
                 raise ImageCandidateNotFoundError
-            new_candidate, new_generation = ownership
-            if new_generation.scene_variant_id != scene_variant_id:
+            if new_candidate.scene_variant_id != scene_variant_id:
                 raise ImageCandidateSceneMismatchError
             if new_candidate.review_status not in {"pending_review", "rejected"}:
                 raise ImageTransitionError
@@ -575,7 +583,7 @@ class ImageService:
             )
             if approved is None:
                 raise ImageTransitionError
-            old_candidate, _old_generation = approved
+            old_candidate = approved
             old_candidate.review_status = "superseded"
             old_candidate.superseded_at = now
             old_candidate.superseded_by_candidate_id = new_candidate.id
@@ -1091,6 +1099,8 @@ class ImageService:
             raise ImageRecoveryBlockedError
         candidate = ImageCandidate(
             image_candidate_id=str(uuid4()),
+            scene_variant_id=generation.scene_variant_id,
+            source_kind="generated",
             image_generation_id=generation.id,
             candidate_index=slot_index,
             source_path=final.relative_to(self._work_root).as_posix(),
@@ -1355,7 +1365,11 @@ class ImageService:
     def _candidate_to_domain(cls, row: ImageCandidateRow) -> ImageCandidate:
         return ImageCandidate(
             image_candidate_id=row.id,
+            scene_variant_id=row.scene_variant_id,
+            source_kind=cast(ImageSourceKind, row.source_kind),
             image_generation_id=row.image_generation_id,
+            import_manifest_sha256=row.import_manifest_sha256,
+            import_source_path=row.import_source_path,
             candidate_index=row.candidate_index,
             source_path=row.source_path,
             sha256=row.sha256,

@@ -371,6 +371,8 @@ class LocalFakeImageGenerateHandler:
         timestamp = self._clock()
         return ImageCandidate(
             image_candidate_id=str(uuid4()),
+            scene_variant_id=scene_variant_id,
+            source_kind="generated",
             image_generation_id=generation_id,
             candidate_index=candidate_index,
             source_path=relative_path.as_posix(),

@@ -96,14 +96,28 @@ def _insert_candidate(
     generation_id: str,
     candidate_index: int,
 ) -> None:
+    columns = {
+        row[1] for row in connection.execute(text("PRAGMA table_info(image_candidates)"))
+    }
+    provenance_columns = (
+        "scene_variant_id,source_kind," if "scene_variant_id" in columns else ""
+    )
+    provenance_values = ":scene,'generated'," if provenance_columns else ""
+    scene_variant_id = connection.execute(
+        text("SELECT scene_variant_id FROM image_generations WHERE id=:generation"),
+        {"generation": generation_id},
+    ).scalar_one()
     connection.execute(
         text(
-            "INSERT INTO image_candidates (id,image_generation_id,candidate_index,source_path,"
+            f"INSERT INTO image_candidates (id,{provenance_columns}image_generation_id,"
+            "candidate_index,source_path,"
             "sha256,width,height,size_bytes,format,review_status,created_at,updated_at) VALUES "
-            "(:id,:generation,:candidate_index,:path,:sha,16,16,128,'png','pending_review',:now,:now)"
+            f"(:id,{provenance_values}:generation,:candidate_index,:path,:sha,16,16,128,'png',"
+            "'pending_review',:now,:now)"
         ),
         {
             "id": candidate_id,
+            "scene": scene_variant_id,
             "generation": generation_id,
             "candidate_index": candidate_index,
             "path": f"campaigns/campaign-1/images/{candidate_id}.png",
@@ -186,7 +200,7 @@ def test_image_migration_upgrades_0003_database_and_creates_image_tables(
     }.issubset(inspector.get_table_names())
     with engine.connect() as connection:
         assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == (
-            "0005_flow_generation_recovery"
+            "0006_manual_image_import"
         )
         triggers = {
             row[0]
@@ -221,7 +235,7 @@ def test_fresh_database_reaches_image_domain_head(tmp_path: Path) -> None:
     )
     with engine.connect() as connection:
         assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == (
-            "0005_flow_generation_recovery"
+            "0006_manual_image_import"
         )
     engine.dispose()
 
@@ -440,4 +454,93 @@ def test_image_migration_downgrade_removes_image_tables(tmp_path: Path) -> None:
         assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == (
             "0003_voice_master"
         )
+    engine.dispose()
+
+
+def test_manual_image_import_migration_backfills_generated_candidate_provenance(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "manual-import-upgrade.db"
+    config = _config(database)
+    command.upgrade(config, "0005_flow_generation_recovery")
+    engine = create_engine(sqlite_url(database))
+    with engine.begin() as connection:
+        _insert_campaign_scene_job(connection)
+        _insert_generation(
+            connection,
+            generation_id="generation-1",
+            job_id="job-1",
+            generation_number=1,
+        )
+        _insert_candidate(
+            connection,
+            candidate_id="candidate-1",
+            generation_id="generation-1",
+            candidate_index=0,
+        )
+    engine.dispose()
+
+    command.upgrade(config, "head")
+
+    engine = create_engine(sqlite_url(database))
+    with engine.connect() as connection:
+        row = connection.execute(
+            text(
+                "SELECT scene_variant_id,source_kind,image_generation_id,"
+                "import_manifest_sha256,import_source_path FROM image_candidates "
+                "WHERE id='candidate-1'"
+            )
+        ).one()
+        version = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
+    assert row == (SCENE_ID, "generated", "generation-1", None, None)
+    assert version == "0006_manual_image_import"
+    engine.dispose()
+
+
+def test_manual_candidate_constraints_accept_only_complete_import_provenance(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "manual-import-constraints.db"
+    migrate_database(database)
+    engine = create_engine(sqlite_url(database))
+    with engine.begin() as connection:
+        connection.execute(text("PRAGMA foreign_keys=ON"))
+        _insert_campaign_scene_job(connection)
+        connection.execute(
+            text(
+                "INSERT INTO image_candidates (id,scene_variant_id,source_kind,"
+                "image_generation_id,import_manifest_sha256,import_source_path,candidate_index,"
+                "source_path,sha256,width,height,size_bytes,format,review_status,created_at,"
+                "updated_at) VALUES ('manual-1',:scene,'manual_import',NULL,:manifest,"
+                "'images/scene.png',0,'campaigns/campaign-1/imported/manual.png',:sha,1080,1920,"
+                "128,'png','pending_review',:now,:now)"
+            ),
+            {"scene": SCENE_ID, "manifest": "e" * 64, "sha": "f" * 64, "now": NOW},
+        )
+
+    for invalid_values in (
+        {"generation": "missing-generation", "manifest": "e" * 64, "source": "images/a.png"},
+        {"generation": None, "manifest": None, "source": "images/a.png"},
+        {"generation": None, "manifest": "e" * 64, "source": None},
+    ):
+        with pytest.raises(IntegrityError):
+            with engine.begin() as connection:
+                connection.execute(
+                    text(
+                        "INSERT INTO image_candidates (id,scene_variant_id,source_kind,"
+                        "image_generation_id,import_manifest_sha256,import_source_path,"
+                        "candidate_index,source_path,sha256,width,height,size_bytes,format,"
+                        "review_status,created_at,updated_at) VALUES (:id,:scene,'manual_import',"
+                        ":generation,:manifest,:source,0,:path,:sha,1080,1920,128,'png',"
+                        "'pending_review',:now,:now)"
+                    ),
+                    {
+                        "id": f"invalid-{invalid_values['manifest']}-{invalid_values['source']}",
+                        "scene": SCENE_ID,
+                        "path": f"campaigns/campaign-1/imported/{invalid_values['source']}.png",
+                        "sha": "a" * 64,
+                        "now": NOW,
+                        **invalid_values,
+                    },
+                )
     engine.dispose()

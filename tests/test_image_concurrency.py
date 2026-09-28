@@ -15,6 +15,7 @@ from auraly_pipeline.campaigns.domain import CampaignCreate
 from auraly_pipeline.campaigns.persistence import create_sqlite_engine
 from auraly_pipeline.campaigns.service import CampaignService
 from auraly_pipeline.images.domain import ImageCandidate, ImageGenerateRequest
+from auraly_pipeline.images.db_models import ImageGenerationRow
 from auraly_pipeline.images.repository import ImageRepository
 from auraly_pipeline.images.service import (
     ImageApprovedCandidateExistsError,
@@ -48,8 +49,16 @@ def _request(campaign_id: str, scene_variant_id: str, key: str) -> ImageGenerate
 
 
 def _add_candidate(database: Path, generation_id: str, index: int) -> ImageCandidate:
+    engine = create_sqlite_engine(database)
+    sessions = sessionmaker(engine, expire_on_commit=False, class_=Session)
+    with sessions() as session:
+        generation = session.get(ImageGenerationRow, generation_id)
+        assert generation is not None
+        scene_variant_id = generation.scene_variant_id
     candidate = ImageCandidate(
         image_candidate_id=str(uuid4()),
+        scene_variant_id=scene_variant_id,
+        source_kind="generated",
         image_generation_id=generation_id,
         candidate_index=index,
         source_path=f"campaigns/test/images/candidate-{index:04d}.png",
@@ -62,8 +71,6 @@ def _add_candidate(database: Path, generation_id: str, index: int) -> ImageCandi
         created_at=NOW,
         updated_at=NOW,
     )
-    engine = create_sqlite_engine(database)
-    sessions = sessionmaker(engine, expire_on_commit=False, class_=Session)
     with sessions() as session:
         ImageRepository.create_candidate_in_session(session, candidate)
         session.commit()

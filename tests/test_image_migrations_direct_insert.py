@@ -93,9 +93,11 @@ def _database(tmp_path: Path):
             )
         connection.execute(
             text(
-                "INSERT INTO image_candidates (id,image_generation_id,candidate_index,source_path,"
+                "INSERT INTO image_candidates (id,scene_variant_id,source_kind,image_generation_id,"
+                "candidate_index,source_path,"
                 "sha256,width,height,size_bytes,format,review_status,created_at,updated_at) VALUES "
-                "('candidate-1','generation-1',0,'campaigns/campaign-1/images/candidate-1.png',"
+                "('candidate-1','scene-1','generated','generation-1',0,"
+                "'campaigns/campaign-1/images/candidate-1.png',"
                 ":sha,16,16,128,'png','pending_review',:now,:now)"
             ),
             {"sha": "d" * 64, "now": NOW},

@@ -96,10 +96,14 @@ def _record_candidate(
     sessions = sessionmaker(engine, expire_on_commit=False, class_=Session)
     timestamp = datetime.now(UTC)
     with sessions() as session:
+        generation = session.get(ImageGenerationRow, generation_id)
+        assert generation is not None
         ImageRepository.create_candidate_in_session(
             session,
             ImageCandidate(
                 image_candidate_id=str(uuid4()),
+                scene_variant_id=generation.scene_variant_id,
+                source_kind="generated",
                 image_generation_id=generation_id,
                 candidate_index=candidate_index,
                 source_path=source_path.as_posix(),
