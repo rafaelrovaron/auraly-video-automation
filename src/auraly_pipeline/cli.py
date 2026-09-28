@@ -30,6 +30,12 @@ from auraly_pipeline.image_generation import (
 )
 from auraly_pipeline.ingest import IngestError, ingest_reel
 from auraly_pipeline.images.domain import ImageGenerateRequest, ImageGenerationSubmission
+from auraly_pipeline.images.import_batch import (
+    ImageImportError,
+    ImageImportService,
+    ImageImportValidationError,
+    export_image_import_schema,
+)
 from auraly_pipeline.images.service import (
     ImageError,
     ImageGenerationRecovery,
@@ -196,6 +202,17 @@ def export_image_generation_schema_command(
     """Export the Google Flow image-generation manifest schema."""
     path = export_image_generation_schema(output)
     typer.echo(f"Schema exported: {path}")
+
+
+@app.command("export-image-import-schema")
+def export_image_import_schema_command(
+    output: Annotated[Path, typer.Option("--output")] = Path(
+        "schemas/image-import.schema.json"
+    ),
+) -> None:
+    """Export the manual image-import manifest schema."""
+    path = export_image_import_schema(output)
+    _json_echo({"success": True, "path": str(path)})
 
 
 def _configure_image_logging() -> None:
@@ -387,6 +404,18 @@ def _close_image_service(service: ImageService | None) -> None:
         _image_failure("image_operation_failed", "The image operation failed safely.")
 
 
+def _close_image_import_service(service: ImageImportService | None) -> None:
+    if service is None:
+        return
+    handling_error = sys.exc_info()[0] is not None
+    try:
+        service.close()
+    except Exception:
+        if handling_error:
+            return
+        _image_failure("image_operation_failed", "The image operation failed safely.")
+
+
 def _image_submission_payload(submission: ImageGenerationSubmission) -> dict[str, object]:
     generation = submission.generation.model_dump(by_alias=True, mode="json")
     job = submission.job.model_dump(by_alias=True, mode="json")
@@ -567,6 +596,50 @@ def image_regenerate_command(
     )
 
 
+@image_app.command("prepare-import")
+def image_prepare_import_command(
+    campaign_id: Annotated[str, typer.Option("--campaign")],
+    output: Annotated[Path, typer.Option("--output")],
+    database: Annotated[Path, typer.Option("--database")] = default_database_path(),
+    work_root: Annotated[Path, typer.Option("--work-root")] = Path("work"),
+) -> None:
+    service: ImageImportService | None = None
+    try:
+        service = ImageImportService.for_database(database, work_root=work_root)
+        prepared = service.prepare_directory(campaign_id, output)
+    except ImageImportError as exc:
+        _image_failure(exc.code, exc.public_message)
+    except Exception:
+        _image_failure("image_operation_failed", "The image operation failed safely.")
+    finally:
+        _close_image_import_service(service)
+    _json_echo(
+        {"success": True, **prepared.model_dump(by_alias=True, mode="json")}
+    )
+
+
+@image_app.command("import-batch")
+def image_import_batch_command(
+    input_path: Annotated[Path, typer.Option("--input")],
+    dry_run: Annotated[bool, typer.Option("--dry-run")] = False,
+    database: Annotated[Path, typer.Option("--database")] = default_database_path(),
+    work_root: Annotated[Path, typer.Option("--work-root")] = Path("work"),
+) -> None:
+    service: ImageImportService | None = None
+    try:
+        service = ImageImportService.for_database(database, work_root=work_root)
+        result = service.import_batch(input_path, dry_run=dry_run)
+    except ImageImportValidationError as exc:
+        _image_failure(exc.code, exc.public_message)
+    except ImageImportError as exc:
+        _image_failure(exc.code, exc.public_message)
+    except Exception:
+        _image_failure("image_operation_failed", "The image operation failed safely.")
+    finally:
+        _close_image_import_service(service)
+    _json_echo({"success": True, **result.model_dump(by_alias=True, mode="json")})
+
+
 @image_generation_app.command("get")
 def image_generation_get_command(
     image_generation_id: Annotated[str, typer.Argument()],
@@ -679,14 +752,26 @@ def image_candidate_get_command(
 
 @image_candidate_app.command("list")
 def image_candidate_list_command(
-    image_generation_id: Annotated[str, typer.Argument()],
+    image_generation_id: Annotated[str | None, typer.Argument()] = None,
+    scene_variant_id: Annotated[
+        str | None, typer.Option("--scene-variant-id")
+    ] = None,
     database: Annotated[Path, typer.Option("--database")] = default_database_path(),
     work_root: Annotated[Path, typer.Option("--work-root")] = Path("work"),
 ) -> None:
+    if (image_generation_id is None) == (scene_variant_id is None):
+        _image_failure(
+            "image_invalid",
+            "Provide exactly one image generation or scene variant ID.",
+        )
     service: ImageService | None = None
     try:
         service = _image_service(database, work_root)
-        candidates = service.list_candidates(image_generation_id)
+        candidates = (
+            service.list_candidates(image_generation_id)
+            if image_generation_id is not None
+            else service.list_candidates_for_scene(scene_variant_id or "")
+        )
     except Exception:
         _image_failure("image_operation_failed", "The image operation failed safely.")
     finally:

@@ -73,6 +73,152 @@ def _complete_locally(database: Path, work_root: Path) -> None:
     assert worked.status == "completed"
 
 
+def _fill_import_template(manifest: Path) -> None:
+    payload = json.loads(manifest.read_text(encoding="utf-8"))
+    payload["approveImported"] = True
+    payload["approvedBy"] = "rafael"
+    for index, item in enumerate(payload["items"]):
+        relative = f"images/{item['variantId']}.png"
+        Image.new("RGB", (360 + index, 640 + index), color=(16, 32, 64)).save(
+            manifest.parent / relative
+        )
+        item["path"] = relative
+    manifest.write_text(json.dumps(payload), encoding="utf-8")
+
+
+def test_manual_image_import_cli_prepares_validates_imports_and_lists_by_scene(
+    tmp_path: Path,
+) -> None:
+    database, work_root, campaign_id, scenes = _database(tmp_path)
+    output = tmp_path / "imports" / campaign_id
+    prepared = runner.invoke(
+        app,
+        [
+            "image",
+            "prepare-import",
+            "--campaign",
+            campaign_id,
+            "--output",
+            str(output),
+            "--database",
+            str(database),
+            "--work-root",
+            str(work_root),
+        ],
+    )
+    assert prepared.exit_code == 0
+    prepared_payload = json.loads(prepared.stdout)
+    assert prepared_payload["success"] is True
+    manifest = output / "image-import.json"
+    _fill_import_template(manifest)
+
+    dry_run = runner.invoke(
+        app,
+        [
+            "image",
+            "import-batch",
+            "--input",
+            str(manifest),
+            "--dry-run",
+            "--database",
+            str(database),
+            "--work-root",
+            str(work_root),
+        ],
+    )
+    assert dry_run.exit_code == 0
+    assert json.loads(dry_run.stdout)["status"] == "valid"
+    assert not work_root.exists()
+
+    imported = runner.invoke(
+        app,
+        [
+            "image",
+            "import-batch",
+            "--input",
+            str(manifest),
+            "--database",
+            str(database),
+            "--work-root",
+            str(work_root),
+        ],
+    )
+    assert imported.exit_code == 0
+    result = json.loads(imported.stdout)
+    assert (result["created"], result["approved"], result["total"]) == (3, 3, 3)
+    assert all(not Path(item["sourcePath"]).is_absolute() for item in result["items"])
+
+    listed = runner.invoke(
+        app,
+        [
+            "image",
+            "candidate",
+            "list",
+            "--scene-variant-id",
+            scenes[0],
+            "--database",
+            str(database),
+            "--work-root",
+            str(work_root),
+        ],
+    )
+    assert listed.exit_code == 0
+    assert json.loads(listed.stdout)["candidates"][0]["sourceKind"] == "manual_import"
+
+
+def test_image_import_cli_returns_sanitized_error_and_exports_schema(tmp_path: Path) -> None:
+    database, work_root, _campaign_id, _scenes = _database(tmp_path)
+    failed = runner.invoke(
+        app,
+        [
+            "image",
+            "import-batch",
+            "--input",
+            str(tmp_path / "SECRET-missing.json"),
+            "--database",
+            str(database),
+            "--work-root",
+            str(work_root),
+        ],
+    )
+    assert failed.exit_code == 1
+    assert json.loads(failed.stdout)["error"]["code"] == "image_import_manifest_invalid"
+    assert "SECRET" not in failed.stdout
+
+    schema = tmp_path / "image-import.schema.json"
+    exported = runner.invoke(
+        app,
+        ["export-image-import-schema", "--output", str(schema)],
+    )
+    assert exported.exit_code == 0
+    payload = json.loads(schema.read_text(encoding="utf-8"))
+    assert payload["$id"] == "https://auraly.local/schemas/image-import.schema.v1.json"
+    assert payload["additionalProperties"] is False
+
+
+def test_candidate_list_requires_exactly_one_selector(tmp_path: Path) -> None:
+    database, work_root, _campaign_id, scenes = _database(tmp_path)
+    common = ["--database", str(database), "--work-root", str(work_root)]
+
+    neither = runner.invoke(app, ["image", "candidate", "list", *common])
+    both = runner.invoke(
+        app,
+        [
+            "image",
+            "candidate",
+            "list",
+            "11111111-1111-4111-8111-111111111111",
+            "--scene-variant-id",
+            scenes[0],
+            *common,
+        ],
+    )
+
+    assert neither.exit_code == both.exit_code == 1
+    assert json.loads(neither.stdout)["error"]["code"] == "image_invalid"
+    assert json.loads(both.stdout)["error"]["code"] == "image_invalid"
+
+
 def _blocked_flow_generation(
     tmp_path: Path,
     *,

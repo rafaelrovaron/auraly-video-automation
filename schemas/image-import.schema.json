@@ -1,0 +1,73 @@
+{
+  "$defs": {
+    "ImageImportItem": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "minLength": 1,
+          "title": "Path",
+          "type": "string"
+        },
+        "variantId": {
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+          "title": "Variantid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "variantId",
+        "path"
+      ],
+      "title": "ImageImportItem",
+      "type": "object"
+    }
+  },
+  "$id": "https://auraly.local/schemas/image-import.schema.v1.json",
+  "additionalProperties": false,
+  "properties": {
+    "approveImported": {
+      "default": false,
+      "title": "Approveimported",
+      "type": "boolean"
+    },
+    "approvedBy": {
+      "anyOf": [
+        {
+          "maxLength": 120,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Approvedby"
+    },
+    "campaignId": {
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+      "title": "Campaignid",
+      "type": "string"
+    },
+    "items": {
+      "items": {
+        "$ref": "#/$defs/ImageImportItem"
+      },
+      "minItems": 1,
+      "title": "Items",
+      "type": "array"
+    },
+    "schemaVersion": {
+      "const": "1.0",
+      "title": "Schemaversion",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "campaignId",
+    "items"
+  ],
+  "title": "ImageImportBatch",
+  "type": "object"
+}

@@ -514,3 +514,14 @@ class ImageImportService:
     @staticmethod
     def _issue(code: str, variant_id: str | None, message: str) -> ImageImportIssue:
         return ImageImportIssue(code=code, variant_id=variant_id, message=message)
+
+
+def export_image_import_schema(output: Path) -> Path:
+    schema = ImageImportBatch.model_json_schema(by_alias=True)
+    schema["$id"] = "https://auraly.local/schemas/image-import.schema.v1.json"
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(
+        json.dumps(schema, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    return output
