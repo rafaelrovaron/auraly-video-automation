@@ -183,7 +183,7 @@ def capture_flow_reference(path: Path, expected_sha256: str) -> FlowReferenceUpl
         raise FlowArtifactInvalidError("reference size is outside the permitted range")
     identity = _identity_from_stat(initial)
     try:
-        descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_BINARY", 0))
+        descriptor = os.open(_native_path(path), os.O_RDONLY | getattr(os, "O_BINARY", 0))
     except OSError as exc:
         raise FlowArtifactInvalidError("unable to open reference") from exc
     try:
@@ -498,7 +498,7 @@ def _link_bound_publication(
     ):
         raise FlowArtifactInvalidError("publication directory changed before link")
     if os.name == "nt":
-        os.link(staging, final)
+        os.link(_windows_extended_path(staging), _windows_extended_path(final))
         return
     os.link(
         binding.staging_name,
@@ -558,7 +558,7 @@ def _recover_matching_final(
 
 def _resolve_staging_for_publication(staging: Path, final: Path, root: Path) -> Path:
     try:
-        metadata = os.stat(staging, follow_symlinks=False)
+        metadata = os.stat(_native_path(staging), follow_symlinks=False)
     except FileNotFoundError:
         return _resolve_exact_legacy_cleanup(staging, final, root)
     except OSError as exc:
@@ -614,7 +614,7 @@ def _inspect_artifact(
     if size_bytes <= 0 or size_bytes > _MAX_ARTIFACT_BYTES:
         raise FlowArtifactInvalidError("artifact size is outside the permitted range")
     try:
-        descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_BINARY", 0))
+        descriptor = os.open(_native_path(path), os.O_RDONLY | getattr(os, "O_BINARY", 0))
     except OSError as exc:
         raise FlowArtifactInvalidError("unable to open artifact") from exc
     try:
@@ -697,7 +697,7 @@ def _inspect_open_stream(
 
 def _regular_file_stat(path: Path) -> os.stat_result:
     try:
-        metadata = os.stat(path, follow_symlinks=False)
+        metadata = os.stat(_native_path(path), follow_symlinks=False)
     except OSError as exc:
         raise FlowArtifactInvalidError("unable to stat artifact") from exc
     if not stat.S_ISREG(metadata.st_mode):
@@ -711,7 +711,7 @@ def _identity_from_stat(metadata: os.stat_result) -> _FileIdentity:
 
 def _directory_identity(path: Path) -> _FileIdentity:
     try:
-        metadata = os.stat(path, follow_symlinks=False)
+        metadata = os.stat(_native_path(path), follow_symlinks=False)
     except OSError as exc:
         raise FlowArtifactInvalidError("unable to stat trusted Flow work root") from exc
     if not stat.S_ISDIR(metadata.st_mode):
@@ -1102,10 +1102,21 @@ def _path_is_link_or_junction(path: Path) -> bool:
     if path.is_symlink():
         return True
     try:
-        attributes = getattr(os.lstat(path), "st_file_attributes", 0)
+        attributes = getattr(os.lstat(_native_path(path)), "st_file_attributes", 0)
     except (AttributeError, OSError):
         return False
     return bool(attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT)
+
+
+def _windows_extended_path(path: Path) -> str:
+    absolute = os.path.abspath(path)
+    if absolute.startswith("\\\\"):
+        return "\\\\?\\UNC\\" + absolute[2:]
+    return "\\\\?\\" + absolute
+
+
+def _native_path(path: Path) -> str | Path:
+    return _windows_extended_path(path) if os.name == "nt" else path
 
 
 def _validate_extension(path: Path, image_format: str) -> None:
@@ -1222,7 +1233,7 @@ def _sha256_stream(stream: BinaryIO) -> str:
 
 def _sync_file_and_directory(path: Path) -> None:
     try:
-        descriptor = os.open(path, os.O_RDWR)
+        descriptor = os.open(_native_path(path), os.O_RDWR)
         try:
             os.fsync(descriptor)
         finally:
@@ -1235,7 +1246,7 @@ def _sync_file_and_directory(path: Path) -> None:
 
 def _sync_directory(path: Path) -> None:
     try:
-        descriptor = os.open(path, os.O_RDONLY)
+        descriptor = os.open(_native_path(path), os.O_RDONLY)
         try:
             os.fsync(descriptor)
         finally:

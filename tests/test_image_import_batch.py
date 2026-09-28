@@ -3,11 +3,14 @@ from __future__ import annotations
 from pathlib import Path
 import json
 from datetime import UTC, datetime
+from concurrent.futures import ThreadPoolExecutor
 from uuid import uuid4
 
 import pytest
 from PIL import Image
 from pydantic import ValidationError
+from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 from auraly_pipeline.campaigns.domain import CampaignCreate
@@ -25,7 +28,9 @@ from auraly_pipeline.flow.artifacts import (
 from auraly_pipeline.images.import_batch import (
     ImageImportBatch,
     ImageImportError,
+    ImageImportPersistenceError,
     ImageImportService,
+    ImageImportSourceChangedError,
     ImageImportValidationError,
 )
 from auraly_pipeline.images.domain import ImageCandidate
@@ -255,6 +260,138 @@ def test_plan_reuses_same_manual_hash_and_blocks_different_approved_hash(tmp_pat
         for issue in caught.value.issues
     )
     service.close()
+
+
+def test_execute_imports_three_images_and_survives_restart(tmp_path: Path) -> None:
+    database = tmp_path / "auraly.db"
+    campaign_id, variants = _campaign(database)
+    manifest = _manifest(tmp_path / "incoming", campaign_id, variants)
+    source_bytes = {
+        path.relative_to(manifest.parent).as_posix(): path.read_bytes()
+        for path in (manifest.parent / "images").iterdir()
+    }
+    work_root = tmp_path / "work"
+    service = ImageImportService.for_database(database, work_root=work_root)
+    plan = service.plan(manifest)
+
+    result = service.execute(plan)
+
+    assert result.total == result.created == result.approved == 3
+    assert result.reused == 0
+    assert all(
+        inspect_image_artifact(work_root / item.source_path).sha256
+        == next(plan_item.sha256 for plan_item in plan.items if plan_item.variant_id == item.variant_id)
+        for item in result.items
+    )
+    assert all(
+        path.read_bytes() == source_bytes[path.relative_to(manifest.parent).as_posix()]
+        for path in (manifest.parent / "images").iterdir()
+    )
+    first_ids = {item.variant_id: item.image_candidate_id for item in result.items}
+    service.close()
+
+    restarted = ImageImportService.for_database(database, work_root=work_root)
+    rerun = restarted.import_batch(manifest)
+    assert rerun.created == 0
+    assert rerun.reused == 3
+    assert {item.variant_id: item.image_candidate_id for item in rerun.items} == first_ids
+    restarted.close()
+
+
+def test_execute_detects_source_change_and_removes_only_its_published_finals(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "auraly.db"
+    campaign_id, variants = _campaign(database)
+    manifest = _manifest(tmp_path / "incoming", campaign_id, variants)
+    work_root = tmp_path / "work"
+    service = ImageImportService.for_database(database, work_root=work_root)
+    plan = service.plan(manifest)
+    changed = plan.items[-1]
+    image_format = "JPEG" if changed.format == "jpeg" else changed.format.upper()
+    _write_image(
+        manifest.parent / changed.source_relative_path,
+        image_format,
+        size=(361, 641),
+    )
+
+    with pytest.raises(ImageImportSourceChangedError):
+        service.execute(plan)
+
+    for item in plan.items:
+        with pytest.raises(FlowArtifactInvalidError):
+            inspect_image_artifact(work_root / item.destination_path)
+    engine = create_sqlite_engine(database)
+    with engine.connect() as connection:
+        assert connection.execute(
+            text("SELECT count(*) FROM image_candidates WHERE source_kind='manual_import'")
+        ).scalar_one() == 0
+    engine.dispose()
+    service.close()
+
+
+def test_execute_rolls_back_all_candidates_and_cleans_finals_on_insert_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = tmp_path / "auraly.db"
+    campaign_id, variants = _campaign(database)
+    manifest = _manifest(tmp_path / "incoming", campaign_id, variants)
+    work_root = tmp_path / "work"
+    service = ImageImportService.for_database(database, work_root=work_root)
+    plan = service.plan(manifest)
+    original = ImageRepository.create_candidate_in_session
+    calls = 0
+
+    def fail_second(session: Session, candidate: ImageCandidate):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise IntegrityError("forced", {}, RuntimeError("forced"))
+        return original(session, candidate)
+
+    monkeypatch.setattr(
+        ImageRepository,
+        "create_candidate_in_session",
+        staticmethod(fail_second),
+    )
+
+    with pytest.raises(ImageImportPersistenceError):
+        service.execute(plan)
+
+    engine = create_sqlite_engine(database)
+    with engine.connect() as connection:
+        assert connection.execute(
+            text("SELECT count(*) FROM image_candidates WHERE source_kind='manual_import'")
+        ).scalar_one() == 0
+    engine.dispose()
+    for item in plan.items:
+        with pytest.raises(FlowArtifactInvalidError):
+            inspect_image_artifact(work_root / item.destination_path)
+    service.close()
+
+
+def test_concurrent_identical_imports_create_one_candidate_per_variant(tmp_path: Path) -> None:
+    database = tmp_path / "auraly.db"
+    campaign_id, variants = _campaign(database)
+    manifest = _manifest(tmp_path / "incoming", campaign_id, variants)
+    work_root = tmp_path / "work"
+    first = ImageImportService.for_database(database, work_root=work_root)
+    second = ImageImportService.for_database(database, work_root=work_root)
+    first_plan = first.plan(manifest)
+    second_plan = second.plan(manifest)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(lambda pair: pair[0].execute(pair[1]), [(first, first_plan), (second, second_plan)]))
+
+    assert sorted(result.created for result in results) == [0, 3]
+    engine = create_sqlite_engine(database)
+    with engine.connect() as connection:
+        assert connection.execute(
+            text("SELECT count(*) FROM image_candidates WHERE source_kind='manual_import'")
+        ).scalar_one() == 3
+    engine.dispose()
+    first.close()
+    second.close()
 
 
 @pytest.mark.parametrize(

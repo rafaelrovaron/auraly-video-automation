@@ -150,13 +150,30 @@ class ImageRepository:
             return list(session.scalars(statement).all())
 
     def list_candidates_for_scene(self, scene_variant_id: str) -> list[ImageCandidateRow]:
+        with self._session_factory() as session:
+            return self.candidates_for_scene_in_session(session, scene_variant_id)
+
+    @staticmethod
+    def candidates_for_scene_in_session(
+        session: Session, scene_variant_id: str
+    ) -> list[ImageCandidateRow]:
         statement: Select[tuple[ImageCandidateRow]] = (
             select(ImageCandidateRow)
             .where(ImageCandidateRow.scene_variant_id == scene_variant_id)
             .order_by(ImageCandidateRow.created_at, ImageCandidateRow.id)
         )
+        return list(session.scalars(statement).all())
+
+    def count_candidates_for_source_path(self, source_path: str) -> int:
         with self._session_factory() as session:
-            return list(session.scalars(statement).all())
+            return int(
+                session.scalar(
+                    select(func.count()).select_from(ImageCandidateRow).where(
+                        ImageCandidateRow.source_path == source_path
+                    )
+                )
+                or 0
+            )
 
     def get_approved_candidate_for_scene(
         self, scene_variant_id: str

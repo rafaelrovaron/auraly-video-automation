@@ -5,23 +5,27 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath, PureWindowsPath
 import shutil
 from typing import Literal, Self, cast
 from uuid import uuid4
 
 from pydantic import Field, PrivateAttr, field_validator, model_validator
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 from auraly_pipeline.campaigns.persistence import create_sqlite_engine, migrate_database
 from auraly_pipeline.campaigns.service import CampaignNotFoundError, CampaignService
 from auraly_pipeline.flow.artifacts import (
+    FlowArtifactConflictError,
     FlowArtifactInvalidError,
     inspect_image_artifact,
+    publish_image_artifact_exclusive,
     resolve_trusted_image_path,
 )
+from auraly_pipeline.images.domain import ImageCandidate, ImageCandidateReviewStatus
 from auraly_pipeline.images.repository import ImageRepository
-from auraly_pipeline.images.domain import ImageCandidateReviewStatus
 from auraly_pipeline.models import ContractModel
 
 
@@ -36,6 +40,26 @@ class ImageImportValidationError(ImageImportError):
     def __init__(self, issues: list[ImageImportIssue]) -> None:
         super().__init__(self.public_message)
         self.issues = tuple(sorted(issues, key=lambda item: (item.variant_id or "", item.code)))
+
+
+class ImageImportSourceChangedError(ImageImportError):
+    code = "image_import_source_changed"
+    public_message = "An image source changed after validation."
+
+
+class ImageImportArtifactConflictError(ImageImportError):
+    code = "image_import_artifact_conflict"
+    public_message = "An image artifact conflicts with existing evidence."
+
+
+class ImageImportPersistenceError(ImageImportError):
+    code = "image_import_persistence_failed"
+    public_message = "The image import could not be persisted."
+
+
+class ImageImportApprovedCandidateConflictError(ImageImportError):
+    code = "image_import_approved_candidate_conflict"
+    public_message = "A variant already has a different approved image."
 
 
 class ImageImportItem(ContractModel):
@@ -103,6 +127,28 @@ class ImageImportPrepared(ContractModel):
     manifest_path: Path
     images_path: Path
     variant_count: int
+
+
+class ImageImportResultItem(ContractModel):
+    image_candidate_id: str
+    variant_id: str
+    scene_variant_id: str
+    source_path: str
+    sha256: str
+    action: Literal["create", "reuse"]
+    review_status: ImageCandidateReviewStatus
+
+
+class ImageImportResult(ContractModel):
+    schema_version: Literal["1.0"] = "1.0"
+    status: Literal["completed"] = "completed"
+    campaign_id: str
+    manifest_sha256: str
+    total: int
+    created: int
+    reused: int
+    approved: int
+    items: list[ImageImportResultItem]
 
 
 class ImageImportService:
@@ -316,6 +362,154 @@ class ImageImportService:
         plan._manifest_path = manifest_path.resolve(strict=False)
         plan._source_paths = source_paths
         return plan
+
+    def execute(self, plan: ImageImportPlan) -> ImageImportResult:
+        created_finals: list[tuple[Path, ImageImportPlanItem]] = []
+        try:
+            for item in plan.items:
+                source = plan._source_paths[item.variant_id]
+                try:
+                    current = inspect_image_artifact(source)
+                except FlowArtifactInvalidError as exc:
+                    raise ImageImportSourceChangedError from exc
+                if (
+                    current.sha256 != item.sha256
+                    or current.size_bytes != item.size_bytes
+                    or current.width != item.width
+                    or current.height != item.height
+                    or current.format != item.format
+                ):
+                    raise ImageImportSourceChangedError
+                final = self._work_root / item.destination_path
+                existed = self._path_exists(final)
+                staging = final.parent / ".staging" / f"{uuid4().hex}.part"
+                staging.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(source, staging)
+                published = publish_image_artifact_exclusive(
+                    staging,
+                    final,
+                    trusted_root=self._work_root,
+                )
+                if published.sha256 != item.sha256:
+                    raise ImageImportSourceChangedError
+                if not existed:
+                    created_finals.append((final, item))
+        except ImageImportError:
+            self._cleanup_created_finals(created_finals)
+            raise
+        except (OSError, FlowArtifactInvalidError, FlowArtifactConflictError) as exc:
+            self._cleanup_created_finals(created_finals)
+            raise ImageImportArtifactConflictError from exc
+
+        now = datetime.now(UTC)
+
+        def persist(session: Session) -> list[ImageImportResultItem]:
+            results: list[ImageImportResultItem] = []
+            for item in plan.items:
+                candidates = self._repository.candidates_for_scene_in_session(
+                    session, item.scene_variant_id
+                )
+                approved = next(
+                    (candidate for candidate in candidates if candidate.review_status == "approved"),
+                    None,
+                )
+                matching = next(
+                    (candidate for candidate in candidates if candidate.sha256 == item.sha256),
+                    None,
+                )
+                if approved is not None and approved.sha256 != item.sha256:
+                    raise ImageImportApprovedCandidateConflictError
+                action: Literal["create", "reuse"] = "reuse"
+                if matching is None:
+                    action = "create"
+                    candidate = ImageCandidate(
+                        image_candidate_id=str(uuid4()),
+                        scene_variant_id=item.scene_variant_id,
+                        source_kind="manual_import",
+                        import_manifest_sha256=plan.manifest_sha256,
+                        import_source_path=item.source_relative_path,
+                        candidate_index=0,
+                        source_path=item.destination_path,
+                        sha256=item.sha256,
+                        width=item.width,
+                        height=item.height,
+                        size_bytes=item.size_bytes,
+                        format=item.format,
+                        review_status="approved" if plan.batch.approve_imported else "pending_review",
+                        approved_at=now if plan.batch.approve_imported else None,
+                        approved_by=plan.batch.approved_by,
+                        created_at=now,
+                        updated_at=now,
+                    )
+                    matching = self._repository.create_candidate_in_session(session, candidate)
+                results.append(
+                    ImageImportResultItem(
+                        image_candidate_id=matching.id,
+                        variant_id=item.variant_id,
+                        scene_variant_id=item.scene_variant_id,
+                        source_path=matching.source_path,
+                        sha256=matching.sha256,
+                        action=action,
+                        review_status=cast(ImageCandidateReviewStatus, matching.review_status),
+                    )
+                )
+            session.flush()
+            return results
+
+        try:
+            items = self._repository.immediate_transaction(persist)
+        except (ImageImportError, IntegrityError, OSError, ValueError) as exc:
+            self._cleanup_created_finals(created_finals)
+            if isinstance(exc, ImageImportError):
+                raise
+            raise ImageImportPersistenceError from exc
+        created = sum(item.action == "create" for item in items)
+        approved = sum(item.review_status == "approved" for item in items)
+        return ImageImportResult(
+            campaign_id=plan.batch.campaign_id,
+            manifest_sha256=plan.manifest_sha256,
+            total=len(items),
+            created=created,
+            reused=len(items) - created,
+            approved=approved,
+            items=sorted(items, key=lambda item: item.variant_id),
+        )
+
+    def import_batch(
+        self, manifest_path: Path, *, dry_run: bool = False
+    ) -> ImageImportPlan | ImageImportResult:
+        plan = self.plan(manifest_path)
+        return plan if dry_run else self.execute(plan)
+
+    def _cleanup_created_finals(
+        self, created_finals: list[tuple[Path, ImageImportPlanItem]]
+    ) -> None:
+        for final, item in reversed(created_finals):
+            try:
+                if (
+                    self._repository.count_candidates_for_source_path(item.destination_path) == 0
+                    and inspect_image_artifact(final).sha256 == item.sha256
+                ):
+                    os.unlink(self._native_path(final))
+            except (OSError, FlowArtifactInvalidError):
+                pass
+
+    @staticmethod
+    def _native_path(path: Path) -> str | Path:
+        if os.name != "nt":
+            return path
+        absolute = os.path.abspath(path)
+        if absolute.startswith("\\\\"):
+            return "\\\\?\\UNC\\" + absolute[2:]
+        return "\\\\?\\" + absolute
+
+    @classmethod
+    def _path_exists(cls, path: Path) -> bool:
+        try:
+            os.stat(cls._native_path(path), follow_symlinks=False)
+        except FileNotFoundError:
+            return False
+        return True
 
     @staticmethod
     def _issue(code: str, variant_id: str | None, message: str) -> ImageImportIssue:
