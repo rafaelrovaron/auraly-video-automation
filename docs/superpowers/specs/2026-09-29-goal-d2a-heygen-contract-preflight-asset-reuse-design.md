@@ -32,6 +32,11 @@ A autenticação será OAuth vinculada à conta Web do usuário, sem API key. A 
 Python oficial do MCP para discovery, PKCE, troca e refresh de tokens e transporte Streamable HTTP.
 Não será implementado um cliente MCP/OAuth próprio.
 
+O HeyGen classifica OAuth/MCP como adequado a testes e pequenos volumes com créditos da assinatura
+Web e recomenda API key para pipelines de escala maior. Para este MVP pessoal, MCP/OAuth permanece
+a decisão aprovada. D2C deve medir os limites reais antes de D2B aumentar volume ou concorrência; se
+eles forem insuficientes, um Goal separado poderá trocar somente o adapter/autenticação.
+
 O login pertence à aplicação local, não à sessão do Codex ou ChatGPT. Isso permite que CLI, worker
 e futura UI utilizem a mesma conexão sem depender desta conversa.
 
@@ -239,6 +244,10 @@ da mesma intenção reutiliza o batch retornado pelo HeyGen.
 - restart consulta batch e asset IDs persistidos antes de qualquer nova criação;
 - sucesso parcial permanece `ready` e não volta ao lote posterior.
 
+`auraly heygen reconcile JOB_ID` consulta o batch/asset IDs persistidos ou repete a alocação com a
+mesma idempotency key quando o timeout ocorreu antes de persistir a resposta. Ele só reabre o job
+depois de provar o estado remoto; o comando genérico `job resume` continua proibido para esse job.
+
 Se um slot temporário expirar antes do envio e o HeyGen não oferecer renovação segura, o item fica
 `reconciliation_required`. D2A não cria outro asset cegamente nem tenta apagar assets remotos. Uma
 correção futura só será adicionada após observar o comportamento real no canário D2C.
@@ -271,6 +280,7 @@ auraly heygen disconnect
 auraly heygen status
 auraly heygen preflight
 auraly heygen prepare-assets CAMPAIGN_ID
+auraly heygen reconcile JOB_ID
 ```
 
 Os comandos mantêm o contrato atual de um único documento JSON em stdout. Interação de navegador
