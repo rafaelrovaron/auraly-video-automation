@@ -64,6 +64,7 @@ def test_upload_slot_never_serializes_or_reprs_temporary_credentials() -> None:
         asset_id="asset-1",
         upload_url="https://storage.example/signed?token=secret",
         upload_headers={"Authorization": "secret"},
+        size_bytes=10,
         expires_in_seconds=300,
         max_bytes=100,
     )

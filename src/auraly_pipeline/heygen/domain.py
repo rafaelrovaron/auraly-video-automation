@@ -139,6 +139,7 @@ class AssetUploadSlot(HeyGenContract):
     asset_id: str = Field(max_length=200)
     upload_url: str = Field(repr=False, exclude=True)
     upload_headers: dict[str, str] = Field(repr=False, exclude=True)
+    size_bytes: int = Field(gt=0)
     expires_in_seconds: int = Field(gt=0)
     max_bytes: int = Field(gt=0)
 
