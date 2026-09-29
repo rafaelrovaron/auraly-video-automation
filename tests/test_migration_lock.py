@@ -7,7 +7,7 @@ from pathlib import Path
 
 from sqlalchemy import create_engine, text
 
-from auraly_pipeline.campaigns.persistence import sqlite_url
+from auraly_pipeline.campaigns.persistence import _database_migration_lock, sqlite_url
 
 
 _STARTUP_SCRIPT = """
@@ -26,6 +26,14 @@ while not go.exists():
 service = JobService.for_database(database)
 service.close()
 """
+
+
+def test_zero_byte_migration_lock_is_recovered(tmp_path: Path) -> None:
+    database_path = tmp_path / "auraly.db"
+    database_path.with_name("auraly.db.migration.lock").touch()
+
+    with _database_migration_lock(database_path, timeout_seconds=0.1):
+        pass
 
 
 def test_concurrent_first_startup_serializes_alembic_migration(tmp_path: Path) -> None:

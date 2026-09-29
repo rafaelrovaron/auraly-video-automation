@@ -84,10 +84,20 @@ def _database_migration_lock(database_path: Path, *, timeout_seconds: float = 30
             new_lock_file.write(b"\0")
             new_lock_file.flush()
     except FileExistsError:
-        while lock_path.stat().st_size == 0:
-            if time.monotonic() >= deadline:
-                raise TimeoutError("Timed out initializing the database migration lock")
-            time.sleep(0.01)
+        while True:
+            try:
+                with lock_path.open("r+b") as existing_lock_file:
+                    existing_lock_file.seek(0, os.SEEK_END)
+                    if existing_lock_file.tell() == 0:
+                        existing_lock_file.write(b"\0")
+                        existing_lock_file.flush()
+                break
+            except (FileNotFoundError, PermissionError):
+                if time.monotonic() >= deadline:
+                    raise TimeoutError(
+                        "Timed out initializing the database migration lock"
+                    ) from None
+                time.sleep(0.01)
     with lock_path.open("r+b") as lock_file:
         while not _try_lock_file(lock_file):
             if time.monotonic() >= deadline:
