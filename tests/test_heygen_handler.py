@@ -10,6 +10,8 @@ from auraly_pipeline.campaigns.persistence import create_sqlite_engine, migrate_
 from auraly_pipeline.heygen.domain import (
     AssetSource,
     AssetUploadJobInput,
+    AssetUploadSlot,
+    RemoteAssetKind,
     RemoteAssetStatus,
     asset_batch_idempotency_key,
 )
@@ -22,7 +24,13 @@ from auraly_pipeline.jobs.handlers import JobExecutionContext
 NOW = datetime(2026, 9, 29, 12, tzinfo=UTC)
 
 
-def _source(work_root: Path, source_id: str, name: str, content: bytes, kind: str) -> AssetSource:
+def _source(
+    work_root: Path,
+    source_id: str,
+    name: str,
+    content: bytes,
+    kind: RemoteAssetKind,
+) -> AssetSource:
     path = work_root / "campaigns" / "one" / name
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(content)
@@ -31,7 +39,7 @@ def _source(work_root: Path, source_id: str, name: str, content: bytes, kind: st
         kind=kind,
         local_path=path.relative_to(work_root).as_posix(),
         sha256=hashlib.sha256(content).hexdigest(),
-        mime_type="audio/wav" if kind == "audio" else "image/png",
+        mime_type="audio/wav" if kind is RemoteAssetKind.AUDIO else "image/png",
         size_bytes=len(content),
     )
 
@@ -62,19 +70,19 @@ def _context(sources: list[AssetSource]) -> JobExecutionContext:
 def test_handler_persists_remote_ids_before_first_put(tmp_path: Path) -> None:
     repository, factory = _setup(tmp_path)
     sources = [
-        _source(tmp_path, "00000000-0000-4000-8000-000000000001", "image.png", b"img", "image"),
-        _source(tmp_path, "00000000-0000-4000-8000-000000000002", "voice.wav", b"wav", "audio"),
+        _source(tmp_path, "00000000-0000-4000-8000-000000000001", "image.png", b"img", RemoteAssetKind.IMAGE),
+        _source(tmp_path, "00000000-0000-4000-8000-000000000002", "voice.wav", b"wav", RemoteAssetKind.AUDIO),
     ]
 
     class CheckingProvider(FakeHeyGenProvider):
         checked = False
 
-        def upload_file(self, slot: object, local_path: Path) -> None:
+        def upload_file(self, slot: AssetUploadSlot, local_path: Path) -> None:
             if not self.checked:
                 assert len(repository.list_by_batch("batch-1")) == 2
                 self.events.append("first_persisted_check")
                 self.checked = True
-            super().upload_file(slot, local_path)  # type: ignore[arg-type]
+            super().upload_file(slot, local_path)
 
     provider = CheckingProvider()
     handler = HeyGenAssetUploadHandler(factory, provider, tmp_path, clock=lambda: NOW)
@@ -99,7 +107,7 @@ def test_handler_persists_remote_ids_before_first_put(tmp_path: Path) -> None:
 def test_handler_rejects_changed_file_before_provider_mutation(tmp_path: Path) -> None:
     _repository, factory = _setup(tmp_path)
     source = _source(
-        tmp_path, "00000000-0000-4000-8000-000000000001", "image.png", b"img", "image"
+        tmp_path, "00000000-0000-4000-8000-000000000001", "image.png", b"img", RemoteAssetKind.IMAGE
     )
     (tmp_path / source.local_path).write_bytes(b"changed")
     provider = FakeHeyGenProvider()
@@ -115,7 +123,7 @@ def test_handler_rejects_changed_file_before_provider_mutation(tmp_path: Path) -
 def test_handler_blocks_account_mismatch_without_remote_mutation(tmp_path: Path) -> None:
     _repository, factory = _setup(tmp_path)
     source = _source(
-        tmp_path, "00000000-0000-4000-8000-000000000001", "image.png", b"img", "image"
+        tmp_path, "00000000-0000-4000-8000-000000000001", "image.png", b"img", RemoteAssetKind.IMAGE
     )
     provider = FakeHeyGenProvider(account_ref="account-other")
 

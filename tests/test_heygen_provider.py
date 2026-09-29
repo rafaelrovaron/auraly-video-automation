@@ -3,18 +3,18 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 import json
 from pathlib import Path
-from typing import Any, AsyncIterator
+from typing import Any, AsyncIterator, Literal
 
 from mcp import types
 import pytest
 
 from auraly_pipeline.heygen.auth import KeyringTokenStorage
-from auraly_pipeline.heygen.domain import AssetSource, ProviderAssetStatus
+from auraly_pipeline.heygen.domain import AssetSource, ProviderAssetStatus, RemoteAssetKind
 from auraly_pipeline.heygen.fake_provider import FakeHeyGenProvider
 from auraly_pipeline.heygen.provider import HeyGenMcpAdapter, HeyGenProviderFailure
 
 
-TOOLS = {
+TOOLS: dict[str, dict[str, object]] = {
     "get_current_user": {},
     "create_asset_upload_batch": {"files": {}, "idempotency_key": {}},
     "complete_asset_batch": {"batch_id": {}},
@@ -24,7 +24,7 @@ TOOLS = {
 }
 IMAGE = AssetSource(
     source_id="00000000-0000-4000-8000-000000000001",
-    kind="image",
+    kind=RemoteAssetKind.IMAGE,
     local_path="campaigns/one/image.png",
     sha256="1" * 64,
     mime_type="image/png",
@@ -67,14 +67,14 @@ class FakeSession:
     async def list_tools(self) -> types.ListToolsResult:
         return types.ListToolsResult(
             tools=[
-                types.Tool(name=name, inputSchema={"type": "object", "properties": properties})
+                types.Tool(name=name, input_schema={"type": "object", "properties": properties})
                 for name, properties in self.tools.items()
             ]
         )
 
     async def call_tool(self, name: str, arguments: dict[str, Any]) -> types.CallToolResult:
         self.calls.append((name, arguments))
-        return types.CallToolResult(content=[], structuredContent=self.responses[name])
+        return types.CallToolResult(content=[], structured_content=self.responses[name])
 
 
 def _adapter(session: FakeSession, **kwargs: Any) -> HeyGenMcpAdapter:
@@ -178,11 +178,14 @@ def test_fake_provider_covers_success_failure_timeout_and_ambiguity() -> None:
         ProviderAssetStatus.COMPLETED
     )
 
-    for scenario, kind in [
+    scenarios: list[
+        tuple[Literal["terminal", "timeout", "ambiguous"], str]
+    ] = [
         ("terminal", "terminal"),
         ("timeout", "retryable"),
         ("ambiguous", "ambiguous"),
-    ]:
+    ]
+    for scenario, kind in scenarios:
         with pytest.raises(HeyGenProviderFailure) as failure:
             FakeHeyGenProvider(scenario=scenario).allocate_asset_batch(
                 [IMAGE], "heygen.asset.upload:" + "a" * 64

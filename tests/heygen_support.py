@@ -17,12 +17,14 @@ def create_ready_campaign(database: Path, work_root: Path) -> None:
     assets.mkdir(parents=True, exist_ok=True)
     voice = assets / "voice.wav"
     voice.write_bytes(b"voice")
-    image_facts: list[tuple[str, str, str]] = []
+    image_facts: list[tuple[str, str, int]] = []
     for index in range(3):
         path = assets / f"image-{index}.png"
         content = f"image-{index}".encode()
         path.write_bytes(content)
-        image_facts.append((path.relative_to(work_root).as_posix(), hashlib.sha256(content).hexdigest(), str(len(content))))
+        image_facts.append(
+            (path.relative_to(work_root).as_posix(), hashlib.sha256(content).hexdigest(), len(content))
+        )
 
     engine = create_sqlite_engine(database)
     with engine.begin() as connection:
@@ -43,7 +45,7 @@ def create_ready_campaign(database: Path, work_root: Path) -> None:
             ),
             {"sha": "a" * 64, "now": NOW},
         )
-        for index, (path, sha, size) in enumerate(image_facts):
+        for index, (relative_path, sha, size) in enumerate(image_facts):
             scene_id = f"20000000-0000-4000-8000-00000000000{index}"
             candidate_id = f"30000000-0000-4000-8000-00000000000{index}"
             connection.execute(
@@ -66,9 +68,9 @@ def create_ready_campaign(database: Path, work_root: Path) -> None:
                     "id": candidate_id,
                     "scene": scene_id,
                     "manifest": str(index + 1) * 64,
-                    "path": path,
+                    "path": relative_path,
                     "sha": sha,
-                    "size": int(size),
+                    "size": size,
                     "now": NOW,
                 },
             )

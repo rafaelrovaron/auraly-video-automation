@@ -12,6 +12,7 @@ from auraly_pipeline.heygen.domain import (
     AssetSource,
     AssetUploadSlot,
     ProviderAssetStatus,
+    RemoteAssetKind,
     RemoteAssetStatus,
 )
 from auraly_pipeline.heygen.repository import (
@@ -23,7 +24,7 @@ from auraly_pipeline.heygen.repository import (
 NOW = datetime(2026, 9, 29, 12, tzinfo=UTC)
 IMAGE = AssetSource(
     source_id="00000000-0000-4000-8000-000000000001",
-    kind="image",
+    kind=RemoteAssetKind.IMAGE,
     local_path="campaigns/one/image.png",
     sha256="1" * 64,
     mime_type="image/png",
@@ -31,7 +32,7 @@ IMAGE = AssetSource(
 )
 AUDIO = AssetSource(
     source_id="00000000-0000-4000-8000-000000000002",
-    kind="audio",
+    kind=RemoteAssetKind.AUDIO,
     local_path="campaigns/one/voice.wav",
     sha256="2" * 64,
     mime_type="audio/wav",

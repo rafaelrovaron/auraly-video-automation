@@ -5,13 +5,18 @@ import json
 from typer.testing import CliRunner
 
 from auraly_pipeline.cli import app
-from auraly_pipeline.heygen.domain import AssetPreparationPlan, AssetSource, HeyGenPreflight
+from auraly_pipeline.heygen.domain import (
+    AssetPreparationPlan,
+    AssetSource,
+    HeyGenPreflight,
+    RemoteAssetKind,
+)
 
 
 runner = CliRunner()
 SOURCE = AssetSource(
     source_id="00000000-0000-4000-8000-000000000001",
-    kind="image",
+    kind=RemoteAssetKind.IMAGE,
     local_path="campaigns/one/image.png",
     sha256="1" * 64,
     mime_type="image/png",

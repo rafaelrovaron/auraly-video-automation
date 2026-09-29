@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from auraly_pipeline.heygen.fake_provider import FakeHeyGenProvider
+from auraly_pipeline.heygen.domain import RemoteAssetKind
 from auraly_pipeline.heygen.service import HeyGenService
 from auraly_pipeline.jobs.domain import RetrySafety
 from tests.heygen_support import create_ready_campaign
@@ -18,8 +19,8 @@ def test_plan_has_three_images_and_one_shared_voice(tmp_path: Path) -> None:
     plan = service.plan_assets("campaign-one")
 
     assert len(plan.sources) == 4
-    assert [item.kind for item in plan.sources].count("audio") == 1
-    assert len({item.sha256 for item in plan.sources if item.kind == "audio"}) == 1
+    assert [item.kind for item in plan.sources].count(RemoteAssetKind.AUDIO) == 1
+    assert len({item.sha256 for item in plan.sources if item.kind is RemoteAssetKind.AUDIO}) == 1
     service.close()
 
 
@@ -35,7 +36,8 @@ def test_submit_creates_one_reconcile_before_retry_batch_job(tmp_path: Path) -> 
     assert submitted.job is not None
     assert submitted.job.job_type == "heygen.asset.upload"
     assert submitted.job.retry_safety is RetrySafety.RECONCILE_BEFORE_RETRY
-    assert len(submitted.job.input["sources"]) == 4
+    sources = submitted.job.input["sources"]
+    assert isinstance(sources, list) and len(sources) == 4
     service.close()
 
 

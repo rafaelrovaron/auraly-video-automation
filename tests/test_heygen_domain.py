@@ -41,7 +41,7 @@ def test_asset_source_rejects_absolute_path_and_bad_hash() -> None:
     with pytest.raises(ValidationError):
         AssetSource(
             source_id="00000000-0000-4000-8000-000000000001",
-            kind="image",
+            kind=RemoteAssetKind.IMAGE,
             local_path="C:/secret.png",
             sha256="bad",
             mime_type="image/png",
