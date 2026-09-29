@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from threading import Event, Thread
@@ -242,6 +242,47 @@ class JobService:
             linked=cast(T, result.linked),
             reused=False,
         )
+
+    def submit_linked_batch(
+        self,
+        requests: Sequence[JobSubmit],
+        create_linked: Callable[[Session, JobRow], T],
+        load_existing: Callable[[Job], T],
+        *,
+        before_commit: Callable[[Session], None],
+    ) -> list[LinkedJobSubmission[T]]:
+        for request in requests:
+            handler = self._handlers.get(request.job_type)
+            if handler is None:
+                raise JobHandlerNotFoundError
+            if not handler_accepts_retry_safety(handler, request.retry_safety):
+                raise JobRetrySafetyError
+            self._validate_references(request)
+
+        def validate_reuse(row: JobRow, request: JobSubmit) -> None:
+            self._reuse_or_conflict(row, request)
+
+        try:
+            results = self._repository.create_linked_batch(
+                requests,
+                self._as_utc(self._clock()),
+                create_linked,
+                self._validate_persisted_row,
+                before_commit,
+                validate_reuse=validate_reuse,
+            )
+        except IntegrityError as exc:
+            raise JobPersistenceError from exc
+        return [
+            LinkedJobSubmission(
+                job=self._to_domain(result.row),
+                linked=load_existing(self._to_domain(result.row))
+                if result.reused
+                else cast(T, result.linked),
+                reused=result.reused,
+            )
+            for result in results
+        ]
 
     def get_job(self, job_id: str) -> Job:
         row = self._repository.get_by_id(job_id)

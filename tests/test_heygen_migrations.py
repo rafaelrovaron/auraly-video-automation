@@ -53,7 +53,7 @@ def test_migration_creates_exact_remote_asset_contract(tmp_path: Path) -> None:
     database = tmp_path / "auraly.db"
     config = _config(database)
     command.upgrade(config, "0006_manual_image_import")
-    command.upgrade(config, "head")
+    command.upgrade(config, "0007_heygen_remote_assets")
     engine = create_engine(sqlite_url(database))
 
     assert {column["name"] for column in inspect(engine).get_columns("remote_assets")} == {

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Generic, Literal, TypeVar
@@ -207,6 +207,47 @@ class JobRepository:
             except Exception:
                 session.rollback()
                 raise
+
+    def create_linked_batch(
+        self,
+        requests: Sequence[JobSubmit],
+        now: datetime,
+        create_linked: Callable[[Session, JobRow], T],
+        validate: Callable[[JobRow], None],
+        before_commit: Callable[[Session], None],
+        *,
+        validate_reuse: Callable[[JobRow, JobSubmit], None],
+    ) -> list[_LinkedJobCreateResult[T]]:
+        with self._session_factory() as session:
+            self._begin_immediate(session)
+            results: list[_LinkedJobCreateResult[T]] = []
+            for request in requests:
+                row = session.scalar(
+                    select(JobRow)
+                    .where(JobRow.idempotency_key == request.idempotency_key)
+                    .options(selectinload(JobRow.attempts), selectinload(JobRow.events))
+                )
+                if row is not None:
+                    validate_reuse(row, request)
+                    results.append(_LinkedJobCreateResult(row=row, linked=None, reused=True))
+                else:
+                    row = self.create_in_session(session, request, now)
+                    linked = create_linked(session, row)
+                    validate(row)
+                    results.append(_LinkedJobCreateResult(row=row, linked=linked, reused=False))
+            session.flush()
+            before_commit(session)
+            session.commit()
+            # _reload expires the identity map; detach each loaded aggregate before the next.
+            loaded: list[_LinkedJobCreateResult[T]] = []
+            identifiers = [r.row.id for r in results]
+            for identifier, result in zip(identifiers, results, strict=True):
+                row = self._reload(session, identifier)
+                session.expunge_all()
+                loaded.append(
+                    _LinkedJobCreateResult(row=row, linked=result.linked, reused=result.reused)
+                )
+            return loaded
 
     def apply(
         self,
