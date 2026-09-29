@@ -1,6 +1,6 @@
 # Auraly Mass Video Pipeline — Memória do Projeto
 
-**Atualizado em:** 2026-09-27
+**Atualizado em:** 2026-09-29
 **Decisão vigente:** MVP delivery-first para uso local e pessoal
 
 Este documento guarda decisões duráveis e fatos verificados. O estado entregue aparece separado
@@ -139,7 +139,19 @@ prepare-import → adicionar imagens/preencher paths → import-batch --dry-run 
 
 O manifest versionado associa `variantId` a path relativo. A importação valida cobertura, mídia e
 orientação, preserva os sources, publica por hash e persiste `ImageCandidate` manual em uma única
-transação. Reruns idênticos reutilizam arquivos e candidatos. D2A é o próximo Goal.
+transação. Reruns idênticos reutilizam arquivos e candidatos.
+
+### 4.2 HeyGen asset preparation entregue
+
+D2A está `IMPLEMENTED` e `LOCAL_VERIFIED`. A aplicação conecta ao Remote MCP oficial por OAuth,
+guarda a sessão no cofre do sistema e valida as seis tools necessárias. Imagens aprovadas e o WAV
+processado são planejados em um batch de até 100 itens; `remote_assets` deduplica por provider,
+conta, tipo e hash.
+
+IDs de batch/asset são persistidos antes do primeiro PUT. URLs e headers temporários permanecem
+somente em memória. Outcomes ambíguos bloqueiam o job `reconcile_before_retry`, e `heygen
+reconcile` prova o estado remoto antes de retomar. O fake local cobre o fluxo; HeyGen ainda não
+está `PROVIDER_VERIFIED`.
 
 ## 5. Contrato de importação batch de imagens
 
@@ -172,21 +184,19 @@ Regras:
 - imagem importada pode ser marcada como selecionada/aprovada no mesmo comando quando o manifest
   declarar essa intenção.
 
-## 6. Integração HeyGen alvo
+## 6. Integração HeyGen
 
 ### 6.1 Provider boundary
 
-Usar integração oficial suportada pelo HeyGen, via MCP/OAuth ou API oficial disponível ao
-runtime. Não automatizar o website. O adapter precisa ser substituível por fake em testes.
+O boundary MCP/OAuth oficial e o fake determinístico estão entregues. Não automatizar o website.
+MCP/OAuth atende ao MVP pessoal; eventual API key para escala maior exige um Goal separado.
 
 ### 6.2 Assets
 
-- fazer upload de cada imagem selecionada;
-- fazer upload do `processed/voice-master.wav` uma vez por hash;
-- persistir `remote_asset_id` antes de avançar;
-- reutilizar áudio entre todas as variantes da campanha;
-- reutilizar imagens e áudio já conhecidos pelo mesmo provider/hash;
-- nunca persistir URL assinada, token ou payload de mídia no SQLite.
+- upload/reuso de imagens e `processed/voice-master.wav`: entregue localmente;
+- persistência de `remote_asset_id` antes dos bytes: entregue localmente;
+- dedupe por conta/tipo/hash e secrets fora do SQLite: entregue localmente;
+- validação real do provider: pendente em D2C.
 
 ### 6.3 Batch generation
 

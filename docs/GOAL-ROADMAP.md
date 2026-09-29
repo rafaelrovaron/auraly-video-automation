@@ -1,6 +1,6 @@
 # Auraly Delivery-First Goal Roadmap
 
-**Roadmap vigente:** 2026-09-27
+**Roadmap vigente:** 2026-09-29
 
 Este documento é a ordem operacional dos próximos Goals. O PRD define o produto; este roadmap
 define como chegar a ele sem transformar cada Goal em um projeto grande demais.
@@ -42,6 +42,8 @@ locais. Canary real exige autorização explícita.
 | 4B | Google Flow Browser Runtime | `IMPLEMENTED`, `LOCAL_VERIFIED`, `PAUSED` |
 | 4C | Flow Generation, Download & Recovery | `IMPLEMENTED`, `LOCAL_VERIFIED`, `PAUSED` |
 | 4D | Flow QC/Review/Provider Canary | `PAUSED` |
+| D1 | Manual Image Batch Intake | `IMPLEMENTED`, `LOCAL_VERIFIED` |
+| D2A | HeyGen Contract, Preflight & Asset Reuse | `IMPLEMENTED`, `LOCAL_VERIFIED` |
 
 O código Flow permanece no repositório. Não removê-lo, reescrevê-lo ou expandi-lo durante o novo
 MVP sem um Goal específico aprovado.
@@ -51,8 +53,8 @@ MVP sem um Goal específico aprovado.
 ```text
 D0  Documentation Alignment                    DONE
 D1  Manual Image Batch Intake                  DONE
-D2A HeyGen Contract, Preflight & Asset Reuse   NEXT
-D2B HeyGen Batch Generation, Polling & Download
+D2A HeyGen Contract, Preflight & Asset Reuse   DONE
+D2B HeyGen Batch Generation, Polling & Download NEXT
 D2C HeyGen Real Canary
 D3A EditProfile, EditManifest & Override Resolution
 D3B Headline A/B Planning & Caption Inputs
@@ -142,7 +144,7 @@ uv run python scripts/verify.py full
 
 ## D2A — HeyGen Contract, Preflight & Asset Reuse
 
-**Status:** `PLANNED` — próximo Goal.
+**Status:** `IMPLEMENTED`, `LOCAL_VERIFIED`.
 
 ### Objetivo
 
@@ -182,9 +184,22 @@ Criar a fronteira oficial HeyGen e garantir upload/reuso seguro de imagens e Voi
 - secrets e URLs assinadas não entram no banco/logs;
 - provider fake cobre sucesso, falha, timeout e resultado ambíguo.
 
+### Operação entregue
+
+```powershell
+uv run auraly heygen connect
+uv run auraly heygen preflight
+uv run auraly heygen prepare-assets CAMPAIGN_ID
+uv run auraly job worker-once --worker-id local-worker
+uv run auraly heygen reconcile JOB_ID
+```
+
+OAuth/MCP é o caminho aprovado para o MVP pessoal e pequenos volumes. `PROVIDER_VERIFIED` continua
+ausente até D2C; nenhum canário real ou geração de vídeo é inferido dos testes locais.
+
 ## D2B — HeyGen Batch Generation, Polling & Download
 
-**Status:** `PLANNED`.
+**Status:** `PLANNED` — próximo Goal.
 
 ### Objetivo
 

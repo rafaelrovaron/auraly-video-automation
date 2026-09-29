@@ -22,13 +22,16 @@ entrega.
 - domínio de imagens, candidatas, review e histórico persistente;
 - importação batch manual com manifest explícito, dry-run, provenance, aprovação opcional e
   replay idempotente;
+- conexão HeyGen MCP/OAuth local, preflight, upload batch e reuso de imagens/WAV por conta, tipo
+  e hash, com checkpoints e reconciliação explícita;
+- CLI `heygen connect|disconnect|status|preflight|prepare-assets|reconcile`;
 - runtime Google Flow/Playwright, geração, correlação de downloads e recuperação implementados e
   verificados com fixtures locais;
 - CLI JSON e harness de verificação para as capacidades acima.
 
 ### Não entregue ainda
 
-- integração HeyGen para upload batch de imagens e do Voice Master, geração, polling e download;
+- geração HeyGen em batch, polling dos vídeos e download dos MP4;
 - `EditProfile` reutilizável e resolução de overrides por vídeo/variante;
 - render final com headline, captions, música e framing configuráveis;
 - variações A/B de headline sem regenerar voz, imagem ou HeyGen;
@@ -84,8 +87,8 @@ manifest inválido não publica nem persiste nada, e repetir o mesmo lote reutil
 
 ## Próximo slice de desenvolvimento
 
-O próximo Goal é **D2A — HeyGen Contract, Preflight & Asset Reuse**: definir a fronteira oficial
-do provider e reutilizar por hash as imagens importadas e o Voice Master aprovado.
+O próximo Goal é **D2B — HeyGen Batch Generation, Polling & Download**: usar os assets remotos já
+preparados para gerar e baixar um MP4 por variante com retomada segura.
 
 O escopo completo e os critérios de saída estão em
 [`docs/GOAL-ROADMAP.md`](docs/GOAL-ROADMAP.md).
@@ -159,8 +162,8 @@ O projeto distingue:
 - `LOCAL_VERIFIED`: o baseline determinístico passou;
 - `PROVIDER_VERIFIED`: um canário real autorizado passou.
 
-Goals 0–3, 4A–4C e D1 estão implementados e verificados localmente. ElevenLabs e Google Flow ainda
-não têm canário real registrado neste repositório. Nenhuma capacidade do novo roadmap deve ser
+Goals 0–3, 4A–4C, D1 e D2A estão implementados e verificados localmente. ElevenLabs, Google Flow e
+HeyGen ainda não têm canário real registrado neste repositório. Nenhuma capacidade do roadmap deve ser
 tratada como entregue antes de código, testes e evidência correspondente.
 
 Gate local completo:

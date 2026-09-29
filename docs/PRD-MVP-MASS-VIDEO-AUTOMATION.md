@@ -775,11 +775,12 @@ uma camada genérica antes de existir necessidade.
 A sequência executável é mantida exclusivamente em `docs/GOAL-ROADMAP.md`:
 
 1. D1 Manual Image Batch Intake — entregue;
-2. D2A/D2B/D2C HeyGen — próximo;
-3. D3A/D3B edição e A/B;
-4. D4A/D4B API/UI e preview;
-5. D5A/D5B render/QC/delivery;
-6. D6 piloto end-to-end.
+2. D2A HeyGen Contract, Preflight & Asset Reuse — entregue localmente;
+3. D2B/D2C HeyGen generation e canário — próximo;
+4. D3A/D3B edição e A/B;
+5. D4A/D4B API/UI e preview;
+6. D5A/D5B render/QC/delivery;
+7. D6 piloto end-to-end.
 
-D2A é o próximo trabalho de implementação. Nenhuma decisão de D2B–D6 precisa ser antecipada para
-iniciar esse Goal.
+D2B é o próximo trabalho de implementação. D2A está `IMPLEMENTED` e `LOCAL_VERIFIED`, mas não
+`PROVIDER_VERIFIED`; nenhuma geração de vídeo real foi executada ou inferida.
