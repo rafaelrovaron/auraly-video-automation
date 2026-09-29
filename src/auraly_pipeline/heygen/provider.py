@@ -11,6 +11,7 @@ from urllib.parse import urlparse
 
 import httpx
 import httpx2
+import jsonschema
 from mcp import ClientSession, types
 from mcp.client.auth import OAuthClientProvider
 from mcp.client.streamable_http import streamable_http_client
@@ -25,6 +26,9 @@ from auraly_pipeline.heygen.domain import (
     AssetUploadSlot,
     HeyGenPreflight,
     ProviderAssetStatus,
+)
+from auraly_pipeline.heygen.video_domain import (
+    HeyGenVideoConfig, ProviderVideo, VideoPlanItem, VideoPreflight,
 )
 
 
@@ -185,6 +189,105 @@ class HeyGenMcpAdapter:
 
     def disconnect(self) -> None:
         asyncio.run(self.storage.clear())
+
+    @staticmethod
+    def _video_payload(config: HeyGenVideoConfig, image_id: str, audio_id: str, callback_id: str) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            'image': {'type': 'asset_id', 'asset_id': image_id}, 'audio_asset_id': audio_id,
+            'aspect_ratio': config.aspect_ratio, 'resolution': config.resolution,
+            'output_format': config.output_format, 'fit': config.fit,
+            'expressiveness': config.expressiveness, 'callback_id': callback_id,
+        }
+        if config.motion_prompt is not None:
+            payload['motion_prompt'] = config.motion_prompt
+        return payload
+
+    @staticmethod
+    def _validate_video_schema(schema: dict[str, Any], payload: dict[str, Any]) -> None:
+        def local_refs(value: Any) -> None:
+            if isinstance(value, dict):
+                if '$ref' in value and not str(value['$ref']).startswith('#/'):
+                    raise ValueError('external schema references not supported')
+                for child in value.values():
+                    local_refs(child)
+            elif isinstance(value, list):
+                for child in value:
+                    local_refs(child)
+        try:
+            local_refs(schema)
+            properties = schema.get('properties', {})
+            if not set(payload).issubset(properties) or 'engine' in properties:
+                raise ValueError('unsupported fields or selectable engine')
+            validator = jsonschema.validators.validator_for(schema)
+            validator.check_schema(schema)
+            validator(schema).validate(payload)
+        except Exception:
+            raise HeyGenProviderFailure('configuration', 'Unsupported HeyGen video tool schema') from None
+
+    async def _video_session_preflight(self, session: Any, config: HeyGenVideoConfig, payload: dict[str, Any] | None = None) -> VideoPreflight:
+        tools = {tool.name: tool for tool in (await session.list_tools()).tools}
+        if not {'get_current_user','create_video_from_image','get_video'}.issubset(tools):
+            raise HeyGenProviderFailure('configuration','Missing HeyGen video tools')
+        schema = tools['create_video_from_image'].input_schema
+        self._validate_video_schema(schema,payload or self._video_payload(config,'asset-preflight-image','asset-preflight-audio','preflight'))
+        self._validate_video_schema(tools['get_video'].input_schema,{'video_id':'video-preflight'})
+        user = await self._call_tool(session,'get_current_user',{})
+        identity = user.get('workspace_id') or user.get('workspaceId') or user.get('id')
+        if not isinstance(identity,str) or not identity:
+            raise HeyGenProviderFailure('configuration','HeyGen account identity unavailable')
+        return VideoPreflight(account_ref='account-'+hashlib.sha256(identity.encode()).hexdigest(),
+            schema_fingerprint=hashlib.sha256(json.dumps({name:tools[name].input_schema for name in ('create_video_from_image','get_video')},sort_keys=True,separators=(',',':')).encode()).hexdigest())
+
+    def preflight_video(self, config: HeyGenVideoConfig) -> VideoPreflight:
+        async def operation() -> VideoPreflight:
+            try:
+                async with self._session_factory(False) as session:
+                    return await self._video_session_preflight(session,config)
+            except HeyGenProviderFailure:
+                raise
+            except Exception:
+                raise HeyGenProviderFailure('configuration','HeyGen video connection unavailable') from None
+        return asyncio.run(operation())
+
+    def create_video(self, item: VideoPlanItem, *, callback_id: str) -> str:
+        payload = self._video_payload(item.config,item.image_asset_id,item.audio_asset_id,callback_id)
+        async def operation() -> str:
+            try:
+                async with self._session_factory(False) as session:
+                    preflight = await self._video_session_preflight(session,item.config,payload)
+                    if preflight.account_ref!=item.account_ref or preflight.schema_fingerprint!=item.schema_fingerprint:
+                        raise HeyGenProviderFailure('configuration','HeyGen video account or schema changed')
+                    try:
+                        response = await self._call_tool(session,'create_video_from_image',payload)
+                        video_id = response.get('video_id') or response.get('videoId') or response.get('id')
+                        return ProviderVideo(video_id=video_id,status=ProviderAssetStatus.QUEUED).video_id
+                    except BaseException:
+                        raise HeyGenProviderFailure('ambiguous','HeyGen video outcome unknown',request_dispatched=True) from None
+            except HeyGenProviderFailure:
+                raise
+            except Exception:
+                raise HeyGenProviderFailure('retryable','HeyGen video connection failed') from None
+        return asyncio.run(operation())
+
+    def get_video(self, video_id: str) -> ProviderVideo:
+        try:
+            response = asyncio.run(self._call('get_video',{'video_id':video_id}))
+            returned_id = response.get('video_id') or response.get('videoId') or response.get('id')
+            if returned_id!=video_id:
+                raise ValueError('video identity mismatch')
+            status = ProviderAssetStatus(response['status'])
+            if status==ProviderAssetStatus.NOT_FOUND:
+                raise ValueError('video not found')
+            url = response.get('video_url') or response.get('videoUrl') or response.get('download_url')
+            if status==ProviderAssetStatus.COMPLETED and (not isinstance(url,str) or urlparse(url).scheme!='https'):
+                raise ValueError('missing HTTPS video URL')
+            return ProviderVideo(video_id=video_id,status=status,download_url=url,
+                callback_id=response.get('callback_id'), image_asset_id=response.get('image_asset_id'),
+                audio_asset_id=response.get('audio_asset_id'))
+        except HeyGenProviderFailure:
+            raise
+        except Exception:
+            raise HeyGenProviderFailure('configuration','Invalid HeyGen video response') from None
 
     async def _call(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         try:

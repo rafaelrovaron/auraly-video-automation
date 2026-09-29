@@ -119,7 +119,10 @@ class VideoPreflight(HeyGenContract):
     tool_name: Literal["create_video_from_image"] = "create_video_from_image"
     schema_fingerprint: str = Field(pattern=SHA_PATTERN)
 
-    _account = field_validator("account_ref")(VideoPlanItem.identifiers)
+    @field_validator('account_ref')
+    @classmethod
+    def account(cls, value: str) -> str:
+        return validate_safe_identifier(value,'account_ref',max_length=200)
 
 
 class ProviderVideo(HeyGenContract):
@@ -130,9 +133,10 @@ class ProviderVideo(HeyGenContract):
     image_asset_id: str | None = None
     audio_asset_id: str | None = None
 
-    _ids = field_validator("video_id", "callback_id", "image_asset_id", "audio_asset_id")(
-        HeyGenRender.identifiers
-    )
+    @field_validator('video_id','callback_id','image_asset_id','audio_asset_id')
+    @classmethod
+    def identifiers(cls, value: str | None) -> str | None:
+        return None if value is None else validate_safe_identifier(value,'video_identifier',max_length=200)
 
 
 class VideoRunSummary(HeyGenContract):
