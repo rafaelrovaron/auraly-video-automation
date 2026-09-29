@@ -20,6 +20,8 @@ dependencies = [
   "sqlalchemy>=2.0,<3",
   "alembic>=1.16,<2",
   "Pillow>=11,<12",
+  "mcp>=2,<3",
+  "keyring>=25,<26",
 ]
 
 [project.scripts]
