@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "generation_mode": "image",
+  "engine_selection": "provider_default",
+  "aspect_ratio": "9:16",
+  "resolution": "1080p",
+  "output_format": "mp4",
+  "fit": "cover",
+  "expressiveness": "medium",
+  "motion_prompt": null,
+  "concurrency": 2,
+  "poll_initial_seconds": 10,
+  "poll_max_seconds": 60,
+  "poll_timeout_seconds": 1800
+}

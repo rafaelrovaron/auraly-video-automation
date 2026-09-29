@@ -1,0 +1,106 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "const": 1,
+      "default": 1,
+      "title": "Schemaversion",
+      "type": "integer"
+    },
+    "generationMode": {
+      "const": "image",
+      "default": "image",
+      "title": "Generationmode",
+      "type": "string"
+    },
+    "engineSelection": {
+      "const": "provider_default",
+      "default": "provider_default",
+      "title": "Engineselection",
+      "type": "string"
+    },
+    "aspectRatio": {
+      "const": "9:16",
+      "default": "9:16",
+      "title": "Aspectratio",
+      "type": "string"
+    },
+    "resolution": {
+      "default": "1080p",
+      "enum": [
+        "1080p",
+        "720p"
+      ],
+      "title": "Resolution",
+      "type": "string"
+    },
+    "outputFormat": {
+      "const": "mp4",
+      "default": "mp4",
+      "title": "Outputformat",
+      "type": "string"
+    },
+    "fit": {
+      "default": "cover",
+      "enum": [
+        "cover",
+        "contain"
+      ],
+      "title": "Fit",
+      "type": "string"
+    },
+    "expressiveness": {
+      "default": "medium",
+      "enum": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "title": "Expressiveness",
+      "type": "string"
+    },
+    "motionPrompt": {
+      "anyOf": [
+        {
+          "maxLength": 2000,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Motionprompt"
+    },
+    "concurrency": {
+      "default": 2,
+      "maximum": 2,
+      "minimum": 1,
+      "title": "Concurrency",
+      "type": "integer"
+    },
+    "pollInitialSeconds": {
+      "default": 10,
+      "maximum": 60,
+      "minimum": 1,
+      "title": "Pollinitialseconds",
+      "type": "integer"
+    },
+    "pollMaxSeconds": {
+      "default": 60,
+      "maximum": 60,
+      "minimum": 1,
+      "title": "Pollmaxseconds",
+      "type": "integer"
+    },
+    "pollTimeoutSeconds": {
+      "default": 1800,
+      "maximum": 1800,
+      "minimum": 1,
+      "title": "Polltimeoutseconds",
+      "type": "integer"
+    }
+  },
+  "title": "HeyGenVideoConfig",
+  "type": "object"
+}
