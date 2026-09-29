@@ -225,8 +225,11 @@ def _configure_image_logging() -> None:
     logging.basicConfig(level=logging.INFO, format="%(message)s")
 
 
-def _json_echo(payload: dict[str, object]) -> None:
-    typer.echo(json.dumps(payload, indent=2, ensure_ascii=False, sort_keys=True, allow_nan=False))
+def _json_echo(payload: dict[str, object], *, err: bool = False) -> None:
+    typer.echo(
+        json.dumps(payload, indent=2, ensure_ascii=False, sort_keys=True, allow_nan=False),
+        err=err,
+    )
 
 
 def _heygen_service(database: Path, work_root: Path) -> HeyGenService:
@@ -311,6 +314,7 @@ def heygen_prepare_assets_command(
     try:
         plan = service.plan_assets(campaign_id)
         plan_payload = plan.model_dump(mode="json", by_alias=True)
+        _json_echo({"plan": plan_payload}, err=True)
         if plan.upload_sources and not yes and not typer.confirm(
             "Submit HeyGen asset upload?", err=True
         ):

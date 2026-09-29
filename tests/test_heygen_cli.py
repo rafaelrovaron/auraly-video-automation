@@ -112,5 +112,8 @@ def test_prepare_assets_can_cancel_or_submit_non_interactively(monkeypatch) -> N
 
     assert cancelled.exit_code == 0
     assert json.loads(cancelled.stdout[cancelled.stdout.index("{") :])["submitted"] is False
+    assert '"campaignId": "campaign-one"' in cancelled.stderr
+    assert cancelled.stderr.index('"campaignId"') < cancelled.stderr.index("Submit HeyGen")
     assert submitted.exit_code == 0
     assert json.loads(submitted.stdout)["submitted"] is True
+    assert '"campaignId": "campaign-one"' in submitted.stderr
