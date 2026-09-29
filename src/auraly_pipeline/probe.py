@@ -124,7 +124,7 @@ def parse_ffprobe_payload(payload: dict[str, Any]) -> MediaProbe:
     )
 
 
-def probe_media(path: Path, ffprobe_bin: str = "ffprobe") -> MediaProbe:
+def probe_media(path: Path, ffprobe_bin: str = "ffprobe", *, timeout_seconds: float | None = None) -> MediaProbe:
     if not path.is_file():
         raise ProbeError(f"Media file does not exist: {path}")
     command = [
@@ -138,7 +138,10 @@ def probe_media(path: Path, ffprobe_bin: str = "ffprobe") -> MediaProbe:
         str(path),
     ]
     try:
-        result = subprocess.run(command, capture_output=True, text=True, check=False)
+        if timeout_seconds is None:
+            result = subprocess.run(command, capture_output=True, text=True, check=False)
+        else:
+            result = subprocess.run(command, capture_output=True, text=True, check=False, timeout=timeout_seconds)
     except FileNotFoundError as exc:
         raise ProbeError(f"ffprobe executable not found: {ffprobe_bin}") from exc
     if result.returncode != 0:
