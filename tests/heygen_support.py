@@ -12,7 +12,11 @@ NOW = "2026-09-29T12:00:00+00:00"
 
 
 def create_ready_campaign(
-    database: Path, work_root: Path, *, duplicate_first_two_images: bool = False, voice_content: bytes = b'voice'
+    database: Path,
+    work_root: Path,
+    *,
+    duplicate_first_two_images: bool = False,
+    voice_content: bytes = b"voice",
 ) -> None:
     migrate_database(database)
     assets = work_root / "campaigns" / "campaign-one"
@@ -22,10 +26,16 @@ def create_ready_campaign(
     image_facts: list[tuple[str, str, int]] = []
     for index in range(3):
         path = assets / f"image-{index}.png"
-        content = b"image-0" if duplicate_first_two_images and index == 1 else f"image-{index}".encode()
+        content = (
+            b"image-0" if duplicate_first_two_images and index == 1 else f"image-{index}".encode()
+        )
         path.write_bytes(content)
         image_facts.append(
-            (path.relative_to(work_root).as_posix(), hashlib.sha256(content).hexdigest(), len(content))
+            (
+                path.relative_to(work_root).as_posix(),
+                hashlib.sha256(content).hexdigest(),
+                len(content),
+            )
         )
 
     engine = create_sqlite_engine(database)

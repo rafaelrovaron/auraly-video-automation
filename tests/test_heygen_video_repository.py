@@ -55,7 +55,7 @@ def test_batch_budget_race(tmp_path: Path) -> None:
         result = service.submit_linked_batch(
             requests,
             create,
-            lambda job: repo.list_campaign("campaign-one")[int(job.input["index"])],
+            lambda job: repo.list_campaign("campaign-one")[int(str(job.input["index"]))],
             before_commit=lambda s: repo.check_budget_in_session(s, "campaign-one", limit),
         )
         return [r.job.job_id for r in result]

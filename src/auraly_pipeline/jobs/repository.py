@@ -300,15 +300,22 @@ class JobRepository:
         with self._session_factory() as session:
             scope = []
             if campaign_id is not None:
-                scope.append(JobRow.campaign_id==campaign_id)
+                scope.append(JobRow.campaign_id == campaign_id)
             if job_type is not None:
-                scope.append(JobRow.job_type==job_type)
+                scope.append(JobRow.job_type == job_type)
             if max_running is not None:
                 if max_running < 1:
-                    raise ValueError('max_running must be positive')
+                    raise ValueError("max_running must be positive")
                 self._begin_immediate(session)
-                running=session.scalar(select(func.count()).select_from(JobRow).where(JobRow.status==JobStatus.RUNNING.value,*scope)) or 0
-                if running>=max_running:
+                running = (
+                    session.scalar(
+                        select(func.count())
+                        .select_from(JobRow)
+                        .where(JobRow.status == JobStatus.RUNNING.value, *scope)
+                    )
+                    or 0
+                )
+                if running >= max_running:
                     session.rollback()
                     return None
             candidate = (

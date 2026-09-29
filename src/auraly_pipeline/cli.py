@@ -17,6 +17,7 @@ from auraly_pipeline.campaigns.service import CampaignError, CampaignService
 from auraly_pipeline.flow import FLOW_URL, FlowPreflightService, FlowWorkspaceIdentity
 from auraly_pipeline.heygen.provider import HeyGenProviderFailure
 from auraly_pipeline.heygen.service import HeyGenService, HeyGenServiceError
+from auraly_pipeline.heygen.video_cli import register_video_commands
 from auraly_pipeline.image_generation import (
     DEFAULT_RETRY_COUNT,
     DEFAULT_TIMEOUT_SECONDS,
@@ -98,6 +99,7 @@ heygen_app = typer.Typer(
     help="Connect HeyGen and prepare reusable remote assets.", no_args_is_help=True
 )
 app.add_typer(heygen_app, name="heygen")
+register_video_commands(heygen_app)
 
 
 @app.command("ingest")

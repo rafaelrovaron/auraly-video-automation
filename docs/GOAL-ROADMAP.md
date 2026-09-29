@@ -44,6 +44,7 @@ locais. Canary real exige autorização explícita.
 | 4D | Flow QC/Review/Provider Canary | `PAUSED` |
 | D1 | Manual Image Batch Intake | `IMPLEMENTED`, `LOCAL_VERIFIED` |
 | D2A | HeyGen Contract, Preflight & Asset Reuse | `IMPLEMENTED`, `LOCAL_VERIFIED` |
+| D2B | HeyGen Batch Generation, Polling & Download | `IMPLEMENTED`, validação final em andamento |
 
 O código Flow permanece no repositório. Não removê-lo, reescrevê-lo ou expandi-lo durante o novo
 MVP sem um Goal específico aprovado.
@@ -54,8 +55,8 @@ MVP sem um Goal específico aprovado.
 D0  Documentation Alignment                    DONE
 D1  Manual Image Batch Intake                  DONE
 D2A HeyGen Contract, Preflight & Asset Reuse   DONE
-D2B HeyGen Batch Generation, Polling & Download NEXT
-D2C HeyGen Real Canary
+D2B HeyGen Batch Generation, Polling & Download IMPLEMENTED (validação final)
+D2C HeyGen Real Canary                         NEXT (exige aprovação paga)
 D3A EditProfile, EditManifest & Override Resolution
 D3B Headline A/B Planning & Caption Inputs
 D4A FastAPI Operational API
@@ -199,7 +200,7 @@ ausente até D2C; nenhum canário real ou geração de vídeo é inferido dos te
 
 ## D2B — HeyGen Batch Generation, Polling & Download
 
-**Status:** `PLANNED` — próximo Goal.
+**Status:** `IMPLEMENTED` — baseline completo/revisão final em andamento; canário real permanece D2C.
 
 ### Objetivo
 
@@ -207,7 +208,7 @@ Gerar e baixar um MP4 HeyGen por variante, em lote retomável.
 
 ### Incluído
 
-- configuração explícita de avatar/engine;
+- geração por imagem + áudio importado; engine `provider_default`, sem campos MCP inventados;
 - dry-run com quantidade de paid renders e assets reutilizados;
 - budget gate antes da primeira submissão;
 - job lógico por variante e comando batch por campanha;

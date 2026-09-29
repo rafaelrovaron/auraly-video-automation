@@ -153,6 +153,29 @@ somente em memória. Outcomes ambíguos bloqueiam o job `reconcile_before_retry`
 reconcile` prova o estado remoto antes de retomar. O fake local cobre o fluxo; HeyGen ainda não
 está `PROVIDER_VERIFIED`.
 
+### 4.3 D2B — geração/polling/download implementados
+
+Em 2026-09-29, o slice local D2B implementa um job `heygen.video.generate` por SceneVariant,
+batch por campanha, tabela `heygen_renders` (migration 0008), reserva atômica com teto explícito
+e concorrência 1..2. Validação final/revisão em andamento; não marcar PROVIDER_VERIFIED.
+
+MCP `create_video_from_image` recebe image asset + audio asset compartilhado. Não há engine
+ou idempotency key inventados: `provider_default` é validado contra schema remoto; callback
+serve apenas de correlação. `submitting` é persistido antes da chamada e o ID antes de polling.
+Resultado ambíguo bloqueia sem paid retry; ID conhecido retoma leitura/download. Sem ID, binding
+manual exige confirmação e recusa identidade contraditória/duplicada.
+
+Config material é separado de polling/concurrency na identidade. Jobs/reservas são reutilizados
+em replay; falha não devolve budget automaticamente. O WAV aprovado é validado por hash/duração,
+assim como imagem, copy, conta e assets ready antes de dispatch. Assinaturas/URLs não persistem.
+
+Source MP4 H.264/AAC vertical passa SHA-256, ffprobe, tolerância `max(2s,5% do WAV)` e full decode.
+Hardlink publica sem overwrite; publication.json fixa identidade/hash antes do MP4, source.json
+fecha o manifest antes de ready. Crash entre publicação e commit recupera sem novo download.
+
+Interface: `heygen plan-videos|generate-videos|run-videos|videos|reconcile-video`. Generate reserva;
+run pode consumir créditos. Canário D2C segue pendente de autorização; editor/UI não entregues.
+
 ## 5. Contrato de importação batch de imagens
 
 O batch deve ser explícito e determinístico. Não inferir associação apenas pela ordem retornada

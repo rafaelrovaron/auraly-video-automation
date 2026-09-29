@@ -32,7 +32,7 @@ def build_fast_steps(pytest_targets: Sequence[str]) -> tuple[VerificationStep, .
     steps = [
         VerificationStep(
             name="Ruff source, tests, and harness",
-            argv=("uv", "run", "ruff", "check", "src", "tests", "scripts"),
+            argv=("uv", "run", "python", "-m", "ruff", "check", "src", "tests", "scripts"),
         ),
         VerificationStep(
             name="mypy source",
@@ -43,7 +43,7 @@ def build_fast_steps(pytest_targets: Sequence[str]) -> tuple[VerificationStep, .
         steps.append(
             VerificationStep(
                 name="focused pytest",
-                argv=("uv", "run", "pytest", *pytest_targets),
+                argv=("uv", "run", "python", "-m", "pytest", *pytest_targets),
             )
         )
     return tuple(steps)
@@ -57,9 +57,11 @@ def build_full_steps(os_name: str = os.name) -> tuple[VerificationStep, ...]:
     npm = npm_executable(os_name)
     return (
         VerificationStep("uv locked sync", ("uv", "sync", "--locked", "--all-groups")),
-        VerificationStep("full pytest", ("uv", "run", "pytest")),
-        VerificationStep("Ruff source and tests", ("uv", "run", "ruff", "check", "src", "tests")),
-        VerificationStep("Ruff harness", ("uv", "run", "ruff", "check", "scripts")),
+        VerificationStep("full pytest", ("uv", "run", "python", "-m", "pytest")),
+        VerificationStep(
+            "Ruff source and tests", ("uv", "run", "python", "-m", "ruff", "check", "src", "tests")
+        ),
+        VerificationStep("Ruff harness", ("uv", "run", "python", "-m", "ruff", "check", "scripts")),
         VerificationStep("mypy source", ("uv", "run", "python", "-m", "mypy", "src")),
         VerificationStep(
             "mypy tests",

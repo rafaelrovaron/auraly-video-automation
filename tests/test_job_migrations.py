@@ -39,7 +39,7 @@ def test_goal_one_database_upgrades_to_goal_two_without_rewriting_goal_one(tmp_p
     assert {"jobs", "job_attempts", "job_events"}.issubset(inspect(engine).get_table_names())
     with engine.connect() as connection:
         assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == (
-            "0007_heygen_remote_assets"
+            "0008_heygen_renders"
         )
         assert connection.execute(text("PRAGMA journal_mode")).scalar_one().casefold() == "wal"
     engine.dispose()

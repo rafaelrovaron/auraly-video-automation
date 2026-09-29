@@ -25,6 +25,8 @@ genérico e não terá timeline estilo CapCut ou preview frame-perfect.
 - WAV processado com trim de silêncio nas bordas, normalização e QC;
 - domínio/review de imagens;
 - importação batch de imagens manuais, dry-run, provenance e CLI JSON;
+- D2A upload/reuso de assets via MCP/OAuth e D2B geração/polling/download via CLI implementados;
+  D2B aguardando baseline/revisão final; HeyGen real não é PROVIDER_VERIFIED;
 - automação Google Flow implementada e localmente verificada;
 - contrato `edit.json` legado, ingestão e inspeção de mídia;
 - CLI e harness de verificação.
@@ -776,11 +778,13 @@ A sequência executável é mantida exclusivamente em `docs/GOAL-ROADMAP.md`:
 
 1. D1 Manual Image Batch Intake — entregue;
 2. D2A HeyGen Contract, Preflight & Asset Reuse — entregue localmente;
-3. D2B/D2C HeyGen generation e canário — próximo;
+3. D2B HeyGen generation — implementado, validação final; D2C canário — próximo;
 4. D3A/D3B edição e A/B;
 5. D4A/D4B API/UI e preview;
 6. D5A/D5B render/QC/delivery;
 7. D6 piloto end-to-end.
 
-D2B é o próximo trabalho de implementação. D2A está `IMPLEMENTED` e `LOCAL_VERIFIED`, mas não
-`PROVIDER_VERIFIED`; nenhuma geração de vídeo real foi executada ou inferida.
+D2B implementa batch local (um job por variante), geração por image/audio assets, polling e
+download com QC. D2A está `IMPLEMENTED` e `LOCAL_VERIFIED`; D2B aguarda baseline/revisão final.
+D2C é a próxima validação real, com aprovação específica de créditos. Nenhuma geração de vídeo
+real foi executada ou inferida; UI/editor/A/B continuam capacidades alvo.

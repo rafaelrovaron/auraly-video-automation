@@ -149,11 +149,12 @@ class HeyGenVideoRepository:
     def reset_no_dispatch(self, render_id: str) -> HeyGenRender:
         def mutate(row: HeyGenRenderRow) -> None:
             if row.remote_video_id is not None:
-                raise ValueError('cannot reset known dispatch')
-            row.dispatch_started_at=None
-            row.status='planned'
-            row.error_code=None
-        return self._update(render_id,mutate)
+                raise ValueError("cannot reset known dispatch")
+            row.dispatch_started_at = None
+            row.status = "planned"
+            row.error_code = None
+
+        return self._update(render_id, mutate)
 
     def record_video(
         self, render_id: str, video_id: str, *, manual_binding: bool = False

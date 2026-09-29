@@ -25,13 +25,15 @@ entrega.
 - conexão HeyGen MCP/OAuth local, preflight, upload batch e reuso de imagens/WAV por conta, tipo
   e hash, com checkpoints e reconciliação explícita;
 - CLI `heygen connect|disconnect|status|preflight|prepare-assets|reconcile`;
+- D2B implementado: batch local de vídeo por variante, reserva de budget, polling/retomada,
+  download HTTPS, QC H.264/AAC e publicação sem overwrite (validação final em andamento);
 - runtime Google Flow/Playwright, geração, correlação de downloads e recuperação implementados e
   verificados com fixtures locais;
 - CLI JSON e harness de verificação para as capacidades acima.
 
 ### Não entregue ainda
 
-- geração HeyGen em batch, polling dos vídeos e download dos MP4;
+- canário HeyGen real (D2C), com autorização específica de consumo de créditos;
 - `EditProfile` reutilizável e resolução de overrides por vídeo/variante;
 - render final com headline, captions, música e framing configuráveis;
 - variações A/B de headline sem regenerar voz, imagem ou HeyGen;
@@ -51,6 +53,38 @@ voltar a ser usada como caminho opcional. Porém:
 Esse corte elimina o maior risco de manutenção de UI externa sem bloquear a produção.
 
 ## Fluxo alvo do MVP
+
+### Operação HeyGen por campanha (D2B)
+
+Após aprovar copy/imagens/voz e preparar os assets D2A:
+
+```powershell
+uv run python -m auraly_pipeline.cli heygen plan-videos CAMPAIGN_ID --config examples/heygen-video-config.json --max-paid-renders 3
+uv run python -m auraly_pipeline.cli heygen generate-videos CAMPAIGN_ID --config examples/heygen-video-config.json --max-paid-renders 3 --approved-by Rafael --yes
+uv run python -m auraly_pipeline.cli heygen run-videos CAMPAIGN_ID
+uv run python -m auraly_pipeline.cli heygen videos CAMPAIGN_ID
+uv run python -m auraly_pipeline.cli heygen reconcile-video RENDER_ID
+```
+
+Os comandos aceitam `--database` e `--work-root`. `plan-videos` só consulta; `generate-videos`
+reserva jobs e não gera mídia; **`run-videos` despacha gerações pagas** usando essa aprovação.
+Não executar geração real antes do canário D2C autorizado. Não há estimativa monetária inventada:
+o limite é por quantidade de renders da campanha, incluindo falhas/ambiguidades.
+
+Config default: imagem + áudio de assets, engine escolhido pelo provider, 9:16/1080p/MP4,
+cover, expressiveness medium, concorrência 2 e polling 10→20→40→60s até 1800s. O schema remoto
+deve aceitar esses inputs; engine selecionável/exigido bloqueia até decisão explícita.
+
+Sources ficam em `campaigns/<campaign>/heygen/<scene-uuid>/<logical-key>/source.mp4`, com
+`publication.json` e `source.json`. São validados por hash, ffprobe e full decode. Repetir
+submit/run reutiliza os registros. Após bloqueio com ID conhecido, reconcile consulta o mesmo
+vídeo e libera a retomada; não chama create. Sem ID após dispatch ambíguo, informar o ID exato
+com `--video-id ID --confirm-manual-binding`; nunca criar outro vídeo para resolver ambiguidade.
+
+Testes locais usam fake MCP e MP4/WAV sintéticos. Eles não provam interoperabilidade real,
+custo ou engine do provider. UI/editor/A/B permanecem no roadmap, sem afetar a identidade HeyGen.
+
+### Pipeline alvo
 
 ```text
 Copy Master aprovada

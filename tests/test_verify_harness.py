@@ -160,9 +160,20 @@ def test_fast_without_pytest_selects_only_low_cost_checks() -> None:
     steps = verify.build_fast_steps(())
 
     assert [step.argv for step in steps] == [
-        ("uv", "run", "ruff", "check", "src", "tests", "scripts"),
+        ("uv", "run", "python", "-m", "ruff", "check", "src", "tests", "scripts"),
         ("uv", "run", "python", "-m", "mypy", "src"),
     ]
+
+
+def test_python_checks_do_not_require_windows_console_launchers() -> None:
+    verify = load_verify_module()
+    steps = (
+        *verify.build_fast_steps(("tests/test_verify_harness.py",)),
+        *verify.build_full_steps(os_name="nt"),
+    )
+    for step in steps:
+        if "pytest" in step.argv or "ruff" in step.argv:
+            assert step.argv[:4] == ("uv", "run", "python", "-m")
 
 
 def test_fast_forwards_focused_pytest_targets_exactly() -> None:
@@ -174,7 +185,7 @@ def test_fast_forwards_focused_pytest_targets_exactly() -> None:
 
     steps = verify.build_fast_steps(targets)
 
-    assert steps[-1].argv == ("uv", "run", "pytest", *targets)
+    assert steps[-1].argv == ("uv", "run", "python", "-m", "pytest", *targets)
     assert sum("pytest" in step.argv for step in steps) == 1
 
 
@@ -194,6 +205,8 @@ def test_fast_cli_selects_requested_focused_target() -> None:
     assert selected[-1].argv == (
         "uv",
         "run",
+        "python",
+        "-m",
         "pytest",
         "tests/test_verify_harness.py",
     )
@@ -203,9 +216,9 @@ def test_full_contains_agents_deterministic_baseline_in_order() -> None:
     verify = load_verify_module()
     expected = [
         ("uv", "sync", "--locked", "--all-groups"),
-        ("uv", "run", "pytest"),
-        ("uv", "run", "ruff", "check", "src", "tests"),
-        ("uv", "run", "ruff", "check", "scripts"),
+        ("uv", "run", "python", "-m", "pytest"),
+        ("uv", "run", "python", "-m", "ruff", "check", "src", "tests"),
+        ("uv", "run", "python", "-m", "ruff", "check", "scripts"),
         ("uv", "run", "python", "-m", "mypy", "src"),
         ("uv", "run", "python", "-m", "mypy", "tests"),
         ("uv", "run", "python", "-m", "auraly_pipeline.schema"),
@@ -367,9 +380,7 @@ def test_schema_existence_transition_is_drift(
 def test_full_schema_generators_declare_tracked_outputs() -> None:
     verify = load_verify_module()
     steps = verify.build_full_steps(os_name="posix")
-    generated = {
-        step.name: step.generated_files for step in steps if step.generated_files
-    }
+    generated = {step.name: step.generated_files for step in steps if step.generated_files}
 
     assert generated == {
         "edit schema": (Path("schemas/edit.schema.json"),),
@@ -377,9 +388,7 @@ def test_full_schema_generators_declare_tracked_outputs() -> None:
     }
 
 
-def test_environment_secret_is_never_printed(
-    tmp_path: Path, monkeypatch, capsys
-) -> None:
+def test_environment_secret_is_never_printed(tmp_path: Path, monkeypatch, capsys) -> None:
     verify = load_verify_module()
     secret = "do-not-print-this-api-key"
     monkeypatch.setenv("ELEVENLABS_API_KEY", secret)
@@ -401,9 +410,7 @@ def test_runner_applies_extra_environment_without_shell_syntax(tmp_path: Path) -
     verify = load_verify_module()
     received_environment: dict[str, str] = {}
 
-    def capture_environment(
-        argv: list[str], **kwargs: Any
-    ) -> subprocess.CompletedProcess[str]:
+    def capture_environment(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         received_environment.update(kwargs["env"])
         return subprocess.CompletedProcess(argv, 0)
 
@@ -518,7 +525,9 @@ def test_linux_ci_installs_managed_chromium_and_runs_full_under_xvfb() -> None:
     assert "actions/setup-node@v6" in uses
     assert any(str(action).startswith("astral-sh/setup-uv@") for action in uses)
 
-    python_step = next(step for step in job["steps"] if step.get("uses") == "actions/setup-python@v6")
+    python_step = next(
+        step for step in job["steps"] if step.get("uses") == "actions/setup-python@v6"
+    )
     node_step = next(step for step in job["steps"] if step.get("uses") == "actions/setup-node@v6")
     assert python_step["with"]["python-version"] == "3.11"
     assert node_step["with"]["node-version"] == "22"
@@ -651,8 +660,8 @@ def test_ci_does_not_use_live_provider_secrets_profiles_or_system_browsers() -> 
         "user-data-dir",
         "auth sessions",
         "trace artifacts",
-        "channel=\"chrome\"",
-        "channel=\"msedge\"",
+        'channel="chrome"',
+        'channel="msedge"',
         "executable_path=",
         "system chrome",
         "system edge",
