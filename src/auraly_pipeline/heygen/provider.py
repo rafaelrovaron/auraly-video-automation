@@ -235,6 +235,7 @@ class HeyGenMcpAdapter:
                     or not isinstance(asset_id, str)
                     or not isinstance(expires, int)
                     or not isinstance(max_bytes, int)
+                    or max_bytes < source.size_bytes
                     or not isinstance(headers, dict)
                     or not all(isinstance(key, str) and isinstance(value, str) for key, value in headers.items())
                 ):

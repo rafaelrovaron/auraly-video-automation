@@ -16,7 +16,10 @@ from auraly_pipeline.heygen.domain import (
     RemoteAssetStatus,
 )
 from auraly_pipeline.heygen.provider import HeyGenProvider, HeyGenProviderFailure
-from auraly_pipeline.heygen.repository import RemoteAssetRepository
+from auraly_pipeline.heygen.repository import (
+    RemoteAssetPersistenceError,
+    RemoteAssetRepository,
+)
 from auraly_pipeline.jobs.domain import JobExecutionOutcome, JobExecutionResult, RetrySafety
 from auraly_pipeline.jobs.handlers import JobExecutionContext
 
@@ -153,7 +156,20 @@ class HeyGenAssetUploadHandler:
                         self._clock(),
                     )
                 return self._provider_failure(failure)
-            assets = self._repository.apply_batch_state(state, self._clock())
+            try:
+                assets = self._repository.apply_batch_state(state, self._clock())
+            except RemoteAssetPersistenceError:
+                self._repository.mark_reconciliation_required(
+                    allocation.batch_id,
+                    "incomplete_remote_status",
+                    "HeyGen returned an incomplete asset status response.",
+                    self._clock(),
+                )
+                return self._failure(
+                    JobExecutionOutcome.BLOCKED,
+                    "heygen_incomplete_status",
+                    "HeyGen asset status requires reconciliation.",
+                )
             if not any(
                 status in {ProviderAssetStatus.QUEUED, ProviderAssetStatus.PROCESSING}
                 for status in state.statuses.values()

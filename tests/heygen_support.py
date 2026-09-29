@@ -11,7 +11,9 @@ from auraly_pipeline.campaigns.persistence import create_sqlite_engine, migrate_
 NOW = "2026-09-29T12:00:00+00:00"
 
 
-def create_ready_campaign(database: Path, work_root: Path) -> None:
+def create_ready_campaign(
+    database: Path, work_root: Path, *, duplicate_first_two_images: bool = False
+) -> None:
     migrate_database(database)
     assets = work_root / "campaigns" / "campaign-one"
     assets.mkdir(parents=True, exist_ok=True)
@@ -20,7 +22,7 @@ def create_ready_campaign(database: Path, work_root: Path) -> None:
     image_facts: list[tuple[str, str, int]] = []
     for index in range(3):
         path = assets / f"image-{index}.png"
-        content = f"image-{index}".encode()
+        content = b"image-0" if duplicate_first_two_images and index == 1 else f"image-{index}".encode()
         path.write_bytes(content)
         image_facts.append(
             (path.relative_to(work_root).as_posix(), hashlib.sha256(content).hexdigest(), len(content))

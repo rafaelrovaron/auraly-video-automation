@@ -136,6 +136,13 @@ def test_allocate_maps_request_and_rejects_unsafe_response() -> None:
     with pytest.raises(HeyGenProviderFailure, match="invalid upload allocation"):
         _adapter(session).allocate_asset_batch([IMAGE], "heygen.asset.upload:" + "a" * 64)
 
+    session.responses["create_asset_upload_batch"]["files"][0]["upload_url"] = (  # type: ignore[index]
+        "https://storage.example/upload"
+    )
+    session.responses["create_asset_upload_batch"]["files"][0]["max_bytes"] = 3  # type: ignore[index]
+    with pytest.raises(HeyGenProviderFailure, match="invalid upload allocation"):
+        _adapter(session).allocate_asset_batch([IMAGE], "heygen.asset.upload:" + "a" * 64)
+
 
 def test_upload_revalidates_size_and_sanitizes_errors(tmp_path: Path) -> None:
     source = tmp_path / "image.png"

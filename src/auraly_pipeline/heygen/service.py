@@ -14,13 +14,17 @@ from auraly_pipeline.heygen.domain import (
     AssetPreparationSubmission,
     AssetSource,
     AssetUploadJobInput,
+    ProviderAssetStatus,
     RemoteAssetKind,
     RemoteAssetStatus,
     asset_batch_idempotency_key,
 )
 from auraly_pipeline.heygen.handler import HeyGenAssetUploadHandler
 from auraly_pipeline.heygen.provider import HeyGenMcpAdapter, HeyGenProvider
-from auraly_pipeline.heygen.repository import RemoteAssetRepository
+from auraly_pipeline.heygen.repository import (
+    RemoteAssetPersistenceError,
+    RemoteAssetRepository,
+)
 from auraly_pipeline.images.repository import ImageRepository
 from auraly_pipeline.jobs.domain import JobSubmit, RetrySafety
 from auraly_pipeline.jobs.service import JobService
@@ -146,6 +150,11 @@ class HeyGenService:
                 )
             )
 
+        unique_sources: dict[tuple[RemoteAssetKind, str], AssetSource] = {}
+        for source in sources:
+            unique_sources.setdefault((source.kind, source.sha256), source)
+        sources = list(unique_sources.values())
+
         reusable = [
             asset
             for asset in self._assets.find_by_keys(preflight.account_ref, sources)
@@ -191,6 +200,11 @@ class HeyGenService:
         if job.job_type != "heygen.asset.upload" or job.status is not JobStatus.BLOCKED:
             raise HeyGenServiceError("Only a blocked HeyGen upload can be reconciled")
         request = AssetUploadJobInput.model_validate(job.input)
+        preflight = self._provider.preflight()
+        if preflight.account_ref != request.account_ref:
+            raise HeyGenServiceError(
+                "The connected HeyGen account does not match the upload job"
+            )
         rows = self._assets.find_by_keys(request.account_ref, request.sources)
         if not rows:
             allocation = self._provider.allocate_asset_batch(
@@ -207,9 +221,25 @@ class HeyGenService:
         batch_id = rows[0].remote_batch_id
         if not batch_id:
             raise HeyGenServiceError("Remote batch identity is unavailable")
-        updated = self._assets.apply_batch_state(
-            self._provider.get_asset_batch(batch_id), job.updated_at
-        )
+        state = self._provider.get_asset_batch(batch_id)
+        try:
+            updated = self._assets.apply_batch_state(state, job.updated_at)
+        except RemoteAssetPersistenceError as error:
+            raise HeyGenServiceError("Remote batch status is incomplete") from error
+        if all(status is ProviderAssetStatus.QUEUED for status in state.statuses.values()):
+            allocation = self._provider.allocate_asset_batch(
+                request.sources, request.idempotency_key
+            )
+            self._assets.record_allocation(
+                request.account_ref,
+                allocation.batch_id,
+                request.sources,
+                allocation.slots,
+                job.updated_at,
+            )
+            return self._jobs.resume_reconciled_job(
+                job_id, reason="remote_asset_batch_reconciled"
+            )
         if any(
             asset.status in {RemoteAssetStatus.PROCESSING, RemoteAssetStatus.RECONCILIATION_REQUIRED}
             for asset in updated

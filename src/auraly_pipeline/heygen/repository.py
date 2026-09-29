@@ -158,6 +158,11 @@ class RemoteAssetRepository:
                     .order_by(RemoteAssetRow.created_at, RemoteAssetRow.id)
                 )
             )
+            expected_asset_ids = {row.remote_asset_id for row in rows}
+            if not rows or set(batch_state.statuses) != expected_asset_ids:
+                raise RemoteAssetPersistenceError(
+                    "remote asset status response does not match the stored batch"
+                )
             for row in rows:
                 provider_status = batch_state.statuses.get(row.remote_asset_id)
                 if provider_status is None or row.status == RemoteAssetStatus.READY.value:

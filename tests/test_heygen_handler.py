@@ -8,15 +8,18 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from auraly_pipeline.campaigns.persistence import create_sqlite_engine, migrate_database
 from auraly_pipeline.heygen.domain import (
+    AssetBatchState,
     AssetSource,
     AssetUploadJobInput,
     AssetUploadSlot,
+    ProviderAssetStatus,
     RemoteAssetKind,
     RemoteAssetStatus,
     asset_batch_idempotency_key,
 )
 from auraly_pipeline.heygen.fake_provider import FakeHeyGenProvider
 from auraly_pipeline.heygen.handler import HeyGenAssetUploadHandler
+from auraly_pipeline.heygen.provider import HeyGenProviderFailure
 from auraly_pipeline.heygen.repository import RemoteAssetRepository
 from auraly_pipeline.jobs.handlers import JobExecutionContext
 
@@ -133,3 +136,121 @@ def test_handler_blocks_account_mismatch_without_remote_mutation(tmp_path: Path)
 
     assert result.outcome == "blocked"
     assert provider.events == ["preflight"]
+
+
+def test_handler_blocks_incomplete_status_response(tmp_path: Path) -> None:
+    repository, factory = _setup(tmp_path)
+    sources = [
+        _source(tmp_path, "00000000-0000-4000-8000-000000000001", "one.png", b"one", RemoteAssetKind.IMAGE),
+        _source(tmp_path, "00000000-0000-4000-8000-000000000002", "two.png", b"two", RemoteAssetKind.IMAGE),
+    ]
+
+    class PartialProvider(FakeHeyGenProvider):
+        def get_asset_batch(self, batch_id: str) -> AssetBatchState:
+            state = super().get_asset_batch(batch_id)
+            asset_id = next(iter(state.statuses))
+            return AssetBatchState(
+                batch_id=batch_id,
+                statuses={asset_id: ProviderAssetStatus.COMPLETED},
+            )
+
+    result = HeyGenAssetUploadHandler(
+        factory, PartialProvider(), tmp_path, clock=lambda: NOW
+    ).execute(_context(sources))
+
+    assert result.outcome == "blocked"
+    assert {asset.status for asset in repository.list_by_batch("batch-1")} == {
+        RemoteAssetStatus.RECONCILIATION_REQUIRED
+    }
+
+
+def test_handler_blocks_ambiguous_allocation_without_rows(tmp_path: Path) -> None:
+    repository, factory = _setup(tmp_path)
+    source = _source(
+        tmp_path, "00000000-0000-4000-8000-000000000001", "image.png", b"img", RemoteAssetKind.IMAGE
+    )
+
+    result = HeyGenAssetUploadHandler(
+        factory, FakeHeyGenProvider(scenario="ambiguous"), tmp_path, clock=lambda: NOW
+    ).execute(_context([source]))
+
+    assert result.outcome == "blocked"
+    assert repository.find_by_keys("account-fake", [source]) == []
+
+
+def test_handler_marks_ambiguous_put_for_reconciliation(tmp_path: Path) -> None:
+    repository, factory = _setup(tmp_path)
+    source = _source(
+        tmp_path, "00000000-0000-4000-8000-000000000001", "image.png", b"img", RemoteAssetKind.IMAGE
+    )
+
+    class AmbiguousPutProvider(FakeHeyGenProvider):
+        def upload_file(self, slot: AssetUploadSlot, local_path: Path) -> None:
+            raise HeyGenProviderFailure("ambiguous", "Fake PUT outcome is unknown")
+
+    result = HeyGenAssetUploadHandler(
+        factory, AmbiguousPutProvider(), tmp_path, clock=lambda: NOW
+    ).execute(_context([source]))
+
+    assert result.outcome == "blocked"
+    assert repository.list_by_batch("batch-1")[0].status is (
+        RemoteAssetStatus.RECONCILIATION_REQUIRED
+    )
+
+
+def test_handler_poll_timeout_preserves_processing_checkpoint(tmp_path: Path) -> None:
+    repository, factory = _setup(tmp_path)
+    source = _source(
+        tmp_path, "00000000-0000-4000-8000-000000000001", "image.png", b"img", RemoteAssetKind.IMAGE
+    )
+
+    class QueuedProvider(FakeHeyGenProvider):
+        def get_asset_batch(self, batch_id: str) -> AssetBatchState:
+            state = super().get_asset_batch(batch_id)
+            return AssetBatchState(
+                batch_id=batch_id,
+                statuses={asset_id: ProviderAssetStatus.QUEUED for asset_id in state.statuses},
+            )
+
+    result = HeyGenAssetUploadHandler(
+        factory,
+        QueuedProvider(),
+        tmp_path,
+        clock=lambda: NOW,
+        poll_timeout_seconds=0,
+    ).execute(_context([source]))
+
+    assert result.outcome == "blocked"
+    assert repository.list_by_batch("batch-1")[0].status is RemoteAssetStatus.PROCESSING
+
+
+def test_handler_persists_partial_failure_as_terminal(tmp_path: Path) -> None:
+    repository, factory = _setup(tmp_path)
+    sources = [
+        _source(tmp_path, "00000000-0000-4000-8000-000000000001", "one.png", b"one", RemoteAssetKind.IMAGE),
+        _source(tmp_path, "00000000-0000-4000-8000-000000000002", "two.png", b"two", RemoteAssetKind.IMAGE),
+    ]
+
+    class PartialFailureProvider(FakeHeyGenProvider):
+        def get_asset_batch(self, batch_id: str) -> AssetBatchState:
+            state = super().get_asset_batch(batch_id)
+            first, second = state.statuses
+            return AssetBatchState(
+                batch_id=batch_id,
+                statuses={
+                    first: ProviderAssetStatus.COMPLETED,
+                    second: ProviderAssetStatus.FAILED,
+                },
+                error_codes={second: "processing_failed"},
+                error_messages={second: "Asset processing failed."},
+            )
+
+    result = HeyGenAssetUploadHandler(
+        factory, PartialFailureProvider(), tmp_path, clock=lambda: NOW
+    ).execute(_context(sources))
+
+    assert result.outcome == "terminal_failure"
+    assert {asset.status for asset in repository.list_by_batch("batch-1")} == {
+        RemoteAssetStatus.READY,
+        RemoteAssetStatus.FAILED,
+    }
