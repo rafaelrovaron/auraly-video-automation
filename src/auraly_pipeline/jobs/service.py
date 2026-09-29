@@ -139,6 +139,8 @@ class JobService:
         resolved_handlers = handlers
         if resolved_handlers is None:
             from auraly_pipeline.images.flow_handler import FlowImageGenerateHandler
+            from auraly_pipeline.heygen.handler import HeyGenAssetUploadHandler
+            from auraly_pipeline.heygen.provider import HeyGenMcpAdapter
             from auraly_pipeline.images.handler import (
                 ImageGenerateHandler,
                 LocalFakeImageGenerateHandler,
@@ -157,6 +159,11 @@ class JobService:
             resolved_handlers["image.generate"] = ImageGenerateHandler(local_fake, flow)
             resolved_handlers["voice.generate"] = VoiceGenerateHandler(
                 session_factory,
+                work_root=configured_work_root(work_root),
+            )
+            resolved_handlers["heygen.asset.upload"] = HeyGenAssetUploadHandler(
+                session_factory,
+                HeyGenMcpAdapter(),
                 work_root=configured_work_root(work_root),
             )
         return cls(

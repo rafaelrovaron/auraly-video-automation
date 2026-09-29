@@ -31,6 +31,7 @@ ReconciliationReason = Literal[
     "existing_dispatch_reconciled",
     "staged_artifact_reconciled",
     "completed_generation_reconciled",
+    "remote_asset_batch_reconciled",
 ]
 _RECONCILIATION_REASONS = frozenset(
     {
@@ -38,6 +39,7 @@ _RECONCILIATION_REASONS = frozenset(
         "existing_dispatch_reconciled",
         "staged_artifact_reconciled",
         "completed_generation_reconciled",
+        "remote_asset_batch_reconciled",
     }
 )
 

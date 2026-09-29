@@ -876,6 +876,7 @@ def test_reconcile_before_retry_policy_cannot_use_generic_resume(tmp_path: Path)
         "existing_dispatch_reconciled",
         "staged_artifact_reconciled",
         "completed_generation_reconciled",
+        "remote_asset_batch_reconciled",
     ],
 )
 def test_resume_reconciled_records_exact_allowlisted_reason(
