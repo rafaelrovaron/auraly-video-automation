@@ -47,7 +47,7 @@ def test_batch_budget_race(tmp_path: Path) -> None:
             return repo.create_in_session(
                 session,
                 row,
-                items[int(row.input_json["index"])],
+                items[int(str(row.input_json["index"]))],
                 max_paid_renders=limit,
                 approved_by="tester",
             )

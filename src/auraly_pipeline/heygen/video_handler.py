@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from contextlib import nullcontext
 from datetime import UTC, datetime
 import hashlib
 from pathlib import Path
@@ -38,8 +39,8 @@ def verified_video_path(root: Path, relative: str, sha: str) -> Path:
     return path
 
 
-def validate_video_item(factory: sessionmaker[Session], root: Path, item: VideoPlanItem) -> None:
-    with factory() as session:
+def validate_video_item(factory: sessionmaker[Session], root: Path, item: VideoPlanItem, *, session: Session | None = None) -> None:
+    with (factory() if session is None else nullcontext(session)) as session:
         scene=session.get(SceneVariantRow,item.scene_variant_id)
         image=session.get(ImageCandidateRow,item.image_candidate_id)
         voice=session.get(VoiceMasterRow,item.voice_master_id)
@@ -111,7 +112,12 @@ class HeyGenVideoHandler:
                 if preflight.schema_fingerprint!=render.item.schema_fingerprint:
                     raise ValueError('video schema changed before dispatch')
                 render=self._repo.mark_dispatch(render.render_id)
-                video_id=self._provider.create_video(render.item,callback_id=render.logical_key)
+                try:
+                    video_id=self._provider.create_video(render.item,callback_id=render.logical_key)
+                except HeyGenProviderFailure as error:
+                    if not error.request_dispatched:
+                        self._repo.reset_no_dispatch(render.render_id)
+                    raise
                 render=self._repo.record_video(render.render_id,video_id)
             assert render.remote_video_id is not None
             deadline=self._monotonic()+render.item.config.poll_timeout_seconds

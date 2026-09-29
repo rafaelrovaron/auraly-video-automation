@@ -59,6 +59,7 @@ def test_material_identity() -> None:
     assert video_logical_key(item) != video_logical_key(
         video_item(config=HeyGenVideoConfig(motion_prompt="Smile"))
     )
-    for invalid in [{"duration_seconds": 0}, {"account_ref": "https://secret.example/token"}]:
+    invalid_items: list[dict[str, object]] = [{"duration_seconds": 0}, {"account_ref": "https://secret.example/token"}]
+    for invalid in invalid_items:
         with pytest.raises(ValidationError):
             video_item(**invalid)

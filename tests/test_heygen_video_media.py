@@ -8,14 +8,14 @@ from uuid import uuid4
 import httpx
 import pytest
 
-from auraly_pipeline.heygen.video_domain import HeyGenRender, HeyGenVideoConfig, material_config_sha256, video_logical_key
+from auraly_pipeline.heygen.video_domain import HeyGenRender, HeyGenRenderStatus, HeyGenVideoConfig, material_config_sha256, video_logical_key
 from auraly_pipeline.heygen.video_media import download_source, recover_source
 from tests.test_heygen_video_domain import video_item
 
 
 def render() -> HeyGenRender:
     item=video_item(config=HeyGenVideoConfig(resolution='720p'))
-    return HeyGenRender(render_id=str(uuid4()),item=item,logical_key=video_logical_key(item),config_sha256=material_config_sha256(item.config),job_id=str(uuid4()),status='download_pending',max_paid_renders=3,approved_by='tester',remote_video_id='video-one',created_at=datetime.now(UTC),updated_at=datetime.now(UTC))
+    return HeyGenRender(render_id=str(uuid4()),item=item,logical_key=video_logical_key(item),config_sha256=material_config_sha256(item.config),job_id=str(uuid4()),status=HeyGenRenderStatus.DOWNLOAD_PENDING,max_paid_renders=3,approved_by='tester',remote_video_id='video-one',created_at=datetime.now(UTC),updated_at=datetime.now(UTC))
 
 
 @pytest.fixture
