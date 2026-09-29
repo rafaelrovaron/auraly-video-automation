@@ -29,6 +29,7 @@ from auraly_pipeline.images.import_batch import (
     ImageImportBatch,
     ImageImportError,
     ImageImportPersistenceError,
+    ImageImportResult,
     ImageImportService,
     ImageImportSourceChangedError,
     ImageImportValidationError,
@@ -292,6 +293,7 @@ def test_execute_imports_three_images_and_survives_restart(tmp_path: Path) -> No
 
     restarted = ImageImportService.for_database(database, work_root=work_root)
     rerun = restarted.import_batch(manifest)
+    assert isinstance(rerun, ImageImportResult)
     assert rerun.created == 0
     assert rerun.reused == 3
     assert {item.variant_id: item.image_candidate_id for item in rerun.items} == first_ids
