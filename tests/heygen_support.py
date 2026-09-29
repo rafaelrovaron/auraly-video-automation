@@ -12,13 +12,13 @@ NOW = "2026-09-29T12:00:00+00:00"
 
 
 def create_ready_campaign(
-    database: Path, work_root: Path, *, duplicate_first_two_images: bool = False
+    database: Path, work_root: Path, *, duplicate_first_two_images: bool = False, voice_content: bytes = b'voice'
 ) -> None:
     migrate_database(database)
     assets = work_root / "campaigns" / "campaign-one"
     assets.mkdir(parents=True, exist_ok=True)
     voice = assets / "voice.wav"
-    voice.write_bytes(b"voice")
+    voice.write_bytes(voice_content)
     image_facts: list[tuple[str, str, int]] = []
     for index in range(3):
         path = assets / f"image-{index}.png"

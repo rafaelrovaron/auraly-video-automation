@@ -292,12 +292,29 @@ class JobRepository:
         lease_seconds: int,
         *,
         before_commit: Callable[[JobRow], None] | None = None,
+        campaign_id: str | None = None,
+        job_type: str | None = None,
+        max_running: int | None = None,
     ) -> JobRow | None:
         lease_expires_at = now + timedelta(seconds=lease_seconds)
         with self._session_factory() as session:
+            scope = []
+            if campaign_id is not None:
+                scope.append(JobRow.campaign_id==campaign_id)
+            if job_type is not None:
+                scope.append(JobRow.job_type==job_type)
+            if max_running is not None:
+                if max_running < 1:
+                    raise ValueError('max_running must be positive')
+                self._begin_immediate(session)
+                running=session.scalar(select(func.count()).select_from(JobRow).where(JobRow.status==JobStatus.RUNNING.value,*scope)) or 0
+                if running>=max_running:
+                    session.rollback()
+                    return None
             candidate = (
                 select(JobRow.id)
                 .where(JobRow.status == JobStatus.QUEUED.value)
+                .where(*scope)
                 .where(JobRow.attempt_count < JobRow.max_attempts)
                 .order_by(JobRow.priority.desc(), JobRow.queued_at, JobRow.id)
                 .limit(1)

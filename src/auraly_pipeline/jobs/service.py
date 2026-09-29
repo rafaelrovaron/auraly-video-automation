@@ -141,6 +141,7 @@ class JobService:
             from auraly_pipeline.images.flow_handler import FlowImageGenerateHandler
             from auraly_pipeline.heygen.handler import HeyGenAssetUploadHandler
             from auraly_pipeline.heygen.provider import HeyGenMcpAdapter
+            from auraly_pipeline.heygen.video_handler import HeyGenVideoHandler
             from auraly_pipeline.images.handler import (
                 ImageGenerateHandler,
                 LocalFakeImageGenerateHandler,
@@ -148,6 +149,7 @@ class JobService:
             from auraly_pipeline.voices.handler import VoiceGenerateHandler
 
             resolved_handlers = default_fake_handlers()
+            resolved_handlers['heygen.video.generate'] = HeyGenVideoHandler(session_factory,HeyGenMcpAdapter(),configured_work_root(work_root))
             local_fake = LocalFakeImageGenerateHandler(
                 session_factory,
                 work_root=configured_work_root(work_root),
@@ -311,6 +313,9 @@ class JobService:
         worker_id: str,
         *,
         lease_seconds: int = 60,
+        campaign_id: str | None = None,
+        job_type: str | None = None,
+        max_running: int | None = None,
     ) -> Job | None:
         self._validate_worker(worker_id, lease_seconds)
         now = self._as_utc(self._clock())
@@ -322,6 +327,7 @@ class JobService:
                 now,
                 lease_seconds,
                 before_commit=self._validate_persisted_row,
+                campaign_id=campaign_id,job_type=job_type,max_running=max_running,
             )
         except (IntegrityError, ValidationError, ValueError) as exc:
             raise JobPersistenceError from exc
@@ -333,6 +339,9 @@ class JobService:
         *,
         lease_seconds: int = 60,
         heartbeat_interval_seconds: float | None = None,
+        campaign_id: str | None = None,
+        job_type: str | None = None,
+        max_running: int | None = None,
     ) -> Job | None:
         interval = (
             self._heartbeat_interval(lease_seconds)
@@ -341,7 +350,7 @@ class JobService:
         )
         if interval <= 0 or interval >= lease_seconds:
             raise ValueError("heartbeat interval must be positive and below the lease duration")
-        claimed = self.claim_next_job(worker_id, lease_seconds=lease_seconds)
+        claimed = self.claim_next_job(worker_id, lease_seconds=lease_seconds,campaign_id=campaign_id,job_type=job_type,max_running=max_running)
         if claimed is None:
             return None
 

@@ -260,6 +260,8 @@ class HeyGenMcpAdapter:
                     try:
                         response = await self._call_tool(session,'create_video_from_image',payload)
                         video_id = response.get('video_id') or response.get('videoId') or response.get('id')
+                        if not isinstance(video_id,str):
+                            raise ValueError('video ID missing')
                         return ProviderVideo(video_id=video_id,status=ProviderAssetStatus.QUEUED).video_id
                     except BaseException:
                         raise HeyGenProviderFailure('ambiguous','HeyGen video outcome unknown',request_dispatched=True) from None
