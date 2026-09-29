@@ -78,12 +78,17 @@ def _unlock_file(lock_file: BinaryIO) -> None:
 @contextmanager
 def _database_migration_lock(database_path: Path, *, timeout_seconds: float = 30) -> Iterator[None]:
     lock_path = database_path.with_name(f"{database_path.name}.migration.lock")
-    with lock_path.open("a+b") as lock_file:
-        lock_file.seek(0, os.SEEK_END)
-        if lock_file.tell() == 0:
-            lock_file.write(b"\0")
-            lock_file.flush()
-        deadline = time.monotonic() + timeout_seconds
+    deadline = time.monotonic() + timeout_seconds
+    try:
+        with lock_path.open("x+b") as new_lock_file:
+            new_lock_file.write(b"\0")
+            new_lock_file.flush()
+    except FileExistsError:
+        while lock_path.stat().st_size == 0:
+            if time.monotonic() >= deadline:
+                raise TimeoutError("Timed out initializing the database migration lock")
+            time.sleep(0.01)
+    with lock_path.open("r+b") as lock_file:
         while not _try_lock_file(lock_file):
             if time.monotonic() >= deadline:
                 raise TimeoutError("Timed out waiting for the database migration lock")
