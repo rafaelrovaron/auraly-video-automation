@@ -20,13 +20,14 @@ entrega.
   aprovação humana;
 - WAV processado em mono/48 kHz, normalizado e com silêncio removido nas duas bordas;
 - domínio de imagens, candidatas, review e histórico persistente;
+- importação batch manual com manifest explícito, dry-run, provenance, aprovação opcional e
+  replay idempotente;
 - runtime Google Flow/Playwright, geração, correlação de downloads e recuperação implementados e
   verificados com fixtures locais;
 - CLI JSON e harness de verificação para as capacidades acima.
 
 ### Não entregue ainda
 
-- importação batch de imagens manuais ligada às variantes da campanha;
 - integração HeyGen para upload batch de imagens e do Voice Master, geração, polling e download;
 - `EditProfile` reutilizável e resolução de overrides por vídeo/variante;
 - render final com headline, captions, música e framing configuráveis;
@@ -69,16 +70,22 @@ review e entrega local
 Uma variante A/B de headline começa no estágio de edição. Ela reutiliza o mesmo MP4 do HeyGen e
 os mesmos assets upstream.
 
+## Importar imagens manuais
+
+```powershell
+uv run auraly image prepare-import --campaign <campaign-id> --output imports/<campaign-id>
+# coloque as imagens em imports/<campaign-id>/images e preencha image-import.json
+uv run auraly image import-batch --input imports/<campaign-id>/image-import.json --dry-run
+uv run auraly image import-batch --input imports/<campaign-id>/image-import.json
+```
+
+O comando só processa o lote quando chamado. Os arquivos originais permanecem intactos; um
+manifest inválido não publica nem persiste nada, e repetir o mesmo lote reutiliza os candidatos.
+
 ## Próximo slice de desenvolvimento
 
-O próximo Goal é **D1 — Manual Image Batch Intake**:
-
-1. importar uma pasta de imagens sem mover ou sobrescrever os originais;
-2. correlacionar arquivos com variantes por um manifest batch explícito;
-3. validar extensão, dimensão, orientação, hash, duplicidade e cobertura;
-4. persistir cada imagem importada como candidata selecionada/aprovada;
-5. expor dry-run e resumo JSON pela CLI;
-6. deixar a campanha pronta para o primeiro Goal HeyGen.
+O próximo Goal é **D2A — HeyGen Contract, Preflight & Asset Reuse**: definir a fronteira oficial
+do provider e reutilizar por hash as imagens importadas e o Voice Master aprovado.
 
 O escopo completo e os critérios de saída estão em
 [`docs/GOAL-ROADMAP.md`](docs/GOAL-ROADMAP.md).
@@ -152,7 +159,7 @@ O projeto distingue:
 - `LOCAL_VERIFIED`: o baseline determinístico passou;
 - `PROVIDER_VERIFIED`: um canário real autorizado passou.
 
-Goals 0–3 e 4A–4C estão implementados e verificados localmente. ElevenLabs e Google Flow ainda
+Goals 0–3, 4A–4C e D1 estão implementados e verificados localmente. ElevenLabs e Google Flow ainda
 não têm canário real registrado neste repositório. Nenhuma capacidade do novo roadmap deve ser
 tratada como entregue antes de código, testes e evidência correspondente.
 

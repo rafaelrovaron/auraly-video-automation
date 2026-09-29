@@ -89,11 +89,10 @@ opt-in.
 
 O esforço ativo passa a ser:
 
-1. import batch de imagens;
-2. HeyGen em escala;
-3. edição configurável e A/B de headline;
-4. interface local simples;
-5. render e piloto end-to-end.
+1. HeyGen em escala;
+2. edição configurável e A/B de headline;
+3. interface local simples;
+4. render e piloto end-to-end.
 
 ### 3.2 Por que
 
@@ -129,6 +128,18 @@ Campaign + Copy Master
 ```
 
 Falha ou atraso na automação Flow não bloqueia nenhum estágio desse caminho.
+
+### 4.1 Manual Image Batch Intake entregue
+
+D1 está `IMPLEMENTED` e `LOCAL_VERIFIED`. O fluxo explícito é:
+
+```text
+prepare-import → adicionar imagens/preencher paths → import-batch --dry-run → import-batch
+```
+
+O manifest versionado associa `variantId` a path relativo. A importação valida cobertura, mídia e
+orientação, preserva os sources, publica por hash e persiste `ImageCandidate` manual em uma única
+transação. Reruns idênticos reutilizam arquivos e candidatos. D2A é o próximo Goal.
 
 ## 5. Contrato de importação batch de imagens
 

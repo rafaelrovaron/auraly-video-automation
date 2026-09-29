@@ -50,8 +50,8 @@ MVP sem um Goal específico aprovado.
 
 ```text
 D0  Documentation Alignment                    DONE
-D1  Manual Image Batch Intake                  NEXT
-D2A HeyGen Contract, Preflight & Asset Reuse
+D1  Manual Image Batch Intake                  DONE
+D2A HeyGen Contract, Preflight & Asset Reuse   NEXT
 D2B HeyGen Batch Generation, Polling & Download
 D2C HeyGen Real Canary
 D3A EditProfile, EditManifest & Override Resolution
@@ -88,7 +88,7 @@ Separar o estado entregue do novo roadmap e tornar o próximo slice inequívoco.
 
 ## D1 — Manual Image Batch Intake
 
-**Status:** `PLANNED` — próximo Goal.
+**Status:** `IMPLEMENTED`, `LOCAL_VERIFIED`.
 
 ### Objetivo
 
@@ -105,9 +105,9 @@ Transformar uma pasta de imagens criadas manualmente em assets de campanha pront
 - seleção/aprovação explícita na importação;
 - idempotência por campaign + variant + content hash;
 - CLI JSON `image import-batch` e consultas existentes atualizadas;
-- migration somente se o modelo atual não conseguir representar provenance de importação.
-- atualização futura da boundary de imagens no `AGENTS.md` somente depois que D1 existir; este
-  replanejamento não altera esse arquivo.
+- migration de provenance manual e ownership direto da SceneVariant;
+- comandos JSON `image prepare-import`, `image import-batch` e
+  `export-image-import-schema` entregues.
 
 ### Explicitamente excluído
 
@@ -142,7 +142,7 @@ uv run python scripts/verify.py full
 
 ## D2A — HeyGen Contract, Preflight & Asset Reuse
 
-**Status:** `PLANNED`.
+**Status:** `PLANNED` — próximo Goal.
 
 ### Objetivo
 

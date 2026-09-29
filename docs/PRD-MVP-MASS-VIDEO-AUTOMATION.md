@@ -24,13 +24,13 @@ genérico e não terá timeline estilo CapCut ou preview frame-perfect.
 - Voice Master via ElevenLabs API;
 - WAV processado com trim de silêncio nas bordas, normalização e QC;
 - domínio/review de imagens;
+- importação batch de imagens manuais, dry-run, provenance e CLI JSON;
 - automação Google Flow implementada e localmente verificada;
 - contrato `edit.json` legado, ingestão e inspeção de mídia;
 - CLI e harness de verificação.
 
 ### 2.2 Capacidade alvo deste PRD
 
-- importação batch de imagens manuais;
 - uploads e geração HeyGen em batch;
 - polling retomável e download dos MP4;
 - EditProfile + EditManifest + overrides;
@@ -774,12 +774,12 @@ uma camada genérica antes de existir necessidade.
 
 A sequência executável é mantida exclusivamente em `docs/GOAL-ROADMAP.md`:
 
-1. D1 Manual Image Batch Intake;
-2. D2A/D2B/D2C HeyGen;
+1. D1 Manual Image Batch Intake — entregue;
+2. D2A/D2B/D2C HeyGen — próximo;
 3. D3A/D3B edição e A/B;
 4. D4A/D4B API/UI e preview;
 5. D5A/D5B render/QC/delivery;
 6. D6 piloto end-to-end.
 
-O primeiro trabalho de implementação deve ser o design do D1. Nenhuma decisão de D2–D6 precisa
-ser antecipada para iniciar esse Goal.
+D2A é o próximo trabalho de implementação. Nenhuma decisão de D2B–D6 precisa ser antecipada para
+iniciar esse Goal.
