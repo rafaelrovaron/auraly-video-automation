@@ -15,6 +15,8 @@ from auraly_pipeline.campaigns.domain import CampaignCreate
 from auraly_pipeline.campaigns.persistence import default_database_path
 from auraly_pipeline.campaigns.service import CampaignError, CampaignService
 from auraly_pipeline.flow import FLOW_URL, FlowPreflightService, FlowWorkspaceIdentity
+from auraly_pipeline.heygen.provider import HeyGenProviderFailure
+from auraly_pipeline.heygen.service import HeyGenService, HeyGenServiceError
 from auraly_pipeline.image_generation import (
     DEFAULT_RETRY_COUNT,
     DEFAULT_TIMEOUT_SECONDS,
@@ -92,6 +94,10 @@ flow_app = typer.Typer(
     help="Safely inspect the local Google Flow browser runtime.", no_args_is_help=True
 )
 app.add_typer(flow_app, name="flow")
+heygen_app = typer.Typer(
+    help="Connect HeyGen and prepare reusable remote assets.", no_args_is_help=True
+)
+app.add_typer(heygen_app, name="heygen")
 
 
 @app.command("ingest")
@@ -221,6 +227,125 @@ def _configure_image_logging() -> None:
 
 def _json_echo(payload: dict[str, object]) -> None:
     typer.echo(json.dumps(payload, indent=2, ensure_ascii=False, sort_keys=True, allow_nan=False))
+
+
+def _heygen_service(database: Path, work_root: Path) -> HeyGenService:
+    return HeyGenService.for_database(database, work_root)
+
+
+def _heygen_failure() -> None:
+    _json_echo({"success": False, "error": "The HeyGen operation failed safely."})
+
+
+@heygen_app.command("status")
+def heygen_status_command(
+    database: Annotated[Path, typer.Option("--database")] = default_database_path(),
+    work_root: Annotated[Path, typer.Option("--work-root")] = Path("work"),
+) -> None:
+    service = _heygen_service(database, work_root)
+    try:
+        _json_echo({"success": True, "connected": service.connection_status()})
+    except Exception:
+        _heygen_failure()
+        raise typer.Exit(code=1) from None
+    finally:
+        service.close()
+
+
+@heygen_app.command("connect")
+def heygen_connect_command(
+    database: Annotated[Path, typer.Option("--database")] = default_database_path(),
+    work_root: Annotated[Path, typer.Option("--work-root")] = Path("work"),
+) -> None:
+    service = _heygen_service(database, work_root)
+    try:
+        payload = service.connect().model_dump(mode="json", by_alias=True)
+        _json_echo({"success": True, **payload})
+    except (HeyGenProviderFailure, HeyGenServiceError, Exception):
+        _heygen_failure()
+        raise typer.Exit(code=1) from None
+    finally:
+        service.close()
+
+
+@heygen_app.command("disconnect")
+def heygen_disconnect_command(
+    database: Annotated[Path, typer.Option("--database")] = default_database_path(),
+    work_root: Annotated[Path, typer.Option("--work-root")] = Path("work"),
+) -> None:
+    service = _heygen_service(database, work_root)
+    try:
+        service.disconnect()
+        _json_echo({"success": True, "connected": False})
+    except Exception:
+        _heygen_failure()
+        raise typer.Exit(code=1) from None
+    finally:
+        service.close()
+
+
+@heygen_app.command("preflight")
+def heygen_preflight_command(
+    database: Annotated[Path, typer.Option("--database")] = default_database_path(),
+    work_root: Annotated[Path, typer.Option("--work-root")] = Path("work"),
+) -> None:
+    service = _heygen_service(database, work_root)
+    try:
+        payload = service.preflight().model_dump(mode="json", by_alias=True)
+        _json_echo({"success": True, **payload})
+    except Exception:
+        _heygen_failure()
+        raise typer.Exit(code=1) from None
+    finally:
+        service.close()
+
+
+@heygen_app.command("prepare-assets")
+def heygen_prepare_assets_command(
+    campaign_id: Annotated[str, typer.Argument()],
+    database: Annotated[Path, typer.Option("--database")] = default_database_path(),
+    work_root: Annotated[Path, typer.Option("--work-root")] = Path("work"),
+    yes: Annotated[bool, typer.Option("--yes", help="Submit without prompting.")] = False,
+) -> None:
+    service = _heygen_service(database, work_root)
+    try:
+        plan = service.plan_assets(campaign_id)
+        plan_payload = plan.model_dump(mode="json", by_alias=True)
+        if plan.upload_sources and not yes and not typer.confirm(
+            "Submit HeyGen asset upload?", err=True
+        ):
+            _json_echo({"success": True, "submitted": False, "plan": plan_payload})
+            return
+        submission = service.submit_assets(plan)
+        _json_echo(
+            {
+                "success": True,
+                "submitted": submission.job is not None,
+                "submission": submission.model_dump(mode="json", by_alias=True),
+            }
+        )
+    except Exception:
+        _heygen_failure()
+        raise typer.Exit(code=1) from None
+    finally:
+        service.close()
+
+
+@heygen_app.command("reconcile")
+def heygen_reconcile_command(
+    job_id: Annotated[str, typer.Argument()],
+    database: Annotated[Path, typer.Option("--database")] = default_database_path(),
+    work_root: Annotated[Path, typer.Option("--work-root")] = Path("work"),
+) -> None:
+    service = _heygen_service(database, work_root)
+    try:
+        job = service.reconcile_upload(job_id)
+        _json_echo({"success": True, "job": job.model_dump(mode="json", by_alias=True)})
+    except Exception:
+        _heygen_failure()
+        raise typer.Exit(code=1) from None
+    finally:
+        service.close()
 
 
 def _flow_preflight_boundary_failure_payload() -> dict[str, object]:
