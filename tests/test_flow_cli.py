@@ -47,11 +47,10 @@ _ANSI_ESCAPE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 
 
 def _run_auraly(*arguments: str) -> subprocess.CompletedProcess[str]:
-    """Run the installed entrypoint; CliRunner does not capture Rich help on Linux."""
+    """Run the CLI in a subprocess; CliRunner does not capture Rich help on Linux."""
 
-    entrypoint_name = "auraly.exe" if sys.platform == "win32" else "auraly"
     return subprocess.run(
-        [str(Path(sys.executable).with_name(entrypoint_name)), *arguments],
+        [sys.executable, "-m", "auraly_pipeline.cli", *arguments],
         capture_output=True,
         check=False,
         cwd=Path(__file__).parents[1],
