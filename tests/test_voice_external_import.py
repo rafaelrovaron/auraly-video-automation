@@ -274,3 +274,54 @@ def test_import_is_local_ready_only_after_processing(tmp_path: Path) -> None:
         engine.dispose()
         service.close()
         voices.close()
+
+
+def test_import_preserves_preexisting_processing_partial(tmp_path: Path) -> None:
+    service, voices, source, request = setup_import(tmp_path)
+    try:
+        submitted = service.import_audio(request, source=source)
+        folder = (
+            source.parent
+            / "work"
+            / "campaigns"
+            / request.campaign_id
+            / "voice"
+            / submitted.voice_master.voice_master_id
+        )
+        partial = folder / "processed" / "voice-master.wav.partial"
+        partial.parent.mkdir()
+        partial.write_bytes(b"existing-user-file")
+        job = service.worker_once("partial-test", campaign_id=request.campaign_id)
+        assert partial.read_bytes() == b"existing-user-file"
+        assert job is not None and job.status == "failed"
+        assert voices.get(submitted.voice_master.voice_master_id).status == "failed"
+    finally:
+        service.close()
+        voices.close()
+
+
+def test_import_rejects_preexisting_voice_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from uuid import UUID
+    from auraly_pipeline.voices import import_audio
+
+    service, voices, source, request = setup_import(tmp_path)
+    voice_id = UUID("11111111-1111-4111-8111-111111111111")
+    monkeypatch.setattr(import_audio, "uuid5", lambda namespace, name: voice_id)
+    folder = source.parent / "work" / "campaigns" / request.campaign_id / "voice" / str(voice_id)
+    partial = folder / "processed" / "voice-master.wav.partial"
+    partial.parent.mkdir(parents=True)
+    partial.write_bytes(b"keep-existing")
+    engine = create_sqlite_engine(tmp_path / "test.db")
+    try:
+        with pytest.raises(Exception):
+            service.import_audio(request, source=source)
+        assert partial.read_bytes() == b"keep-existing"
+        assert voices.list(campaign_id=request.campaign_id) == []
+        with engine.connect() as connection:
+            assert connection.scalar(text("SELECT count(*) FROM jobs")) == 0
+    finally:
+        engine.dispose()
+        service.close()
+        voices.close()

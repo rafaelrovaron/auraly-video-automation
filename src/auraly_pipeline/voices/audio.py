@@ -299,8 +299,12 @@ def process_voice_audio(raw_path: Path, output_path: Path) -> AudioProcessingRep
     finally:
         if reservation_fd is not None:
             os.close(reservation_fd)
-    if temporary.exists():
-        temporary.unlink()
+    try:
+        with temporary.open("xb"):
+            pass
+    except OSError as exc:
+        output_path.unlink(missing_ok=True)
+        raise AudioProcessingError(AudioProcessingError.public_message) from exc
     result = _run(
         [
             "ffmpeg",

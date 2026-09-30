@@ -167,7 +167,8 @@ class VoiceImportService:
                 / f"source.{audio_format}"
             )
             raw = _safe_path(self._work_root / relative, self._work_root)
-            raw.parent.mkdir(parents=True, exist_ok=True)
+            raw.parent.parent.mkdir(parents=True, exist_ok=False)
+            raw.parent.mkdir(exist_ok=False)
             with raw.open("xb") as target:
                 target.write(data)
                 target.flush()
