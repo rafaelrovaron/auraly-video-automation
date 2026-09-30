@@ -1,6 +1,6 @@
 # Auraly Mass Video Pipeline — Memória do Projeto
 
-**Atualizado em:** 2026-09-29
+**Atualizado em:** 2026-09-30
 **Decisão vigente:** MVP delivery-first para uso local e pessoal
 
 Este documento guarda decisões duráveis e fatos verificados. O estado entregue aparece separado
@@ -50,6 +50,18 @@ não se comportar como um SaaS multiusuário.
 - loudness, true peak, silêncio, duração, WPM, hashes e transcript diff persistidos;
 - aprovação humana obrigatória;
 - budget gate, reconciliação e proteção contra geração paga duplicada.
+
+Extensão de importação externa: CLI `voice import` submete um job local `voice.import`, e
+`voice run-import` processa apenas essa campanha/tipo. MP3/WAV até 100 MiB sob project root
+confiável, original preservado, cópia exclusiva com hash e origem `imported`, sem provider ID
+ElevenLabs. Decodificação integral para WAV intermediário reutiliza o processamento existente;
+trim somente nas bordas, mono/48 kHz/24-bit. `local_ready` somente após publicação completa.
+QC usa transcrição independente faster-whisper e aprovação humana existente; jamais auto-approve.
+Replay verifica artefatos e reutiliza job/voz; falha é explícita e sem retry automático.
+
+O runtime nativo de transcrição já apresentou bloqueio pelo Windows Application Control.
+Não contornar nem usar a copy esperada como transcrição: sem ASR real disponível, o canário para.
+Integração com HeyGen usa o mesmo WAV aprovado por hash; testes fake não provam o provider real.
 
 Artefato canônico reutilizável pelo HeyGen:
 
@@ -180,7 +192,10 @@ Hardlink publica sem overwrite; publication.json fixa identidade/hash antes do M
 fecha o manifest antes de ready. Crash entre publicação e commit recupera sem novo download.
 
 Interface: `heygen plan-videos|generate-videos|run-videos|videos|reconcile-video`. Generate reserva;
-run pode consumir créditos. Canário D2C segue pendente de autorização; editor/UI não entregues.
+run pode consumir créditos. Canário D2C tem autorização de consumo limitado, mas não foi executado;
+editor/UI não entregues. O primeiro canário planejado tem teto de um render e concorrência um.
+Há conflito de pré-requisito: CampaignCreate exige três cenas e o planner HeyGen inclui todas.
+Resolver com ajuste separado aprovado, sem burlar validação nem elevar o teto autorizado.
 
 ## 5. Contrato de importação batch de imagens
 

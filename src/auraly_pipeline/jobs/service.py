@@ -147,6 +147,7 @@ class JobService:
                 LocalFakeImageGenerateHandler,
             )
             from auraly_pipeline.voices.handler import VoiceGenerateHandler
+            from auraly_pipeline.voices.import_audio import VoiceImportHandler
 
             resolved_handlers = default_fake_handlers()
             resolved_handlers["heygen.video.generate"] = HeyGenVideoHandler(
@@ -162,6 +163,10 @@ class JobService:
             )
             resolved_handlers["image.generate"] = ImageGenerateHandler(local_fake, flow)
             resolved_handlers["voice.generate"] = VoiceGenerateHandler(
+                session_factory,
+                work_root=configured_work_root(work_root),
+            )
+            resolved_handlers["voice.import"] = VoiceImportHandler(
                 session_factory,
                 work_root=configured_work_root(work_root),
             )

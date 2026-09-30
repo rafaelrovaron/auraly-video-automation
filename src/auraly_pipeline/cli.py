@@ -214,9 +214,7 @@ def export_image_generation_schema_command(
 
 @app.command("export-image-import-schema")
 def export_image_import_schema_command(
-    output: Annotated[Path, typer.Option("--output")] = Path(
-        "schemas/image-import.schema.json"
-    ),
+    output: Annotated[Path, typer.Option("--output")] = Path("schemas/image-import.schema.json"),
 ) -> None:
     """Export the manual image-import manifest schema."""
     path = export_image_import_schema(output)
@@ -317,8 +315,10 @@ def heygen_prepare_assets_command(
         plan = service.plan_assets(campaign_id)
         plan_payload = plan.model_dump(mode="json", by_alias=True)
         _json_echo({"plan": plan_payload}, err=True)
-        if plan.upload_sources and not yes and not typer.confirm(
-            "Submit HeyGen asset upload?", err=True
+        if (
+            plan.upload_sources
+            and not yes
+            and not typer.confirm("Submit HeyGen asset upload?", err=True)
         ):
             _json_echo({"success": True, "submitted": False, "plan": plan_payload})
             return
@@ -604,9 +604,7 @@ def _image_generate(
         if provider_workspace_path is not None:
             workspace = FlowWorkspaceIdentity(
                 workspace_path=provider_workspace_path,
-                fingerprint=hashlib.sha256(
-                    provider_workspace_path.encode("utf-8")
-                ).hexdigest(),
+                fingerprint=hashlib.sha256(provider_workspace_path.encode("utf-8")).hexdigest(),
             )
         request = ImageGenerateRequest(
             campaign_id=campaign_id,
@@ -624,9 +622,7 @@ def _image_generate(
             provider_action_confirmed=confirm_provider_action,
             provider_action_approved_by=provider_action_approved_by,
             provider_workspace_path=(None if workspace is None else workspace.workspace_path),
-            provider_workspace_fingerprint=(
-                None if workspace is None else workspace.fingerprint
-            ),
+            provider_workspace_fingerprint=(None if workspace is None else workspace.fingerprint),
         )
         service = _image_service(database, work_root)
         submission = service.regenerate(request) if regenerate else service.generate(request)
@@ -648,18 +644,14 @@ def image_generate_command(
     idempotency_key: Annotated[str, typer.Option("--idempotency-key")],
     prompt_snapshot: Annotated[str, typer.Option("--prompt-snapshot")],
     reference_image_path: Annotated[str | None, typer.Option("--reference-image-path")] = None,
-    reference_image_sha256: Annotated[
-        str | None, typer.Option("--reference-image-sha256")
-    ] = None,
+    reference_image_sha256: Annotated[str | None, typer.Option("--reference-image-sha256")] = None,
     executor: Annotated[
         Literal["local-fake", "playwright-python"], typer.Option("--executor")
     ] = "local-fake",
     provider_action_approved_by: Annotated[
         str | None, typer.Option("--provider-action-approved-by")
     ] = None,
-    confirm_provider_action: Annotated[
-        bool, typer.Option("--confirm-provider-action")
-    ] = False,
+    confirm_provider_action: Annotated[bool, typer.Option("--confirm-provider-action")] = False,
     provider_workspace_path: Annotated[
         str | None, typer.Option("--provider-workspace-path")
     ] = None,
@@ -691,18 +683,14 @@ def image_regenerate_command(
     idempotency_key: Annotated[str, typer.Option("--idempotency-key")],
     prompt_snapshot: Annotated[str, typer.Option("--prompt-snapshot")],
     reference_image_path: Annotated[str | None, typer.Option("--reference-image-path")] = None,
-    reference_image_sha256: Annotated[
-        str | None, typer.Option("--reference-image-sha256")
-    ] = None,
+    reference_image_sha256: Annotated[str | None, typer.Option("--reference-image-sha256")] = None,
     executor: Annotated[
         Literal["local-fake", "playwright-python"], typer.Option("--executor")
     ] = "local-fake",
     provider_action_approved_by: Annotated[
         str | None, typer.Option("--provider-action-approved-by")
     ] = None,
-    confirm_provider_action: Annotated[
-        bool, typer.Option("--confirm-provider-action")
-    ] = False,
+    confirm_provider_action: Annotated[bool, typer.Option("--confirm-provider-action")] = False,
     provider_workspace_path: Annotated[
         str | None, typer.Option("--provider-workspace-path")
     ] = None,
@@ -744,9 +732,7 @@ def image_prepare_import_command(
         _image_failure("image_operation_failed", "The image operation failed safely.")
     finally:
         _close_image_import_service(service)
-    _json_echo(
-        {"success": True, **prepared.model_dump(by_alias=True, mode="json")}
-    )
+    _json_echo({"success": True, **prepared.model_dump(by_alias=True, mode="json")})
 
 
 @image_app.command("import-batch")
@@ -884,9 +870,7 @@ def image_candidate_get_command(
 @image_candidate_app.command("list")
 def image_candidate_list_command(
     image_generation_id: Annotated[str | None, typer.Argument()] = None,
-    scene_variant_id: Annotated[
-        str | None, typer.Option("--scene-variant-id")
-    ] = None,
+    scene_variant_id: Annotated[str | None, typer.Option("--scene-variant-id")] = None,
     database: Annotated[Path, typer.Option("--database")] = default_database_path(),
     work_root: Annotated[Path, typer.Option("--work-root")] = Path("work"),
 ) -> None:
@@ -979,6 +963,67 @@ def image_candidate_replace_approved_command(
     finally:
         _close_image_service(service)
     _json_echo({"success": True, "candidate": candidate.model_dump(by_alias=True, mode="json")})
+
+
+@voice_app.command("import")
+def voice_import_command(
+    campaign_id: Annotated[str, typer.Argument(help="Campaign ID")],
+    source: Annotated[Path, typer.Option("--source")],
+    copy_master_version: Annotated[int | None, typer.Option("--copy-master-version", min=1)] = None,
+    database: Annotated[Path, typer.Option("--database")] = default_database_path(),
+    project_root: Annotated[Path | None, typer.Option("--project-root")] = None,
+    work_root: Annotated[Path | None, typer.Option("--work-root")] = None,
+) -> None:
+    from auraly_pipeline.voices.domain import VoiceImportRequest
+    from auraly_pipeline.voices.import_audio import VoiceImportError, VoiceImportService
+
+    service: VoiceImportService | None = None
+    try:
+        request = VoiceImportRequest(
+            campaign_id=campaign_id, copy_master_version=copy_master_version
+        )
+        service = VoiceImportService.for_database(
+            database, project_root=project_root, work_root=work_root
+        )
+        submission = service.import_audio(request, source=source)
+    except Exception:
+        _voice_failure("voice_import_failed", VoiceImportError.public_message)
+    finally:
+        if service is not None:
+            service.close()
+    _json_echo(
+        {
+            "success": True,
+            "voiceMaster": submission.voice_master.model_dump(by_alias=True, mode="json"),
+            "job": submission.job.model_dump(by_alias=True, mode="json"),
+        }
+    )
+
+
+@voice_app.command("run-import")
+def voice_run_import_command(
+    campaign_id: Annotated[str, typer.Argument(help="Campaign ID")],
+    worker_id: Annotated[str, typer.Option("--worker-id")],
+    database: Annotated[Path, typer.Option("--database")] = default_database_path(),
+    work_root: Annotated[Path | None, typer.Option("--work-root")] = None,
+) -> None:
+    from auraly_pipeline.voices.import_audio import VoiceImportError, VoiceImportService
+
+    service: VoiceImportService | None = None
+    try:
+        service = VoiceImportService.for_database(database, work_root=work_root)
+        job = service.worker_once(worker_id, campaign_id=campaign_id)
+    except Exception:
+        _voice_failure("voice_import_failed", VoiceImportError.public_message)
+    finally:
+        if service is not None:
+            service.close()
+    _json_echo(
+        {
+            "success": True,
+            "job": None if job is None else job.model_dump(by_alias=True, mode="json"),
+        }
+    )
 
 
 @voice_app.command("generate")

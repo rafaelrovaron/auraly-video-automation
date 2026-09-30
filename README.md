@@ -18,6 +18,8 @@ entrega.
 - fila local retomável com idempotência, leases, retries e recuperação;
 - Voice Master automatizado pela API oficial da ElevenLabs, com processamento, QC, review e
   aprovação humana;
+- importação local de MP3/WAV externo como Voice Master, com origem `imported`, QC independente
+  e aprovação humana separada (sem chamada ElevenLabs);
 - WAV processado em mono/48 kHz, normalizado e com silêncio removido nas duas bordas;
 - domínio de imagens, candidatas, review e histórico persistente;
 - importação batch manual com manifest explícito, dry-run, provenance, aprovação opcional e
@@ -122,10 +124,44 @@ uv run auraly image import-batch --input imports/<campaign-id>/image-import.json
 O comando só processa o lote quando chamado. Os arquivos originais permanecem intactos; um
 manifest inválido não publica nem persiste nada, e repetir o mesmo lote reutiliza os candidatos.
 
+## Importar áudio externo
+
+Com a Copy Master já aprovada e o arquivo dentro do project root confiável:
+
+```powershell
+uv run python -m auraly_pipeline.cli voice import CAMPAIGN_ID --source caminho/para/hook.mp3
+uv run python -m auraly_pipeline.cli voice run-import CAMPAIGN_ID --worker-id Rafael
+uv run python -m auraly_pipeline.cli voice get VOICE_MASTER_ID
+uv run python -m auraly_pipeline.cli voice approve VOICE_MASTER_ID --approved-by Rafael
+uv run python -m auraly_pipeline.cli heygen prepare-assets CAMPAIGN_ID
+```
+
+Import aceita MP3/WAV de até 100 MiB e apenas submete um job local. O worker específico processa
+somente `voice.import` da campanha indicada. Original preservado; WAV mono/48 kHz/24-bit com
+normalização e trim nas bordas. Um MP3 CBR válido sem Xing pode ser importado sem mudar o gate
+da geração ElevenLabs. Replay idêntico reutiliza IDs e verifica os hashes; outra entrada é
+recusada enquanto houver uma voz ativa/aprovada. Não há retry automático ou auto-approve.
+
+O resultado é `review_required`, não uma aprovação. Whisper indisponível (inclusive bloqueio
+do Application Control no Windows) produz falha sanitizada, preservando os arquivos locais.
+Transcrição divergente ou headline falada impede aprovação; não substituir por texto manual.
+Confira `job.status`: `success: true` do worker significa que a consulta/execução retornou,
+não que um job `failed` passou no QC.
+
+Intake aceita `--project-root`, `--work-root` e `--database`; o worker aceita os dois últimos.
+Revisão/aprovação usam o work root configurado por `AURALY_PROJECT_ROOT`; se usar override no
+intake, mantenha a mesma configuração para aprovar e preparar assets. Não usar o worker genérico
+em uma fila real que também contenha jobs pagos.
+
 ## Próximo slice de desenvolvimento
 
 O próximo Goal é **D2C — HeyGen Real Canary**: validar uma geração real pequena com os assets
 aprovados, mediante autorização específica de consumo de créditos.
+
+A autorização de um canário limitado já foi dada, mas a execução permanece pendente de
+transcrição real, aprovações e OAuth. O contrato atual exige três cenas por campanha e o plano
+HeyGen inclui todas: o canário de uma cena/um render precisa de um ajuste aprovado separado,
+não de bypass de validação nem de aumento silencioso do consumo.
 
 O escopo completo e os critérios de saída estão em
 [`docs/GOAL-ROADMAP.md`](docs/GOAL-ROADMAP.md).
