@@ -208,6 +208,8 @@ class HeyGenMcpAdapter:
             if isinstance(value, dict):
                 if '$ref' in value and not str(value['$ref']).startswith('#/'):
                     raise ValueError('external schema references not supported')
+                if 'engine' in value.get('properties', {}):
+                    raise ValueError('selectable engine requires an explicit decision')
                 for child in value.values():
                     local_refs(child)
             elif isinstance(value, list):

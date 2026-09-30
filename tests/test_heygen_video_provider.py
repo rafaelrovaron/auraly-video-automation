@@ -127,3 +127,16 @@ def test_asset_preflight_stays_independent() -> None:
     from tests.test_heygen_provider import _adapter
 
     assert _adapter(session).preflight().connected
+
+
+@pytest.mark.parametrize("composition", ["allOf", "anyOf", "oneOf"])
+def test_composed_optional_engine_blocks_before_dispatch(composition: str) -> None:
+    session = VideoSession()
+    session.schema = {
+        **session.schema,
+        "additionalProperties": True,
+        composition: [{"properties": {"engine": {"enum": ["engine-a", "engine-b"]}}}],
+    }
+    with pytest.raises(HeyGenProviderFailure):
+        adapter(session).preflight_video(HeyGenVideoConfig())
+    assert not any(name == "create_video_from_image" for name, _ in session.calls)
