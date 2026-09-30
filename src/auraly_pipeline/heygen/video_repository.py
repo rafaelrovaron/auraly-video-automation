@@ -17,7 +17,7 @@ from auraly_pipeline.heygen.video_domain import (
     material_config_sha256,
     video_logical_key,
 )
-from auraly_pipeline.jobs.db_models import JobRow
+from auraly_pipeline.jobs.db_models import JobEventRow, JobRow
 from auraly_pipeline.metadata_security import validate_safe_error_message, validate_safe_identifier
 
 
@@ -117,18 +117,29 @@ class HeyGenVideoRepository:
         if isinstance(max_paid_renders, bool) or max_paid_renders < 1 or count > max_paid_renders:
             raise ValueError("approved render budget exceeded")
 
-    def _update(self, render_id: str, mutate: Callable[[HeyGenRenderRow], None]) -> HeyGenRender:
+    def _update(
+        self,
+        render_id: str,
+        mutate: Callable[[HeyGenRenderRow], None],
+        *,
+        session: Session | None = None,
+    ) -> HeyGenRender:
+        def apply(active: Session) -> HeyGenRender:
+            row = active.get(HeyGenRenderRow, render_id)
+            if row is None:
+                raise ValueError("render not found")
+            mutate(row)
+            row.updated_at = datetime.now(UTC)
+            active.flush()
+            return _domain(row)
+
         try:
-            with self._session_factory() as session:
-                session.execute(text("BEGIN IMMEDIATE"))
-                row = session.get(HeyGenRenderRow, render_id)
-                if row is None:
-                    raise ValueError("render not found")
-                mutate(row)
-                row.updated_at = datetime.now(UTC)
-                session.flush()
-                result = _domain(row)
-                session.commit()
+            if session is not None:
+                return apply(session)
+            with self._session_factory() as active:
+                active.execute(text("BEGIN IMMEDIATE"))
+                result = apply(active)
+                active.commit()
                 return result
         except IntegrityError:
             raise ValueError("render checkpoint conflict") from None
@@ -146,7 +157,7 @@ class HeyGenVideoRepository:
 
         return self._update(render_id, mutate)
 
-    def reset_no_dispatch(self, render_id: str) -> HeyGenRender:
+    def reset_no_dispatch(self, render_id: str, *, session: Session | None = None) -> HeyGenRender:
         def mutate(row: HeyGenRenderRow) -> None:
             if row.remote_video_id is not None:
                 raise ValueError("cannot reset known dispatch")
@@ -154,10 +165,15 @@ class HeyGenVideoRepository:
             row.status = "planned"
             row.error_code = None
 
-        return self._update(render_id, mutate)
+        return self._update(render_id, mutate, session=session)
 
     def record_video(
-        self, render_id: str, video_id: str, *, manual_binding: bool = False
+        self,
+        render_id: str,
+        video_id: str,
+        *,
+        manual_binding: bool = False,
+        session: Session | None = None,
     ) -> HeyGenRender:
         validate_safe_identifier(video_id, "video_id", max_length=200)
 
@@ -168,7 +184,7 @@ class HeyGenVideoRepository:
             row.manual_binding = int(manual_binding or bool(row.manual_binding))
             row.status = "processing"
 
-        return self._update(render_id, mutate)
+        return self._update(render_id, mutate, session=session)
 
     def set_status(
         self,
@@ -189,6 +205,44 @@ class HeyGenVideoRepository:
             row.error_message = error_message
 
         return self._update(render_id, mutate)
+
+    def rebind_recovery_job_in_session(
+        self,
+        session: Session,
+        render_id: str,
+        previous_job_id: str,
+        job: JobRow,
+    ) -> HeyGenRender:
+        def mutate(row: HeyGenRenderRow) -> None:
+            previous = session.get(JobRow, previous_job_id)
+            if (
+                previous is None
+                or previous.status != "blocked"
+                or previous.attempt_count < previous.max_attempts
+                or row.job_id != previous_job_id
+                or row.remote_video_id is None
+                or job.campaign_id != row.campaign_id
+                or job.scene_variant_id != row.scene_variant_id
+                or job.input_json != {"logical_key": row.logical_key}
+            ):
+                raise ValueError("existing video recovery checkpoint invalid")
+            row.job_id = job.id
+            row.status = "processing"
+            session.add(
+                JobEventRow(
+                    id=str(uuid4()),
+                    job_id=job.id,
+                    event_type="job.video_recovery_linked",
+                    timestamp=datetime.now(UTC),
+                    metadata_json={
+                        "previousJobId": previous_job_id,
+                        "renderId": row.id,
+                        "remoteVideoId": row.remote_video_id,
+                    },
+                )
+            )
+
+        return self._update(render_id, mutate, session=session)
 
     def record_source(self, render_id: str, source: VideoSource) -> HeyGenRender:
         def mutate(row: HeyGenRenderRow) -> None:

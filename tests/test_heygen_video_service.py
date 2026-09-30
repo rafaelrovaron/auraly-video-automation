@@ -74,11 +74,34 @@ def test_expired_url_resumes_same_id(tmp_path: Path, mp4: bytes) -> None:
     summary = service.run_videos("campaign-one")
     assert summary.blocked_count == 3
     ids = {r.render_id: r.remote_video_id for r in summary.renders}
+    original_jobs = {r.render_id: r.job_id for r in summary.renders}
+    for _ in range(2):
+        for render in summary.renders:
+            service.reconcile_video(render.render_id)
+        summary = service.run_videos("campaign-one")
+        assert summary.blocked_count == 3
     status[0] = 200
     for render in summary.renders:
-        service.reconcile_video(render.render_id)
+        resumed = service.reconcile_video(render.render_id)
+        assert resumed.job_id != original_jobs[render.render_id]
+        assert service._jobs.get_job(original_jobs[render.render_id]).status == "blocked"
+        recovery_job = service._jobs.get_job(resumed.job_id)
+        assert recovery_job.status == "queued"
+        assert any(
+            event.event_type == "job.video_recovery_linked"
+            and event.metadata["previousJobId"] == original_jobs[render.render_id]
+            for event in recovery_job.events
+        )
     assert service.run_videos("campaign-one").ready_count == 3
     assert {r.render_id: r.remote_video_id for r in service.list_videos("campaign-one")} == ids
+    assert provider.events.count("create_video") == 3
+    service.submit_videos(
+        "campaign-one",
+        HeyGenVideoConfig(resolution="720p"),
+        max_paid_renders=3,
+        approved_by="tester",
+    )
+    assert service.run_videos("campaign-one").ready_count == 3
     assert provider.events.count("create_video") == 3
     service.close()
 

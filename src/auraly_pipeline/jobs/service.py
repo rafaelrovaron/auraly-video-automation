@@ -465,7 +465,7 @@ class JobService:
             raise JobNotFoundError
         return self._to_domain(row)
 
-    def _resume_reconciled_job_in_session(
+    def resume_reconciled_job_in_session(
         self,
         session: Session,
         row: JobRow,
@@ -482,6 +482,8 @@ class JobService:
             )
         except InvalidJobTransition as exc:
             raise JobTransitionError from exc
+
+    _resume_reconciled_job_in_session = resume_reconciled_job_in_session
 
     def recover_stale_jobs(self) -> list[Job]:
         return [

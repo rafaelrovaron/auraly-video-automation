@@ -6,7 +6,7 @@ from pathlib import Path
 from uuid import uuid4
 
 import httpx
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from auraly_pipeline.campaigns.db_models import CampaignRow, SceneVariantRow
@@ -173,7 +173,7 @@ class HeyGenVideoService:
 
         def existing(job: Job) -> HeyGenRender:
             render = self._repo.find(str(job.input["logical_key"]))
-            if render is None or render.job_id != job.job_id:
+            if render is None:
                 raise ValueError("video job checkpoint missing")
             return render
 
@@ -252,8 +252,16 @@ class HeyGenVideoService:
         if resolved is None:
             if render.dispatch_started_at is not None:
                 raise ValueError("ambiguous dispatch requires exact video ID and manual binding")
-            render = self._repo.reset_no_dispatch(render_id)
-            self._jobs.resume_reconciled_job(render.job_id, reason="no_dispatch_proven")
+            with self._factory() as session:
+                session.execute(text("BEGIN IMMEDIATE"))
+                row = session.get(JobRow, render.job_id)
+                if row is None:
+                    raise ValueError("video job checkpoint missing")
+                self._jobs.resume_reconciled_job_in_session(
+                    session, row, reason="no_dispatch_proven"
+                )
+                render = self._repo.reset_no_dispatch(render_id, session=session)
+                session.commit()
             return render
         state = self._provider.get_video(resolved)
         if state.video_id != resolved:
@@ -269,6 +277,49 @@ class HeyGenVideoService:
                 raise ValueError("remote video material mismatch")
         if known_id is None and not confirm_manual_binding:
             raise ValueError("manual binding requires explicit confirmation")
-        render = self._repo.record_video(render_id, resolved, manual_binding=known_id is None)
-        self._jobs.resume_reconciled_job(render.job_id, reason="existing_dispatch_reconciled")
+        if job.attempt_count >= job.max_attempts:
+
+            def recover(session: Session, recovery_job: JobRow) -> HeyGenRender:
+                self._repo.record_video(
+                    render_id,
+                    resolved,
+                    manual_binding=known_id is None,
+                    session=session,
+                )
+                return self._repo.rebind_recovery_job_in_session(
+                    session,
+                    render_id,
+                    job.job_id,
+                    recovery_job,
+                )
+
+            return self._jobs.submit_linked_job(
+                JobSubmit(
+                    job_type="heygen.video.generate",
+                    campaign_id=render.item.campaign_id,
+                    scene_variant_id=render.item.scene_variant_id,
+                    idempotency_key="heygen.video.resume:" + job.job_id,
+                    input={"logical_key": render.logical_key},
+                    retry_safety=RetrySafety.RECONCILE_BEFORE_RETRY,
+                ),
+                recover,
+                lambda existing: self._repo.get(render_id),
+            ).linked
+        with self._factory() as session:
+            session.execute(text("BEGIN IMMEDIATE"))
+            row = session.get(JobRow, render.job_id)
+            if row is None:
+                raise ValueError("video job checkpoint missing")
+            self._jobs.resume_reconciled_job_in_session(
+                session,
+                row,
+                reason="existing_dispatch_reconciled",
+            )
+            render = self._repo.record_video(
+                render_id,
+                resolved,
+                manual_binding=known_id is None,
+                session=session,
+            )
+            session.commit()
         return render
