@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import subprocess
+import json
 from pathlib import Path
 
 import pytest
@@ -9,8 +10,81 @@ from auraly_pipeline.voices.audio import (
     PROCESSING_FILTER,
     AudioProcessingError,
     _require_complete_mp3,
+    probe_wav_duration,
     process_voice_audio,
 )
+from auraly_pipeline.voices import audio as audio_module
+
+
+@pytest.mark.parametrize("codec", ["pcm_s16le", "pcm_s24le", "pcm_s32le"])
+def test_probe_accepts_integer_pcm_wav(tmp_path: Path, codec: str) -> None:
+    audio = tmp_path / "voice.wav"
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-v",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=duration=1",
+            "-c:a",
+            codec,
+            str(audio),
+        ],
+        capture_output=True,
+        check=True,
+    )
+    assert probe_wav_duration(audio) == pytest.approx(1, abs=0.001)
+
+
+@pytest.mark.parametrize("codec,container", [("pcm_f32le", "wav"), ("libmp3lame", "mp3")])
+def test_probe_rejects_non_integer_wav_and_disguised_mp3(
+    tmp_path: Path, codec: str, container: str
+) -> None:
+    audio = tmp_path / "voice.wav"
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-v",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=duration=1",
+            "-c:a",
+            codec,
+            "-f",
+            container,
+            str(audio),
+        ],
+        capture_output=True,
+        check=True,
+    )
+    with pytest.raises(AudioProcessingError):
+        probe_wav_duration(audio)
+
+
+@pytest.mark.parametrize("duration", ["nan", "inf", "0", "-1"])
+def test_probe_rejects_invalid_duration(monkeypatch: pytest.MonkeyPatch, duration: str) -> None:
+    payload = {
+        "format": {"format_name": "wav", "duration": duration},
+        "streams": [
+            {
+                "codec_type": "audio",
+                "codec_name": "pcm_s24le",
+                "sample_rate": "48000",
+                "channels": 1,
+            }
+        ],
+    }
+    monkeypatch.setattr(
+        audio_module,
+        "_run",
+        lambda command: subprocess.CompletedProcess(command, 0, json.dumps(payload)),
+    )
+    with pytest.raises(AudioProcessingError):
+        probe_wav_duration(Path("voice.wav"))
 
 
 def _synthetic_mp3(path: Path) -> None:

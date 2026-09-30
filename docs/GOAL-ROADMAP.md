@@ -257,6 +257,11 @@ Validar o adapter e as suposições de payload contra um render real pequeno.
 - polling, download e QC do MP4;
 - registro sanitizado de IDs, custo e evidência.
 
+Preparação local: campanha com uma única cena, importação de imagem/Voice Master e validação
+do WAV PCM24 extensível. O teste integrado usa provider fake e reserva somente um render
+(`max_paid_renders=1`, concorrência 1), sem geração paga. Aprovações reais de copy, imagem e
+voz e preflight OAuth continuam necessários antes do canário; isto não é `PROVIDER_VERIFIED`.
+
 ### Saída
 
 - `PROVIDER_VERIFIED` somente após MP4 real íntegro;

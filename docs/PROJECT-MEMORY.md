@@ -27,6 +27,8 @@ não se comportar como um SaaS multiusuário.
 - Python 3.11, Pydantic, Typer, SQLAlchemy 2, Alembic e SQLite WAL;
 - contratos versionados, JSON Schemas e validação de paths;
 - Campaign, CopyMaster e SceneVariant persistentes;
+- campanhas aceitam uma ou mais cenas; lista vazia, IDs repetidos e locações repetidas
+  continuam inválidos. O canário pode usar uma cena sem alterar o banco;
 - Copy Master aprovada imutável e headline explicitamente visual-only;
 - ingestão que copia, nunca move ou sobrescreve sources;
 - `ffprobe` JSON, hashing e escrita atômica onde já implementados.
@@ -62,6 +64,9 @@ Replay verifica artefatos e reutiliza job/voz; falha é explícita e sem retry a
 O runtime nativo de transcrição já apresentou bloqueio pelo Windows Application Control.
 Não contornar nem usar a copy esperada como transcrição: sem ASR real disponível, o canário para.
 Integração com HeyGen usa o mesmo WAV aprovado por hash; testes fake não provam o provider real.
+Validação compartilhada do WAV usa `ffprobe` existente: aceita PCM inteiro, incluindo o PCM24
+extensível produzido pelo FFmpeg que `wave` do Python 3.11 não lê. Formato, duração finita
+positiva e tolerância de 50 ms continuam obrigatórios, além de hashes e aprovações existentes.
 Probe operacional em 2026-09-30: import nativo e modelo `small.en` já em cache carregaram;
 transcrição local do MP3 selecionado reconheceu fala sem download/créditos. O bloqueio anterior
 não se reproduziu. Isso não aprova a copy nem comprova o canário pago.
@@ -197,8 +202,8 @@ fecha o manifest antes de ready. Crash entre publicação e commit recupera sem 
 Interface: `heygen plan-videos|generate-videos|run-videos|videos|reconcile-video`. Generate reserva;
 run pode consumir créditos. Canário D2C tem autorização de consumo limitado, mas não foi executado;
 editor/UI não entregues. O primeiro canário planejado tem teto de um render e concorrência um.
-Há conflito de pré-requisito: CampaignCreate exige três cenas e o planner HeyGen inclui todas.
-Resolver com ajuste separado aprovado, sem burlar validação nem elevar o teto autorizado.
+O conflito histórico (CampaignCreate exigia três cenas) foi resolvido com ajuste separado
+aprovado para uma ou mais cenas; o planner continua incluindo todas, sem elevar o teto autorizado.
 
 ## 5. Contrato de importação batch de imagens
 

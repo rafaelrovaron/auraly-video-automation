@@ -15,12 +15,14 @@ entrega.
 - parser de Copy Master que mantém a headline fora da narração;
 - inspeção de mídia por `ffprobe`, ingestão não destrutiva e base de conhecimento local;
 - domínio e persistência SQLite para Campaign, CopyMaster, SceneVariant, Jobs e eventos;
+- campanhas com uma ou mais cenas, permitindo canário de uma imagem/um render sem migration;
 - fila local retomável com idempotência, leases, retries e recuperação;
 - Voice Master automatizado pela API oficial da ElevenLabs, com processamento, QC, review e
   aprovação humana;
 - importação local de MP3/WAV externo como Voice Master, com origem `imported`, QC independente
   e aprovação humana separada (sem chamada ElevenLabs);
 - WAV processado em mono/48 kHz, normalizado e com silêncio removido nas duas bordas;
+- validação HeyGen do WAV PCM inteiro via `ffprobe`, inclusive PCM24 extensível do FFmpeg;
 - domínio de imagens, candidatas, review e histórico persistente;
 - importação batch manual com manifest explícito, dry-run, provenance, aprovação opcional e
   replay idempotente;

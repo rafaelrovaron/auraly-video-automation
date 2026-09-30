@@ -6,7 +6,6 @@ from datetime import UTC, datetime
 import hashlib
 from pathlib import Path
 import time
-import wave
 
 import httpx
 from sqlalchemy import select
@@ -24,6 +23,7 @@ from auraly_pipeline.images.db_models import ImageCandidateRow
 from auraly_pipeline.jobs.db_models import JobRow
 from auraly_pipeline.jobs.domain import JobExecutionOutcome, JobExecutionResult, RetrySafety
 from auraly_pipeline.jobs.handlers import JobExecutionContext
+from auraly_pipeline.voices.audio import probe_wav_duration
 from auraly_pipeline.voices.db_models import VoiceMasterRow
 from auraly_pipeline.voices.domain import validate_workspace_path
 
@@ -73,8 +73,7 @@ def validate_video_item(
             raise ValueError("video requires approved matching copy")
         verified_video_path(root, image.source_path, item.image_sha256)
         audio_path = verified_video_path(root, voice.processed_audio_path, item.audio_sha256)
-        with wave.open(str(audio_path), "rb") as audio:
-            duration = audio.getnframes() / audio.getframerate()
+        duration = probe_wav_duration(audio_path)
         if duration <= 0 or abs(duration - item.duration_seconds) > 0.05:
             raise ValueError("processed WAV duration changed")
         for kind, sha, asset_id in [

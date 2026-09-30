@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import re
 import subprocess
@@ -133,6 +134,7 @@ def _run(command: list[str]) -> subprocess.CompletedProcess[str]:
 
 class _AudioProbeData(TypedDict):
     format: str
+    codec: str
     duration: float
     sample_rate: int
     channels: int
@@ -160,12 +162,28 @@ def _probe(path: Path) -> _AudioProbeData:
         duration = float(payload["format"]["duration"])
         return {
             "format": str(payload["format"].get("format_name", "unknown")).split(",")[0],
+            "codec": str(audio.get("codec_name", "unknown")),
             "duration": duration,
             "sample_rate": int(audio["sample_rate"]),
             "channels": int(audio["channels"]),
         }
     except (KeyError, StopIteration, TypeError, ValueError, json.JSONDecodeError) as exc:
         raise AudioProcessingError(AudioProcessingError.public_message) from exc
+
+
+def probe_wav_duration(path: Path) -> float:
+    """Validate integer PCM WAV, including FFmpeg's WAVE_FORMAT_EXTENSIBLE output."""
+    audio = _probe(path)
+    if (
+        audio["format"] != "wav"
+        or audio["codec"] not in {"pcm_u8", "pcm_s16le", "pcm_s24le", "pcm_s32le"}
+        or not math.isfinite(audio["duration"])
+        or audio["duration"] <= 0
+        or audio["sample_rate"] <= 0
+        or audio["channels"] <= 0
+    ):
+        raise AudioProcessingError(AudioProcessingError.public_message)
+    return audio["duration"]
 
 
 def _loudness(path: Path) -> tuple[float, float]:
