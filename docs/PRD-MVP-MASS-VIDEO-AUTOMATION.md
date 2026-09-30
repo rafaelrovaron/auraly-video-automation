@@ -778,7 +778,7 @@ A sequência executável é mantida exclusivamente em `docs/GOAL-ROADMAP.md`:
 
 1. D1 Manual Image Batch Intake — entregue;
 2. D2A HeyGen Contract, Preflight & Asset Reuse — entregue localmente;
-3. D2B HeyGen generation — entregue localmente; D2C canário — próximo;
+3. D2B HeyGen generation — entregue localmente; D2C canário — concluído com vínculo manual;
 4. D3A/D3B edição e A/B;
 5. D4A/D4B API/UI e preview;
 6. D5A/D5B render/QC/delivery;
@@ -789,10 +789,13 @@ download com QC. D2A/D2B estão `IMPLEMENTED` e `LOCAL_VERIFIED`; D2B passou no 
 13/13 em 2026-09-30 (1357 testes aprovados/18 skips) e revisão independente com correções.
 Reconciliação após esgotar tentativas locais pode adicionar um job histórico de recuperação,
 vinculado ao mesmo render/ID remoto, sem nova geração paga.
-D2C está em execução: em 2026-09-30, preflight e upload reais concluíram e uma geração autorizada
+D2C concluiu um canário: em 2026-09-30, preflight e upload reais concluíram e uma geração autorizada
 foi enviada, sem retry pago. Resposta sem ID verificável bloqueou para reconciliação; candidato
-concluído foi localizado por consulta MCP, mas vínculo manual exige confirmação humana.
-Download/QC pendentes: ainda não `PROVIDER_VERIFIED`. Gate atual 14/14 (1430 testes/19 skips).
+concluído foi localizado por consulta MCP e Rafael confirmou o vínculo manual.
+Download/QC passaram (1080×1920, H.264/AAC, 7,224 s, full decode); replay reutilizou o render
+sem nova reserva/dispatch. `PROVIDER_VERIFIED` para este canário com reconciliação manual,
+não para recuperação automática do ID nem escala real. Review visual continua humano.
+Gate atual 14/14 (1430 testes/19 skips).
 Voz importada permite aceitação humana auditável somente de `review_required` isolado, preservando
 ASR/QC/WAV/hashes; divergência grave, headline falada e outros achados continuam bloqueantes.
 UI/editor/A/B continuam capacidades alvo. Evidência em

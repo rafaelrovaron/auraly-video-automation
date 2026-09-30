@@ -56,8 +56,8 @@ D0  Documentation Alignment                    DONE
 D1  Manual Image Batch Intake                  DONE
 D2A HeyGen Contract, Preflight & Asset Reuse   DONE
 D2B HeyGen Batch Generation, Polling & Download LOCAL_VERIFIED
-D2C HeyGen Real Canary                         NEXT (exige aprovação paga)
-D3A EditProfile, EditManifest & Override Resolution
+D2C HeyGen Real Canary                         PROVIDER_VERIFIED (vínculo manual)
+D3A EditProfile, EditManifest & Override Resolution NEXT
 D3B Headline A/B Planning & Caption Inputs
 D4A FastAPI Operational API
 D4B React Operations UI & Approximate Preview
@@ -195,14 +195,14 @@ uv run auraly job worker-once --worker-id local-worker
 uv run auraly heygen reconcile JOB_ID
 ```
 
-OAuth/MCP é o caminho aprovado para o MVP pessoal e pequenos volumes. `PROVIDER_VERIFIED` continua
-ausente até D2C; nenhum canário real ou geração de vídeo é inferido dos testes locais.
+OAuth/MCP é o caminho aprovado para o MVP pessoal e pequenos volumes. Os testes locais não
+estabelecem `PROVIDER_VERIFIED`; a evidência real limitada está na seção D2C abaixo.
 
 ## D2B — HeyGen Batch Generation, Polling & Download
 
 **Status:** `IMPLEMENTED`, `LOCAL_VERIFIED` — gate Windows 13/13 em 2026-09-30,
 1357 testes aprovados/18 skips; revisão independente e correções verificadas.
-Canário real permanece D2C; não `PROVIDER_VERIFIED`.
+Evidência real posterior: D2C abaixo, um vídeo com reconciliação manual, não escala batch real.
 
 ### Objetivo
 
@@ -243,7 +243,7 @@ Gerar e baixar um MP4 HeyGen por variante, em lote retomável.
 
 ## D2C — HeyGen Real Canary
 
-**Status:** `IN_PROGRESS`; um envio real autorizado executado, vínculo manual/download/QC pendentes.
+**Status:** `PROVIDER_VERIFIED` para um vídeo com vínculo manual confirmado; review visual humano pendente.
 
 ### Objetivo
 
@@ -265,8 +265,10 @@ voz e preflight OAuth continuam necessários antes do canário; isto não é `PR
 Checkpoint 2026-09-30: voz aprovada com motivo auditável sem alterar evidência; OAuth/preflight
 reais e upload de imagem/WAV concluídos. Uma reserva, concorrência 1 e um dispatch de geração.
 Resposta sem ID verificável bloqueou corretamente, sem nova cobrança automática. Consulta MCP
-encontrou candidato concluído com duração 7,21733 s; confirmação humana é necessária para vínculo
-manual antes do download/QC. Gate 14/14; 1430 testes aprovados/19 skips. D3A continua planejado,
+encontrou candidato concluído com duração 7,21733 s. Rafael confirmou o vínculo manual; download/QC
+passaram (H.264/AAC, 1080×1920, 7,224 s, full decode). Replay sem novo dispatch/reserva.
+Resposta automática sem ID permanece limitação, não recuperação automática verificada.
+Gate 14/14; 1430 testes aprovados/19 skips. D3A continua planejado,
 não iniciado. Ver `docs/superpowers/2026-09-30-d2c-canary-verification.md`.
 
 ### Saída

@@ -31,13 +31,14 @@ entrega.
 - CLI `heygen connect|disconnect|status|preflight|prepare-assets|reconcile`;
 - D2B implementado: batch local de vídeo por variante, reserva de budget, polling/retomada,
   download HTTPS, QC H.264/AAC e publicação sem overwrite (`LOCAL_VERIFIED`);
+- D2C: canário real de um vídeo concluído com MCP/OAuth, vínculo manual confirmado, download/QC
+  e replay sem nova geração (`PROVIDER_VERIFIED` para este caso; revisão visual ainda humana);
 - runtime Google Flow/Playwright, geração, correlação de downloads e recuperação implementados e
   verificados com fixtures locais;
 - CLI JSON e harness de verificação para as capacidades acima.
 
 ### Não entregue ainda
 
-- conclusão do canário HeyGen real (D2C): envio executado, reconciliação manual pendente;
 - `EditProfile` reutilizável e resolução de overrides por vídeo/variante;
 - render final com headline, captions, música e framing configuráveis;
 - variações A/B de headline sem regenerar voz, imagem ou HeyGen;
@@ -160,14 +161,16 @@ em uma fila real que também contenha jobs pagos.
 
 ## Próximo slice de desenvolvimento
 
-O próximo Goal é **D2C — HeyGen Real Canary**: validar uma geração real pequena com os assets
-aprovados, mediante autorização específica de consumo de créditos.
+O próximo Goal de desenvolvimento é **D3A — EditProfile, EditManifest & Override Resolution**.
+Antes, revisar visualmente o vídeo do canário e decidir a integração da branch.
 
 A execução de 2026-09-30 aprovou o WAV existente com motivo auditável, completou upload de
 uma imagem e um áudio e despachou uma única geração, com concorrência 1. A resposta não
 forneceu ID verificável; o pipeline bloqueou, sem repetir a geração. A consulta MCP encontrou
 um vídeo concluído no horário do envio com duração 7,21733 s, mas sem callback/asset IDs.
-Vínculo manual exige confirmação; download/QC ainda pendentes. Isto não é `PROVIDER_VERIFIED`.
+Rafael confirmou o vínculo manual: download e QC concluíram, MP4 H.264/AAC 1080×1920 de
+7,224 s. Replay reutilizou o mesmo render sem outro dispatch/reserva. Este canário é
+`PROVIDER_VERIFIED`, mas não comprova recuperação automática do ID nem escala em lote real.
 Detalhes em [evidência D2C](docs/superpowers/2026-09-30-d2c-canary-verification.md).
 
 O escopo completo e os critérios de saída estão em

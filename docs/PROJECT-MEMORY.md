@@ -220,8 +220,12 @@ Gate completo: 14/14 etapas, 1430 testes aprovados/19 skips, revisão sem achado
 Upload real da imagem e WAV concluído. Uma reserva e um envio de geração foram executados;
 sem ID verificável na resposta, render ficou `reconciliation_required`. Consulta somente leitura
 encontrou um vídeo concluído no mesmo horário e com duração do WAV, sem correlação material
-exposta pelo MCP. Confirmação humana do vínculo manual, download e QC permanecem pendentes.
-Não marcar `PROVIDER_VERIFIED`, nem executar outra geração para resolver esta ambiguidade.
+exposta pelo MCP. Rafael confirmou o vínculo manual; download/QC concluíram e o render está
+`ready`: H.264/AAC, 1080×1920, 25 fps, 7,224 s, 3.603.735 bytes, full decode sem erros.
+Replay de plan/submit/run preservou o mesmo render, sem nova reserva ou chamada paga.
+`PROVIDER_VERIFIED` somente para este canário com reconciliação manual; a resposta automática
+de criação sem ID segue limitação conhecida, não resolvida por gerar outro vídeo.
+Revisão visual final continua humana; D3A é a próxima etapa planejada.
 Evidência: `docs/superpowers/2026-09-30-d2c-canary-verification.md`.
 
 Limitação menor da revisão: sanitização completa do motivo é garantida pelo serviço/domínio,

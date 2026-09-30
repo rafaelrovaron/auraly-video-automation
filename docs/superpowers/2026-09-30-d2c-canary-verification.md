@@ -1,4 +1,4 @@
-# D2C canary checkpoint — 2026-09-30
+# D2C canary result — 2026-09-30
 
 ## Deterministic evidence
 
@@ -16,6 +16,9 @@
   original transcript review retained.” Original ASR/QC/comparison and artifact hashes retained.
 - Processed WAV SHA-256: `f6399632aeba75c40db6dbda45eb6d376d388cdbb9df679084297cf12cc1ad44`.
 - WAV duration: 7.217333 seconds. No reimport, voice generation, ASR rerun or audio edit.
+- Database comparison against the pre-approval backup confirmed all original Voice Master
+  fields unchanged except status/approver/time; the added review reason is preserved. Final
+  database count is exactly one render reservation for this campaign.
 - Real OAuth asset/video preflight passed with matching hashed account identity.
 - One batch uploaded the existing image and WAV. Upload job
   `50617d9b-7085-4dd1-982b-588a896ae2bc`: completed, one attempt.
@@ -26,13 +29,22 @@
   `51010dfdc35da0a361b26167355c51cc`, created 23:26:16 UTC, completed, duration 7.21733 seconds.
   MCP does not expose its callback/image/audio identity. Time/duration alone are not an automatic
   binding guarantee: explicit human confirmation was requested before manual binding.
+- Rafael subsequently confirmed manual binding of that exact candidate. Existing service
+  reconciliation persisted the video ID and `manual_binding=true`; the same job resumed.
+- Download/publication/QC completed: render `ready`, H.264/AAC, 1080×1920, 25 fps,
+  duration 7.224 seconds, AAC 48 kHz stereo, 3,603,735 bytes, no probe warnings.
+- MP4 SHA-256: `721f35a2d054742d3600ca5dd6f61459a948bcf32bc1663641fcaabe377dba69`.
+- Full FFmpeg decode exited 0. Plan/submit/run replay returned the identical render with zero
+  new reservations. Replay used an adapter whose create method raises immediately; no new
+  paid call occurred. The original approved image/audio asset identities remain reused.
 - Actual credits consumed/currency were not measured; no monetary cost is inferred.
 
 ## Remaining work and status
 
-`IMPLEMENTED` and `LOCAL_VERIFIED`; **not `PROVIDER_VERIFIED`**. Await confirmation of the
-candidate ID, then reconcile the existing render, download and validate the MP4 through existing
-probe/full-decode QC. Do not generate another video. Human visual approval remains separate.
+`IMPLEMENTED`, `LOCAL_VERIFIED` and **`PROVIDER_VERIFIED` for this one-render canary with
+confirmed manual reconciliation**. Automatic create-response ID recovery and real multi-video
+scale are not verified by this result. Do not generate another video to resolve the original
+ambiguity. Human visual approval remains separate; D3A is the next planned development slice.
 No media, signed URLs, tokens or personal account data are committed. No merge/push performed.
 
 ## Review rulings and limitations
