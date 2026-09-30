@@ -15,7 +15,7 @@ from tests.test_heygen_video_domain import video_item
 class VideoSession(FakeSession):
     schema: dict[str, Any] = {
         "type": "object",
-        "required": ["image", "audio_asset_id"],
+        "required": ["image"],
         "additionalProperties": False,
         "properties": {
             "image": {
@@ -31,14 +31,14 @@ class VideoSession(FakeSession):
                     }
                 ]
             },
-            "audio_asset_id": {"type": "string"},
-            "aspect_ratio": {"enum": ["9:16", "16:9"]},
+            "audioAssetId": {"type": "string"},
+            "aspectRatio": {"enum": ["9:16", "16:9"]},
             "resolution": {"enum": ["720p", "1080p"]},
-            "output_format": {"enum": ["mp4"]},
+            "outputFormat": {"enum": ["mp4"]},
             "fit": {"enum": ["cover", "contain"]},
             "expressiveness": {"enum": ["medium", "high", "low"]},
-            "motion_prompt": {"type": "string"},
-            "callback_id": {"type": "string"},
+            "motionPrompt": {"type": "string"},
+            "callbackId": {"type": "string"},
             "title": {"type": "string"},
         },
     }
@@ -52,8 +52,8 @@ class VideoSession(FakeSession):
                     name="get_video",
                     input_schema={
                         "type": "object",
-                        "properties": {"video_id": {"type": "string"}},
-                        "required": ["video_id"],
+                        "properties": {"videoId": {"type": "string"}},
+                        "required": ["videoId"],
                     },
                 ),
             ]
@@ -80,8 +80,9 @@ def test_video_payload_exact() -> None:
     assert provider.create_video(item, callback_id="callback-one") == "video-one"
     payload = session.calls[-1][1]
     assert payload["image"] == {"type": "asset_id", "asset_id": "image-one"}
-    assert payload["audio_asset_id"] == "audio-one"
-    assert payload["aspect_ratio"] == "9:16"
+    assert payload["audioAssetId"] == "audio-one"
+    assert payload["aspectRatio"] == "9:16"
+    assert payload["callbackId"] == "callback-one"
     assert "idempotency_key" not in payload and "engine" not in payload
     session.responses["get_video"] = {
         "video_id": "video-one",
@@ -89,6 +90,7 @@ def test_video_payload_exact() -> None:
         "video_url": "https://signed.example/video?secret=value",
     }
     result = provider.get_video("video-one")
+    assert session.calls[-1] == ("get_video", {"videoId": "video-one"})
     assert result.download_url is not None
     assert "secret" not in result.model_dump_json()
 
@@ -98,7 +100,7 @@ def test_video_schema_requires_imported_audio() -> None:
     session.schema = {
         **session.schema,
         "properties": {
-            k: v for k, v in session.schema["properties"].items() if k != "audio_asset_id"
+            k: v for k, v in session.schema["properties"].items() if k != "audioAssetId"
         },
     }
     with pytest.raises(HeyGenProviderFailure):
@@ -127,6 +129,30 @@ def test_asset_preflight_stays_independent() -> None:
     from tests.test_heygen_provider import _adapter
 
     assert _adapter(session).preflight().connected
+
+
+def test_wrapped_paid_dispatch_timeout_remains_ambiguous() -> None:
+    class TimeoutVideoSession(VideoSession):
+        async def call_tool(self, name: str, arguments: dict[str, Any]) -> types.CallToolResult:
+            if name == "create_video_from_image":
+                raise TimeoutError("secret=value")
+            return await super().call_tool(name, arguments)
+
+    session = TimeoutVideoSession()
+
+    @asynccontextmanager
+    async def factory(interactive: bool) -> AsyncIterator[VideoSession]:
+        try:
+            yield session
+        except Exception as error:
+            raise ExceptionGroup("session failed", [error])
+
+    provider = HeyGenMcpAdapter(session_factory=factory)
+    preflight = provider.preflight_video(HeyGenVideoConfig())
+    with pytest.raises(HeyGenProviderFailure) as failure:
+        provider.create_video(video_item(account_ref=preflight.account_ref, schema_fingerprint=preflight.schema_fingerprint), callback_id="callback-one")
+    assert failure.value.kind == "ambiguous" and failure.value.request_dispatched
+    assert "secret=value" not in str(failure.value)
 
 
 @pytest.mark.parametrize("composition", ["allOf", "anyOf", "oneOf"])

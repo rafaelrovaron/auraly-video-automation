@@ -16,11 +16,11 @@ from auraly_pipeline.heygen.provider import HeyGenMcpAdapter, HeyGenProviderFail
 
 TOOLS: dict[str, dict[str, object]] = {
     "get_current_user": {},
-    "create_asset_upload_batch": {"files": {}, "idempotency_key": {}},
-    "complete_asset_batch": {"batch_id": {}},
-    "get_asset_batch": {"batch_id": {}},
-    "bulk_asset_statuses": {"asset_ids": {}, "batch_ids": {}},
-    "get_asset": {"asset_id": {}},
+    "create_asset_upload_batch": {"files": {"type": "array"}, "title": {"type": "string"}},
+    "complete_asset_batch": {"batchId": {"type": "string"}},
+    "get_asset_batch": {"batchId": {"type": "string"}, "token": {"type": "string"}},
+    "bulk_asset_statuses": {"assetIds": {"type": "string"}, "batchIds": {"type": "string"}},
+    "get_asset": {"assetId": {"type": "string"}},
 }
 IMAGE = AssetSource(
     source_id="00000000-0000-4000-8000-000000000001",
@@ -38,13 +38,13 @@ class FakeSession:
         self.calls: list[tuple[str, dict[str, Any]]] = []
         self.responses: dict[str, dict[str, Any]] = {
             "get_current_user": {
-                "id": "user@example.com",
-                "workspace_id": "workspace-1",
-                "credits": 12,
+                "username": "user-one",
+                "email": "user@example.com",
+                "subscription": {"credits": {"premium_credits": {"remaining": 12}, "add_on_credits": {"remaining": None}}},
             },
             "create_asset_upload_batch": {
                 "batch_id": "batch-1",
-                "files": [
+                "items": [
                     {
                         "asset_id": "asset-1",
                         "upload_url": "https://storage.example/upload",
@@ -56,10 +56,12 @@ class FakeSession:
             },
             "get_asset_batch": {
                 "batch_id": "batch-1",
-                "assets": [{"asset_id": "asset-1", "status": "completed"}],
+                "items": [{"video_id": "asset-1", "status": "completed", "error": None}],
+                "has_more": False,
             },
             "bulk_asset_statuses": {
-                "assets": [{"asset_id": "asset-1", "status": "completed"}],
+                "items": [{"video_id": "asset-1", "status": "completed", "error": None}],
+                "has_more": False,
             },
             "complete_asset_batch": {"ok": True},
         }
@@ -93,9 +95,10 @@ def test_preflight_requires_tools_and_fingerprints_account() -> None:
 
     assert preflight.connected
     assert preflight.account_ref == "account-" + __import__("hashlib").sha256(
-        b"workspace-1"
+        b"username:user-one"
     ).hexdigest()
     assert set(preflight.capabilities) == set(TOOLS)
+    assert preflight.credits_remaining == 12
     assert "example.com" not in preflight.model_dump_json()
 
 
@@ -106,7 +109,7 @@ def test_preflight_rejects_missing_tool_or_schema_field() -> None:
         _adapter(FakeSession(tools=missing_tool)).preflight()
 
     bad_schema = dict(TOOLS)
-    bad_schema["create_asset_upload_batch"] = {"files": {}}
+    bad_schema["create_asset_upload_batch"] = {"unsupported_files": {}}
     with pytest.raises(HeyGenProviderFailure, match="schema"):
         _adapter(FakeSession(tools=bad_schema)).preflight()
 
@@ -126,20 +129,19 @@ def test_allocate_maps_request_and_rejects_unsafe_response() -> None:
                     "checksum_sha256": "1" * 64,
                 }
             ],
-            "idempotency_key": "heygen.asset.upload:" + "a" * 64,
         },
     )
 
-    session.responses["create_asset_upload_batch"]["files"][0]["upload_url"] = (  # type: ignore[index]
+    session.responses["create_asset_upload_batch"]["items"][0]["upload_url"] = (  # type: ignore[index]
         "http://unsafe.example/upload"
     )
     with pytest.raises(HeyGenProviderFailure, match="invalid upload allocation"):
         _adapter(session).allocate_asset_batch([IMAGE], "heygen.asset.upload:" + "a" * 64)
 
-    session.responses["create_asset_upload_batch"]["files"][0]["upload_url"] = (  # type: ignore[index]
+    session.responses["create_asset_upload_batch"]["items"][0]["upload_url"] = (  # type: ignore[index]
         "https://storage.example/upload"
     )
-    session.responses["create_asset_upload_batch"]["files"][0]["max_bytes"] = 3  # type: ignore[index]
+    session.responses["create_asset_upload_batch"]["items"][0]["max_bytes"] = 3  # type: ignore[index]
     with pytest.raises(HeyGenProviderFailure, match="invalid upload allocation"):
         _adapter(session).allocate_asset_batch([IMAGE], "heygen.asset.upload:" + "a" * 64)
 
@@ -176,6 +178,56 @@ def test_parser_accepts_single_json_text_block() -> None:
 
     session.call_tool = call_tool  # type: ignore[method-assign]
     assert _adapter(session).preflight().connected
+
+
+def test_asset_transport_uses_camelcase_and_csv_ids() -> None:
+    session = FakeSession()
+    provider = _adapter(session)
+    provider.complete_asset_batch("batch-1", "local-key")
+    assert session.calls[-1] == ("complete_asset_batch", {"batchId": "batch-1"})
+    assert provider.get_asset_batch("batch-1").statuses == {"asset-1": ProviderAssetStatus.COMPLETED}
+    assert session.calls[-1] == ("get_asset_batch", {"batchId": "batch-1"})
+    provider.get_assets(["asset-1", "asset-2"])
+    assert session.calls[-1] == ("bulk_asset_statuses", {"assetIds": "asset-1,asset-2"})
+
+
+def test_parser_accepts_documented_data_envelopes() -> None:
+    assert HeyGenMcpAdapter._payload(types.CallToolResult(content=[], structured_content={"data": {"batch_id": "batch-one"}})) == {"batch_id": "batch-one"}
+    assert HeyGenMcpAdapter._payload(types.CallToolResult(content=[], structured_content={"data": [{"video_id": "asset-one", "status": "completed"}], "has_more": False})) == {"items": [{"video_id": "asset-one", "status": "completed"}], "has_more": False}
+
+
+@pytest.mark.parametrize("change", [{"has_more": True}, {"items": [{"video_id": None, "status": "completed"}]}, {"batch_id": "wrong-batch"}])
+def test_incomplete_or_wrong_batch_response_never_marks_assets_ready(change: dict[str, object]) -> None:
+    session = FakeSession()
+    session.responses["get_asset_batch"].update(change)
+    with pytest.raises(HeyGenProviderFailure):
+        _adapter(session).get_asset_batch("batch-1")
+
+
+def test_allocation_malformed_response_is_ambiguous() -> None:
+    session = FakeSession()
+    session.responses["create_asset_upload_batch"] = {}
+    with pytest.raises(HeyGenProviderFailure) as error:
+        _adapter(session).allocate_asset_batch([IMAGE], "local-key")
+    assert error.value.kind == "ambiguous" and error.value.request_dispatched
+
+
+def test_wrapped_allocation_timeout_remains_ambiguous() -> None:
+    class TimeoutSession(FakeSession):
+        async def call_tool(self, name: str, arguments: dict[str, Any]) -> types.CallToolResult:
+            raise TimeoutError("secret=value")
+
+    @asynccontextmanager
+    async def factory(interactive: bool) -> AsyncIterator[FakeSession]:
+        try:
+            yield TimeoutSession()
+        except Exception as error:
+            raise ExceptionGroup("session failed", [error])
+
+    with pytest.raises(HeyGenProviderFailure) as error:
+        HeyGenMcpAdapter(session_factory=factory).allocate_asset_batch([IMAGE], "local-key")
+    assert error.value.kind == "ambiguous" and error.value.request_dispatched
+    assert "secret=value" not in str(error.value)
 
 
 def test_fake_provider_covers_success_failure_timeout_and_ambiguity() -> None:

@@ -102,9 +102,13 @@ class HeyGenAssetUploadHandler:
                 "An approved local asset changed before upload.",
             )
 
+        existing = self._repository.find_by_keys(request.account_ref, request.sources)
+        if any(asset.status is not RemoteAssetStatus.READY for asset in existing):
+            return self._failure(JobExecutionOutcome.BLOCKED, "heygen_reconciliation_required",
+                                 "Existing HeyGen assets require reconciliation before retry.")
         ready = {
             (asset.kind, asset.sha256)
-            for asset in self._repository.find_by_keys(request.account_ref, request.sources)
+            for asset in existing
             if asset.status is RemoteAssetStatus.READY
         }
         pending = [

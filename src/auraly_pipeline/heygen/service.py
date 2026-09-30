@@ -207,17 +207,7 @@ class HeyGenService:
             )
         rows = self._assets.find_by_keys(request.account_ref, request.sources)
         if not rows:
-            allocation = self._provider.allocate_asset_batch(
-                request.sources, request.idempotency_key
-            )
-            self._assets.record_allocation(
-                request.account_ref,
-                allocation.batch_id,
-                request.sources,
-                allocation.slots,
-                job.updated_at,
-            )
-            rows = self._assets.list_by_batch(allocation.batch_id)
+            raise HeyGenServiceError("Unknown upload allocation requires manual reconciliation")
         batch_id = rows[0].remote_batch_id
         if not batch_id:
             raise HeyGenServiceError("Remote batch identity is unavailable")
@@ -227,19 +217,7 @@ class HeyGenService:
         except RemoteAssetPersistenceError as error:
             raise HeyGenServiceError("Remote batch status is incomplete") from error
         if all(status is ProviderAssetStatus.QUEUED for status in state.statuses.values()):
-            allocation = self._provider.allocate_asset_batch(
-                request.sources, request.idempotency_key
-            )
-            self._assets.record_allocation(
-                request.account_ref,
-                allocation.batch_id,
-                request.sources,
-                allocation.slots,
-                job.updated_at,
-            )
-            return self._jobs.resume_reconciled_job(
-                job_id, reason="remote_asset_batch_reconciled"
-            )
+            return job
         if any(
             asset.status in {RemoteAssetStatus.PROCESSING, RemoteAssetStatus.RECONCILIATION_REQUIRED}
             for asset in updated

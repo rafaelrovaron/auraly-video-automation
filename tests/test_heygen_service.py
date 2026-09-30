@@ -160,7 +160,7 @@ def test_reconcile_rejects_connected_account_change(tmp_path: Path) -> None:
     service.close()
 
 
-def test_reconcile_resumes_queued_checkpoint_with_same_allocation(tmp_path: Path) -> None:
+def test_reconcile_preserves_queued_checkpoint_without_reallocation(tmp_path: Path) -> None:
     database = tmp_path / "auraly.db"
     create_ready_campaign(database, tmp_path)
 
@@ -195,6 +195,24 @@ def test_reconcile_resumes_queued_checkpoint_with_same_allocation(tmp_path: Path
 
     reconciled = service.reconcile_upload(blocked.job_id)
 
-    assert reconciled.status is JobStatus.QUEUED
-    assert provider.events[-3:] == ["preflight", "poll", "allocate"]
+    assert reconciled.status is JobStatus.BLOCKED
+    assert provider.events[-2:] == ["preflight", "poll"]
+    assert provider.events.count("allocate") == 1
     service.close()
+
+
+def test_reconcile_unknown_allocation_never_recreates(tmp_path: Path) -> None:
+    database = tmp_path / "auraly.db"
+    create_ready_campaign(database, tmp_path)
+    provider = FakeHeyGenProvider(scenario="ambiguous")
+    service = HeyGenService.for_database(database, tmp_path, provider=provider)
+    try:
+        submitted = service.submit_assets(service.plan_assets("campaign-one"))
+        assert submitted.job is not None
+        job = service._jobs.worker_once("worker", job_type="heygen.asset.upload")
+        assert job is not None and job.status is JobStatus.BLOCKED
+        with pytest.raises(HeyGenServiceError):
+            service.reconcile_upload(job.job_id)
+        assert provider.events.count("allocate") == 1
+    finally:
+        service.close()

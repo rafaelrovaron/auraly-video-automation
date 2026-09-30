@@ -42,10 +42,10 @@ REQUIRED_TOOLS = {
     "get_asset",
 }
 _REQUIRED_PROPERTIES = {
-    "create_asset_upload_batch": {"files", "idempotency_key"},
-    "complete_asset_batch": {"batch_id"},
-    "get_asset_batch": {"batch_id"},
-    "get_asset": {"asset_id"},
+    "create_asset_upload_batch": {"files"},
+    "complete_asset_batch": {"batchId"},
+    "get_asset_batch": {"batchId"},
+    "get_asset": {"assetId"},
 }
 
 
@@ -126,7 +126,21 @@ class HeyGenMcpAdapter:
                     ) from error
         if not isinstance(payload, dict):
             raise HeyGenProviderFailure("terminal", "HeyGen returned an invalid response")
+        if isinstance(payload.get("data"), dict):
+            payload = payload["data"]
+        elif isinstance(payload.get("data"), list):
+            payload = {"items": payload["data"], **{key: value for key, value in payload.items() if key != "data"}}
         return cast(dict[str, Any], payload)
+
+    @staticmethod
+    def _account_ref(user: dict[str, Any]) -> str:
+        identity = user.get("workspace_id") or user.get("workspaceId") or user.get("id")
+        if identity is None and isinstance(user.get("username"), str) and user["username"].strip():
+            # ponytail: MCP exposes user identity, not workspace; prefer workspace ID if exposed later.
+            identity = "username:" + user["username"]
+        if not isinstance(identity, str) or not identity:
+            raise HeyGenProviderFailure("configuration", "HeyGen account identity is unavailable")
+        return "account-" + hashlib.sha256(identity.encode()).hexdigest()
 
     async def _call_tool(
         self, session: Any, name: str, arguments: dict[str, Any]
@@ -156,7 +170,7 @@ class HeyGenMcpAdapter:
                 bulk_properties = tools["bulk_asset_statuses"].input_schema.get(
                     "properties", {}
                 )
-                if not ({"asset_ids", "batch_ids"} & set(bulk_properties)):
+                if "assetIds" not in bulk_properties:
                     raise HeyGenProviderFailure(
                         "configuration", "Invalid HeyGen tool schema: bulk_asset_statuses"
                     )
@@ -168,11 +182,14 @@ class HeyGenMcpAdapter:
                 "configuration", "HeyGen OAuth connection is unavailable"
             ) from error
 
-        stable_id = user.get("workspace_id") or user.get("workspaceId") or user.get("id")
-        if not isinstance(stable_id, str) or not stable_id:
-            raise HeyGenProviderFailure("configuration", "HeyGen account identity is unavailable")
-        account_ref = "account-" + hashlib.sha256(stable_id.encode()).hexdigest()
+        account_ref = self._account_ref(user)
         credits = user.get("credits")
+        if not isinstance(credits, (int, float)):
+            subscription = user.get("subscription") or {}
+            credit_groups = subscription.get("credits") or {}
+            remaining = [(credit_groups.get(name) or {}).get("remaining") for name in ("premium_credits", "add_on_credits")]
+            numeric = [value for value in remaining if isinstance(value, (int, float)) and not isinstance(value, bool)]
+            credits = sum(numeric) if numeric else None
         return HeyGenPreflight(
             connected=True,
             account_ref=account_ref,
@@ -193,13 +210,13 @@ class HeyGenMcpAdapter:
     @staticmethod
     def _video_payload(config: HeyGenVideoConfig, image_id: str, audio_id: str, callback_id: str) -> dict[str, Any]:
         payload: dict[str, Any] = {
-            'image': {'type': 'asset_id', 'asset_id': image_id}, 'audio_asset_id': audio_id,
-            'aspect_ratio': config.aspect_ratio, 'resolution': config.resolution,
-            'output_format': config.output_format, 'fit': config.fit,
-            'expressiveness': config.expressiveness, 'callback_id': callback_id,
+            'image': {'type': 'asset_id', 'asset_id': image_id}, 'audioAssetId': audio_id,
+            'aspectRatio': config.aspect_ratio, 'resolution': config.resolution,
+            'outputFormat': config.output_format, 'fit': config.fit,
+            'expressiveness': config.expressiveness, 'callbackId': callback_id,
         }
         if config.motion_prompt is not None:
-            payload['motion_prompt'] = config.motion_prompt
+            payload['motionPrompt'] = config.motion_prompt
         return payload
 
     @staticmethod
@@ -232,12 +249,9 @@ class HeyGenMcpAdapter:
             raise HeyGenProviderFailure('configuration','Missing HeyGen video tools')
         schema = tools['create_video_from_image'].input_schema
         self._validate_video_schema(schema,payload or self._video_payload(config,'asset-preflight-image','asset-preflight-audio','preflight'))
-        self._validate_video_schema(tools['get_video'].input_schema,{'video_id':'video-preflight'})
+        self._validate_video_schema(tools['get_video'].input_schema,{'videoId':'video-preflight'})
         user = await self._call_tool(session,'get_current_user',{})
-        identity = user.get('workspace_id') or user.get('workspaceId') or user.get('id')
-        if not isinstance(identity,str) or not identity:
-            raise HeyGenProviderFailure('configuration','HeyGen account identity unavailable')
-        return VideoPreflight(account_ref='account-'+hashlib.sha256(identity.encode()).hexdigest(),
+        return VideoPreflight(account_ref=self._account_ref(user),
             schema_fingerprint=hashlib.sha256(json.dumps({name:tools[name].input_schema for name in ('create_video_from_image','get_video')},sort_keys=True,separators=(',',':')).encode()).hexdigest())
 
     def preflight_video(self, config: HeyGenVideoConfig) -> VideoPreflight:
@@ -254,11 +268,13 @@ class HeyGenMcpAdapter:
     def create_video(self, item: VideoPlanItem, *, callback_id: str) -> str:
         payload = self._video_payload(item.config,item.image_asset_id,item.audio_asset_id,callback_id)
         async def operation() -> str:
+            dispatched = False
             try:
                 async with self._session_factory(False) as session:
                     preflight = await self._video_session_preflight(session,item.config,payload)
                     if preflight.account_ref!=item.account_ref or preflight.schema_fingerprint!=item.schema_fingerprint:
                         raise HeyGenProviderFailure('configuration','HeyGen video account or schema changed')
+                    dispatched = True
                     try:
                         response = await self._call_tool(session,'create_video_from_image',payload)
                         video_id = response.get('video_id') or response.get('videoId') or response.get('id')
@@ -270,12 +286,14 @@ class HeyGenMcpAdapter:
             except HeyGenProviderFailure:
                 raise
             except Exception:
+                if dispatched:
+                    raise HeyGenProviderFailure('ambiguous','HeyGen video outcome unknown',request_dispatched=True) from None
                 raise HeyGenProviderFailure('retryable','HeyGen video connection failed') from None
         return asyncio.run(operation())
 
     def get_video(self, video_id: str) -> ProviderVideo:
         try:
-            response = asyncio.run(self._call('get_video',{'video_id':video_id}))
+            response = asyncio.run(self._call('get_video',{'videoId':video_id}))
             returned_id = response.get('video_id') or response.get('videoId') or response.get('id')
             if returned_id!=video_id:
                 raise ValueError('video identity mismatch')
@@ -294,12 +312,18 @@ class HeyGenMcpAdapter:
             raise HeyGenProviderFailure('configuration','Invalid HeyGen video response') from None
 
     async def _call(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        dispatched = False
         try:
             async with self._session_factory(False) as session:
+                dispatched = True
                 return await self._call_tool(session, name, arguments)
         except HeyGenProviderFailure:
+            if dispatched and name == "create_asset_upload_batch":
+                raise HeyGenProviderFailure("ambiguous", "HeyGen allocation outcome is unknown", request_dispatched=True) from None
             raise
         except BaseException as error:
+            if dispatched and name == "create_asset_upload_batch":
+                raise HeyGenProviderFailure("ambiguous", "HeyGen allocation outcome is unknown", request_dispatched=True) from None
             raise HeyGenProviderFailure("retryable", "HeyGen connection failed") from error
 
     def allocate_asset_batch(
@@ -318,14 +342,13 @@ class HeyGenMcpAdapter:
                         }
                         for source in sources
                     ],
-                    "idempotency_key": idempotency_key,
                 },
             )
         )
-        raw_slots = payload.get("files") or payload.get("slots")
+        raw_slots = payload.get("items") or payload.get("files") or payload.get("slots")
         batch_id = payload.get("batch_id") or payload.get("batchId")
         if not isinstance(batch_id, str) or not isinstance(raw_slots, list) or len(raw_slots) != len(sources):
-            raise HeyGenProviderFailure("terminal", "HeyGen returned an invalid upload allocation")
+            raise HeyGenProviderFailure("ambiguous", "HeyGen returned an invalid upload allocation", request_dispatched=True)
         slots: list[AssetUploadSlot] = []
         try:
             for source, raw in zip(sources, raw_slots, strict=True):
@@ -361,7 +384,7 @@ class HeyGenMcpAdapter:
             return AssetBatchAllocation(batch_id=batch_id, slots=slots)
         except (TypeError, ValueError) as error:
             raise HeyGenProviderFailure(
-                "terminal", "HeyGen returned an invalid upload allocation"
+                "ambiguous", "HeyGen returned an invalid upload allocation", request_dispatched=True
             ) from error
 
     def upload_file(self, slot: AssetUploadSlot, local_path: Path) -> None:
@@ -387,13 +410,19 @@ class HeyGenMcpAdapter:
         asyncio.run(
             self._call(
                 "complete_asset_batch",
-                {"batch_id": batch_id, "idempotency_key": idempotency_key},
+                {"batchId": batch_id},
             )
         )
 
     @staticmethod
     def _batch_state(payload: dict[str, Any], fallback_batch_id: str) -> AssetBatchState:
-        raw_assets = payload.get("assets") or payload.get("files")
+        # ponytail: at most 100 assets per request; unexpected pagination blocks instead of losing IDs.
+        if payload.get("has_more") is True:
+            raise HeyGenProviderFailure("configuration", "HeyGen asset statuses are incomplete")
+        returned_batch = payload.get("batch_id") or payload.get("batchId")
+        if fallback_batch_id != "assets" and returned_batch != fallback_batch_id:
+            raise HeyGenProviderFailure("configuration", "HeyGen asset batch identity mismatch")
+        raw_assets = payload.get("items", payload.get("assets", payload.get("files")))
         if not isinstance(raw_assets, list):
             raise HeyGenProviderFailure("terminal", "HeyGen returned invalid asset statuses")
         statuses: dict[str, ProviderAssetStatus] = {}
@@ -401,7 +430,9 @@ class HeyGenMcpAdapter:
         error_messages: dict[str, str] = {}
         try:
             for item in raw_assets:
-                asset_id = item.get("asset_id") or item.get("assetId")
+                asset_id = item.get("video_id") or item.get("asset_id") or item.get("assetId")
+                if not isinstance(asset_id, str) or not asset_id or asset_id in statuses:
+                    raise ValueError("missing or duplicate asset ID")
                 statuses[asset_id] = ProviderAssetStatus(item["status"])
                 error = item.get("error") or {}
                 if error.get("code"):
@@ -419,11 +450,11 @@ class HeyGenMcpAdapter:
 
     def get_asset_batch(self, batch_id: str) -> AssetBatchState:
         return self._batch_state(
-            asyncio.run(self._call("get_asset_batch", {"batch_id": batch_id})), batch_id
+            asyncio.run(self._call("get_asset_batch", {"batchId": batch_id})), batch_id
         )
 
     def get_assets(self, asset_ids: Sequence[str]) -> AssetBatchState:
         return self._batch_state(
-            asyncio.run(self._call("bulk_asset_statuses", {"asset_ids": list(asset_ids)})),
+            asyncio.run(self._call("bulk_asset_statuses", {"assetIds": ",".join(asset_ids)})),
             "assets",
         )

@@ -254,3 +254,19 @@ def test_handler_persists_partial_failure_as_terminal(tmp_path: Path) -> None:
         RemoteAssetStatus.READY,
         RemoteAssetStatus.FAILED,
     }
+
+
+def test_handler_retry_never_reallocates_known_unready_assets(tmp_path: Path) -> None:
+    repository, factory = _setup(tmp_path)
+    source = _source(tmp_path, "00000000-0000-4000-8000-000000000001", "image.png", b"img", RemoteAssetKind.IMAGE)
+
+    class AmbiguousPut(FakeHeyGenProvider):
+        def upload_file(self, slot: AssetUploadSlot, local_path: Path) -> None:
+            raise HeyGenProviderFailure("ambiguous", "Upload outcome unknown", request_dispatched=True)
+
+    provider = AmbiguousPut()
+    handler = HeyGenAssetUploadHandler(factory, provider, tmp_path, clock=lambda: NOW)
+    assert handler.execute(_context([source])).outcome == "blocked"
+    assert repository.list_by_batch("batch-1")
+    assert handler.execute(_context([source])).outcome == "blocked"
+    assert provider.events.count("allocate") == 1
