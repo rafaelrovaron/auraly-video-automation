@@ -87,6 +87,11 @@ def build_full_steps(os_name: str = os.name) -> tuple[VerificationStep, ...]:
             ),
             generated_files=(Path("schemas/image-generation.schema.json"),),
         ),
+        VerificationStep(
+            "voice schemas",
+            ("uv", "run", "python", "-m", "auraly_pipeline.voices.schema"),
+            generated_files=(Path("schemas/voice-import.schema.json"), Path("schemas/voice-master.schema.json")),
+        ),
         VerificationStep("uv dependency check", ("uv", "pip", "check")),
         VerificationStep("npm locked install", (npm, "ci")),
         VerificationStep("HyperFrames doctor", (npm, "run", "hf:doctor")),

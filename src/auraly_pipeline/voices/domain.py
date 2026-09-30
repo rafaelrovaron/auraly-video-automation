@@ -143,6 +143,12 @@ class VoiceGenerateRequest(ContractModel):
         return self
 
 
+class VoiceImportRequest(ContractModel):
+    schema_version: Literal[1] = 1
+    campaign_id: str = Field(pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*$", max_length=80)
+    copy_master_version: int | None = Field(default=None, ge=1)
+
+
 class VoiceMaster(ContractModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
@@ -152,7 +158,7 @@ class VoiceMaster(ContractModel):
     copy_master_version: int = Field(ge=1)
     generation: int = Field(ge=1)
     status: VoiceMasterStatus
-    provider: Literal["elevenlabs"]
+    provider: Literal["elevenlabs", "imported"]
     voice_preset: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]*$", max_length=120)
     voice_id: str = Field(pattern=r"^[A-Za-z0-9_-]+$", max_length=120)
     model_id: str = Field(pattern=r"^[A-Za-z0-9_-]+$", max_length=120)
@@ -197,6 +203,12 @@ class VoiceMaster(ContractModel):
 
     @model_validator(mode="after")
     def validate_state(self) -> Self:
+        if self.provider == "imported" and (
+            self.voice_id != "imported" or self.model_id != "external-audio-v1"
+            or self.provider_request_id is not None
+            or self.transcript_source not in {None, TranscriptSource.FASTER_WHISPER}
+        ):
+            raise ValueError("imported voice must not claim remote generation provenance")
         for field_name in ("voice_master_id", "copy_master_id", "campaign_id", "voice_preset"):
             validate_safe_identifier(getattr(self, field_name), field_name, max_length=120)
         if self.provider_request_id is not None:

@@ -1,0 +1,36 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "const": 1,
+      "default": 1,
+      "title": "Schemaversion",
+      "type": "integer"
+    },
+    "campaignId": {
+      "maxLength": 80,
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+      "title": "Campaignid",
+      "type": "string"
+    },
+    "copyMasterVersion": {
+      "anyOf": [
+        {
+          "minimum": 1,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Copymasterversion"
+    }
+  },
+  "required": [
+    "campaignId"
+  ],
+  "title": "VoiceImportRequest",
+  "type": "object",
+  "$id": "https://auraly.local/schemas/voice-import.schema.v1.json"
+}

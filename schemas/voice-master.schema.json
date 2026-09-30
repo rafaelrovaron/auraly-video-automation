@@ -1,0 +1,520 @@
+{
+  "$defs": {
+    "TranscriptMatchStatus": {
+      "enum": [
+        "matched",
+        "review_required",
+        "mismatched"
+      ],
+      "title": "TranscriptMatchStatus",
+      "type": "string"
+    },
+    "TranscriptSource": {
+      "enum": [
+        "elevenlabs_alignment",
+        "faster_whisper"
+      ],
+      "title": "TranscriptSource",
+      "type": "string"
+    },
+    "VoiceMasterStatus": {
+      "enum": [
+        "pending",
+        "generating",
+        "processing",
+        "review_required",
+        "approved",
+        "rejected",
+        "failed"
+      ],
+      "title": "VoiceMasterStatus",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "voiceMasterId": {
+      "maxLength": 36,
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+      "title": "Voicemasterid",
+      "type": "string"
+    },
+    "campaignId": {
+      "maxLength": 80,
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+      "title": "Campaignid",
+      "type": "string"
+    },
+    "copyMasterId": {
+      "maxLength": 36,
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+      "title": "Copymasterid",
+      "type": "string"
+    },
+    "copyMasterVersion": {
+      "minimum": 1,
+      "title": "Copymasterversion",
+      "type": "integer"
+    },
+    "generation": {
+      "minimum": 1,
+      "title": "Generation",
+      "type": "integer"
+    },
+    "status": {
+      "$ref": "#/$defs/VoiceMasterStatus"
+    },
+    "provider": {
+      "enum": [
+        "elevenlabs",
+        "imported"
+      ],
+      "title": "Provider",
+      "type": "string"
+    },
+    "voicePreset": {
+      "maxLength": 120,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      "title": "Voicepreset",
+      "type": "string"
+    },
+    "voiceId": {
+      "maxLength": 120,
+      "pattern": "^[A-Za-z0-9_-]+$",
+      "title": "Voiceid",
+      "type": "string"
+    },
+    "modelId": {
+      "maxLength": 120,
+      "pattern": "^[A-Za-z0-9_-]+$",
+      "title": "Modelid",
+      "type": "string"
+    },
+    "settingsFingerprint": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Settingsfingerprint",
+      "type": "string"
+    },
+    "rawAudioPath": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Rawaudiopath"
+    },
+    "processedAudioPath": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Processedaudiopath"
+    },
+    "transcriptPath": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Transcriptpath"
+    },
+    "manifestPath": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Manifestpath"
+    },
+    "rawSha256": {
+      "anyOf": [
+        {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Rawsha256"
+    },
+    "processedSha256": {
+      "anyOf": [
+        {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Processedsha256"
+    },
+    "transcriptSha256": {
+      "anyOf": [
+        {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Transcriptsha256"
+    },
+    "manifestSha256": {
+      "anyOf": [
+        {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Manifestsha256"
+    },
+    "rawSizeBytes": {
+      "anyOf": [
+        {
+          "exclusiveMinimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Rawsizebytes"
+    },
+    "rawFormat": {
+      "anyOf": [
+        {
+          "maxLength": 20,
+          "pattern": "^[a-z0-9]+$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Rawformat"
+    },
+    "durationSeconds": {
+      "anyOf": [
+        {
+          "exclusiveMinimum": 0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Durationseconds"
+    },
+    "wordCount": {
+      "anyOf": [
+        {
+          "minimum": 1,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Wordcount"
+    },
+    "wpm": {
+      "anyOf": [
+        {
+          "exclusiveMinimum": 0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Wpm"
+    },
+    "sampleRate": {
+      "anyOf": [
+        {
+          "exclusiveMinimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Samplerate"
+    },
+    "channels": {
+      "anyOf": [
+        {
+          "maximum": 8,
+          "minimum": 1,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Channels"
+    },
+    "loudnessLufs": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Loudnesslufs"
+    },
+    "truePeakDbfs": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Truepeakdbfs"
+    },
+    "leadingSilenceSeconds": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Leadingsilenceseconds"
+    },
+    "trailingSilenceSeconds": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Trailingsilenceseconds"
+    },
+    "longInternalPauses": {
+      "items": {
+        "maxItems": 2,
+        "minItems": 2,
+        "prefixItems": [
+          {
+            "type": "number"
+          },
+          {
+            "type": "number"
+          }
+        ],
+        "type": "array"
+      },
+      "title": "Longinternalpauses",
+      "type": "array"
+    },
+    "transcriptSource": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TranscriptSource"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "transcriptMatchStatus": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TranscriptMatchStatus"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "transcriptMatchScore": {
+      "anyOf": [
+        {
+          "maximum": 1,
+          "minimum": 0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Transcriptmatchscore"
+    },
+    "headlineSpoken": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Headlinespoken"
+    },
+    "qcFindings": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Qcfindings",
+      "type": "array"
+    },
+    "providerRequestId": {
+      "anyOf": [
+        {
+          "maxLength": 200,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Providerrequestid"
+    },
+    "approvedAt": {
+      "anyOf": [
+        {
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Approvedat"
+    },
+    "approvedBy": {
+      "anyOf": [
+        {
+          "maxLength": 120,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Approvedby"
+    },
+    "rejectedAt": {
+      "anyOf": [
+        {
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Rejectedat"
+    },
+    "rejectedBy": {
+      "anyOf": [
+        {
+          "maxLength": 120,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Rejectedby"
+    },
+    "rejectionReason": {
+      "anyOf": [
+        {
+          "maxLength": 512,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Rejectionreason"
+    },
+    "createdAt": {
+      "format": "date-time",
+      "title": "Createdat",
+      "type": "string"
+    },
+    "updatedAt": {
+      "format": "date-time",
+      "title": "Updatedat",
+      "type": "string"
+    }
+  },
+  "required": [
+    "voiceMasterId",
+    "campaignId",
+    "copyMasterId",
+    "copyMasterVersion",
+    "generation",
+    "status",
+    "provider",
+    "voicePreset",
+    "voiceId",
+    "modelId",
+    "settingsFingerprint",
+    "createdAt",
+    "updatedAt"
+  ],
+  "title": "VoiceMaster",
+  "type": "object",
+  "$id": "https://auraly.local/schemas/voice-master.schema.v1.json"
+}

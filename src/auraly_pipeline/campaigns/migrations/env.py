@@ -52,7 +52,9 @@ def run_migrations_online() -> None:
         poolclass=pool.NullPool,
     )
     with connectable.connect() as connection:
-        connection.exec_driver_sql("PRAGMA foreign_keys=ON")
+        # SQLite table rebuilds require FK enforcement off on this migration-only
+        # connection. Check every FK before committing the atomic migration.
+        connection.exec_driver_sql("PRAGMA foreign_keys=OFF")
         connection.exec_driver_sql("PRAGMA busy_timeout=5000")
         connection.exec_driver_sql("PRAGMA journal_mode=WAL")
         connection.exec_driver_sql("PRAGMA synchronous=NORMAL")
@@ -62,9 +64,14 @@ def run_migrations_online() -> None:
             target_metadata=target_metadata,
             render_as_batch=True,
             compare_type=True,
+            transactional_ddl=True,
         )
         with context.begin_transaction():
+            connection.exec_driver_sql("BEGIN IMMEDIATE")
             context.run_migrations()
+            if connection.exec_driver_sql("PRAGMA foreign_key_check").first() is not None:
+                raise RuntimeError("Migration would violate foreign key integrity")
+        connection.exec_driver_sql("PRAGMA foreign_keys=ON")
 
 
 if context.is_offline_mode():

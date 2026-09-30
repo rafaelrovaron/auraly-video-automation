@@ -101,3 +101,31 @@ def test_transcript_mismatch_and_headline_are_explicit_review_failures() -> None
     assert report.headline_spoken is True
     assert report.missing_tokens
     assert report.unexpected_tokens
+
+
+def test_imported_voice_has_honest_provenance() -> None:
+    data = _voice_data()
+    data.update(provider="imported", voiceId="imported", modelId="external-audio-v1",
+                transcriptSource="faster_whisper")
+    voice = VoiceMaster.model_validate(data)
+    assert voice.provider == "imported"
+    assert voice.provider_request_id is None
+
+
+def test_voice_import_request_is_versioned_and_validates_campaign() -> None:
+    from auraly_pipeline.voices import domain
+
+    request_type = getattr(domain, "VoiceImportRequest", None)
+    assert request_type is not None, "external voice import contract missing"
+    assert request_type(campaign_id="voice-pilot").schema_version == 1
+    for value in ({"campaign_id": "../escape"}, {"campaign_id": "voice-pilot", "schema_version": 2}):
+        with pytest.raises(ValidationError):
+            request_type(**value)
+
+
+def test_imported_voice_cannot_claim_remote_generation_metadata() -> None:
+    data = _voice_data()
+    data.update(provider="imported", voiceId="imported", modelId="external-audio-v1",
+                transcriptSource="faster_whisper", providerRequestId="fake-remote")
+    with pytest.raises(ValidationError):
+        VoiceMaster.model_validate(data)

@@ -200,7 +200,7 @@ def test_image_migration_upgrades_0003_database_and_creates_image_tables(
     }.issubset(inspector.get_table_names())
     with engine.connect() as connection:
         assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == (
-                "0008_heygen_renders"
+                "0009_external_voice_import"
         )
         triggers = {
             row[0]
@@ -235,7 +235,7 @@ def test_fresh_database_reaches_image_domain_head(tmp_path: Path) -> None:
     )
     with engine.connect() as connection:
         assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == (
-                "0008_heygen_renders"
+                "0009_external_voice_import"
         )
     engine.dispose()
 
@@ -493,7 +493,7 @@ def test_manual_image_import_migration_backfills_generated_candidate_provenance(
         ).one()
         version = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
     assert row == (SCENE_ID, "generated", "generation-1", None, None)
-    assert version == "0008_heygen_renders"
+    assert version == "0009_external_voice_import"
     engine.dispose()
 
 

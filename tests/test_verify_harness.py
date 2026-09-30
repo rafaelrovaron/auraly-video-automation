@@ -232,6 +232,7 @@ def test_full_contains_agents_deterministic_baseline_in_order() -> None:
             "--output",
             "schemas/image-generation.schema.json",
         ),
+        ("uv", "run", "python", "-m", "auraly_pipeline.voices.schema"),
         ("uv", "pip", "check"),
         ("npm", "ci"),
         ("npm", "run", "hf:doctor"),
@@ -313,6 +314,22 @@ def test_schema_drift_fails_without_reverting_generated_file(tmp_path: Path) -> 
     assert "generated schema drift" in "\n".join(output).lower()
 
 
+def test_voice_schema_drift_is_in_full_gate(tmp_path: Path) -> None:
+    verify = load_verify_module()
+    steps = [s for s in verify.build_full_steps() if "auraly_pipeline.voices.schema" in s.argv]
+    assert len(steps) == 1, "voice contracts are not checked for drift"
+    schema = tmp_path / "schemas" / "voice-import.schema.json"
+    schema.parent.mkdir()
+    schema.write_text("{}")
+
+    def changing_generator(argv: list[str], **_: Any) -> subprocess.CompletedProcess[str]:
+        schema.write_text('{"changed": true}')
+        return subprocess.CompletedProcess(argv, 0)
+
+    assert verify.run_steps(steps, repository_root=tmp_path,
+                            run_command=changing_generator, output=lambda _: None) == 1
+
+
 def test_unrelated_dirty_file_does_not_trigger_schema_drift(tmp_path: Path) -> None:
     verify = load_verify_module()
     schema = tmp_path / "schemas" / "generated.json"
@@ -385,6 +402,7 @@ def test_full_schema_generators_declare_tracked_outputs() -> None:
     assert generated == {
         "edit schema": (Path("schemas/edit.schema.json"),),
         "image generation schema": (Path("schemas/image-generation.schema.json"),),
+        "voice schemas": (Path("schemas/voice-import.schema.json"), Path("schemas/voice-master.schema.json")),
     }
 
 

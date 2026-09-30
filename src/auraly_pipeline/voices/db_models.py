@@ -26,10 +26,17 @@ class VoiceMasterRow(Base):
             "status IN ('pending','generating','processing','review_required','approved','rejected','failed')",
             name="voice_master_status",
         ),
-        CheckConstraint("provider = 'elevenlabs'", name="voice_master_provider"),
+        CheckConstraint("provider IN ('elevenlabs','imported')", name="voice_master_provider"),
         CheckConstraint(
-            "provider_state IN ('not_dispatched','dispatching','response_received','ambiguous')",
+            "provider_state IN ('not_dispatched','dispatching','response_received','ambiguous','local_ready')",
             name="voice_provider_state",
+        ),
+        CheckConstraint(
+            "(provider = 'elevenlabs' AND provider_state <> 'local_ready') OR "
+            "(provider = 'imported' AND provider_state IN ('not_dispatched','local_ready') "
+            "AND provider_request_id IS NULL AND voice_id = 'imported' "
+            "AND model_id = 'external-audio-v1')",
+            name="voice_master_origin_state",
         ),
         CheckConstraint(
             "copy_master_version >= 1 AND generation >= 1", name="voice_master_versions"
@@ -46,7 +53,8 @@ class VoiceMasterRow(Base):
             "AND leading_silence_seconds IS NOT NULL AND trailing_silence_seconds IS NOT NULL "
             "AND transcript_source IS NOT NULL AND transcript_match_status = 'matched' "
             "AND headline_spoken = 0 AND json_array_length(qc_findings_json) = 0 "
-            "AND provider_state = 'response_received')",
+            "AND ((provider = 'elevenlabs' AND provider_state = 'response_received') "
+            "OR (provider = 'imported' AND provider_state = 'local_ready')))",
             name="voice_master_approval",
         ),
         CheckConstraint(

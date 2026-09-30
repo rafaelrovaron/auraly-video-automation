@@ -603,7 +603,7 @@ class VoiceMasterService:
             copy_master_version=row.copy_master_version,
             generation=row.generation,
             status=VoiceMasterStatus(row.status),
-            provider=cast("Literal['elevenlabs']", row.provider),
+            provider=cast("Literal['elevenlabs', 'imported']", row.provider),
             voice_preset=row.voice_preset,
             voice_id=row.voice_id,
             model_id=row.model_id,
