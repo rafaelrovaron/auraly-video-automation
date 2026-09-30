@@ -6,9 +6,8 @@ import os
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Protocol, cast
+from typing import TYPE_CHECKING, Protocol, cast
 
-from faster_whisper import WhisperModel  # type: ignore[import-untyped]
 from sqlalchemy.orm import Session, sessionmaker
 
 from auraly_pipeline.campaigns.db_models import CampaignRow, CopyMasterRow
@@ -28,6 +27,9 @@ from auraly_pipeline.voices.provider import (
     ProviderFailureKind,
     SpeechGeneration,
 )
+
+if TYPE_CHECKING:
+    from faster_whisper import WhisperModel  # type: ignore[import-untyped]
 
 
 class SpeechProvider(Protocol):
@@ -52,6 +54,8 @@ class FasterWhisperTranscriber:
 
     def transcribe(self, audio_path: Path) -> str:
         if self._model is None:
+            from faster_whisper import WhisperModel
+
             self._model = WhisperModel("small.en", device="cpu", compute_type="int8")
         segments, _ = self._model.transcribe(str(audio_path), language="en", beam_size=5)
         return " ".join(segment.text.strip() for segment in segments).strip()
