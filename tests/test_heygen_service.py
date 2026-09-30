@@ -84,7 +84,7 @@ def test_reconcile_rejects_connected_account_change(tmp_path: Path) -> None:
     submission = service.submit_assets(service.plan_assets("campaign-one"))
     assert submission.job is not None
     provider.account_ref = "account-other"
-    blocked = service._jobs.worker_once("worker-1")
+    blocked = service._jobs.worker_once("worker-1", job_type="heygen.asset.upload")
     assert blocked is not None and blocked.status is JobStatus.BLOCKED
 
     with pytest.raises(HeyGenServiceError, match="account"):
@@ -116,7 +116,7 @@ def test_reconcile_resumes_queued_checkpoint_with_same_allocation(tmp_path: Path
     submission = service.submit_assets(service.plan_assets("campaign-one"))
     assert submission.job is not None
     provider.account_ref = "account-other"
-    blocked = service._jobs.worker_once("worker-1")
+    blocked = service._jobs.worker_once("worker-1", job_type="heygen.asset.upload")
     assert blocked is not None and blocked.status is JobStatus.BLOCKED
     provider.account_ref = "account-fake"
     request = AssetUploadJobInput.model_validate(blocked.input)

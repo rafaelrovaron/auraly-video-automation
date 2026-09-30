@@ -22,5 +22,7 @@ def ready_video_campaign(database: Path, root: Path, provider: FakeHeyGenProvide
     service = HeyGenService.for_database(database, root, provider)
     submitted = service.submit_assets(service.plan_assets("campaign-one"))
     assert submitted.job is not None
-    service._jobs.worker_once("assets-test")
+    service._jobs.worker_once(
+        "assets-test", campaign_id="campaign-one", job_type="heygen.asset.upload"
+    )
     service.close()
