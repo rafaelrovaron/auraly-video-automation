@@ -222,6 +222,50 @@ def _silence(path: Path, duration: float) -> tuple[float, float, list[tuple[floa
     return round(max(0.0, leading), 6), round(max(0.0, trailing), 6), internal
 
 
+def decode_external_audio(source: Path, output: Path) -> None:
+    """Decode external MP3/WAV without requiring provider-specific Xing metadata."""
+    if _probe(source)["format"] not in {"mp3", "wav"}:
+        raise AudioProcessingError(AudioProcessingError.public_message)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with output.open("xb"):
+        pass
+    temporary = output.with_suffix(".partial")
+    temporary_owned = False
+    try:
+        with temporary.open("xb"):
+            pass
+        temporary_owned = True
+        result = _run(
+            [
+                "ffmpeg",
+                "-v",
+                "error",
+                "-xerror",
+                "-err_detect",
+                "explode",
+                "-i",
+                str(source),
+                "-map",
+                "0:a:0",
+                "-c:a",
+                "pcm_s24le",
+                "-f",
+                "wav",
+                "-y",
+                str(temporary),
+            ],
+        )
+        if result.returncode or _probe(temporary)["duration"] <= 0:
+            raise AudioProcessingError(AudioProcessingError.public_message)
+        temporary.replace(output)
+    except Exception:
+        output.unlink(missing_ok=True)
+        raise
+    finally:
+        if temporary_owned:
+            temporary.unlink(missing_ok=True)
+
+
 def process_voice_audio(raw_path: Path, output_path: Path) -> AudioProcessingReport:
     if not raw_path.is_file() or raw_path.stat().st_size <= 0 or output_path.exists():
         raise AudioProcessingError(AudioProcessingError.public_message)
