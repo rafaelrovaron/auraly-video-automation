@@ -19,6 +19,14 @@ _SAFE_PATH = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]*$")
 _TOKEN = re.compile(r"[^\W_]+", re.UNICODE)
 
 
+def permits_transcript_review(provider: str, match_status: str | None, headline_spoken: bool | None, findings: list[str]) -> bool:
+    return (
+        provider == "imported" and match_status == "review_required"
+        and headline_spoken is False
+        and findings == ["The narration transcript requires human review."]
+    )
+
+
 class VoiceMasterStatus(StrEnum):
     PENDING = "pending"
     GENERATING = "generating"
@@ -191,6 +199,7 @@ class VoiceMaster(ContractModel):
     provider_request_id: str | None = Field(default=None, max_length=200)
     approved_at: datetime | None = None
     approved_by: str | None = Field(default=None, max_length=120)
+    approval_review_reason: str | None = Field(default=None, min_length=1, max_length=512)
     rejected_at: datetime | None = None
     rejected_by: str | None = Field(default=None, max_length=120)
     rejection_reason: str | None = Field(default=None, max_length=512)
@@ -219,10 +228,16 @@ class VoiceMaster(ContractModel):
             validate_safe_error_message(finding, "qc_finding")
         if self.rejection_reason is not None:
             validate_safe_error_message(self.rejection_reason, "rejection_reason")
+        if self.approval_review_reason is not None:
+            validate_safe_error_message(self.approval_review_reason, "approval_review_reason")
+            if self.status is not VoiceMasterStatus.APPROVED or not permits_transcript_review(
+                self.provider, self.transcript_match_status, self.headline_spoken, self.qc_findings
+            ):
+                raise ValueError("review reason requires explicit imported transcript acceptance")
         if self.status is VoiceMasterStatus.APPROVED:
             if not self.approved_at or not self.approved_by:
                 raise ValueError("approved VoiceMaster requires approval metadata")
-            if (
+            if self.approval_review_reason is None and (
                 self.headline_spoken
                 or self.qc_findings
                 or self.transcript_match_status is not TranscriptMatchStatus.MATCHED

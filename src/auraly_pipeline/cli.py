@@ -1132,12 +1132,13 @@ def voice_list_command(
 def voice_approve_command(
     voice_master_id: Annotated[str, typer.Argument()],
     approved_by: Annotated[str, typer.Option("--approved-by")],
+    review_reason: Annotated[str | None, typer.Option("--review-reason")] = None,
     database: Annotated[Path, typer.Option("--database")] = default_database_path(),
 ) -> None:
     service: VoiceMasterService | None = None
     try:
         service = _voice_service(database)
-        voice = service.approve(voice_master_id, approved_by=approved_by)
+        voice = service.approve(voice_master_id, approved_by=approved_by, approval_review_reason=review_reason)
     except VoiceMasterNotFoundError as exc:
         _voice_failure("voice_not_found", exc.public_message)
     except VoiceMasterError as exc:

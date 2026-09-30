@@ -51,11 +51,22 @@ class VoiceMasterRow(Base):
             "AND word_count IS NOT NULL AND wpm IS NOT NULL AND sample_rate IS NOT NULL AND channels IS NOT NULL "
             "AND loudness_lufs IS NOT NULL AND true_peak_dbfs IS NOT NULL "
             "AND leading_silence_seconds IS NOT NULL AND trailing_silence_seconds IS NOT NULL "
-            "AND transcript_source IS NOT NULL AND transcript_match_status = 'matched' "
-            "AND headline_spoken = 0 AND json_array_length(qc_findings_json) = 0 "
+            "AND transcript_source IS NOT NULL "
+            "AND COALESCE(headline_spoken = 0 AND ((approval_review_reason IS NULL AND transcript_match_status = 'matched' "
+            "AND json_array_length(qc_findings_json) = 0) OR "
+            "(approval_review_reason IS NOT NULL AND provider = 'imported' "
+            "AND transcript_match_status = 'review_required' "
+            "AND json_array_length(qc_findings_json) = 1 "
+            "AND json_extract(qc_findings_json, '$[0]') = 'The narration transcript requires human review.')), 0) "
             "AND ((provider = 'elevenlabs' AND provider_state = 'response_received') "
             "OR (provider = 'imported' AND provider_state = 'local_ready')))",
             name="voice_master_approval",
+        ),
+        CheckConstraint(
+            "approval_review_reason IS NULL OR (status = 'approved' "
+            "AND length(trim(approval_review_reason)) BETWEEN 1 AND 512 "
+            "AND instr(approval_review_reason, char(10)) = 0 AND instr(approval_review_reason, char(13)) = 0)",
+            name="voice_review_reason",
         ),
         CheckConstraint(
             "(status <> 'rejected') OR "
@@ -118,6 +129,7 @@ class VoiceMasterRow(Base):
     )
     approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     approved_by: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    approval_review_reason: Mapped[str | None] = mapped_column(String(512), nullable=True)
     rejected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     rejected_by: Mapped[str | None] = mapped_column(String(120), nullable=True)
     rejection_reason: Mapped[str | None] = mapped_column(Text, nullable=True)

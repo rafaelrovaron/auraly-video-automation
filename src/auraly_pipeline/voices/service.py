@@ -27,6 +27,7 @@ from auraly_pipeline.voices.domain import (
     VoiceGenerateRequest,
     VoiceMaster,
     VoiceMasterStatus,
+    permits_transcript_review,
 )
 from auraly_pipeline.voices.handler import SpeechProvider, TranscriptProvider, VoiceGenerateHandler
 from auraly_pipeline.voices.repository import VoiceMasterRepository
@@ -434,8 +435,13 @@ class VoiceMasterService:
                 )
             ]
 
-    def approve(self, voice_master_id: str, *, approved_by: str) -> VoiceMaster:
+    def approve(self, voice_master_id: str, *, approved_by: str, approval_review_reason: str | None = None) -> VoiceMaster:
         validate_safe_identifier(approved_by, "approved_by", max_length=120)
+        if approval_review_reason is not None:
+            validate_safe_error_message(approval_review_reason, "approval_review_reason")
+            approval_review_reason = approval_review_reason.strip()
+            if not approval_review_reason:
+                raise VoiceMasterReviewError
         now = datetime.now(UTC)
         with self._sessions() as session:
             session.execute(text("BEGIN IMMEDIATE"))
@@ -443,11 +449,14 @@ class VoiceMasterService:
             row = repository.get(voice_master_id)
             if row is None:
                 raise VoiceMasterNotFoundError
+            review_accepted = approval_review_reason is not None and permits_transcript_review(
+                row.provider, row.transcript_match_status, row.headline_spoken, row.qc_findings_json
+            )
             if (
                 row.status != "review_required"
                 or row.headline_spoken
-                or row.transcript_match_status != "matched"
-                or row.qc_findings_json
+                or (approval_review_reason is not None and not review_accepted)
+                or (not review_accepted and (row.transcript_match_status != "matched" or row.qc_findings_json))
                 or not row.processed_audio_path
                 or not row.processed_sha256
                 or not row.raw_audio_path
@@ -479,6 +488,7 @@ class VoiceMasterService:
             row.status = "approved"
             row.approved_by = approved_by
             row.approved_at = now
+            row.approval_review_reason = approval_review_reason
             row.updated_at = now
             try:
                 repository.commit()
@@ -644,6 +654,7 @@ class VoiceMasterService:
             provider_request_id=row.provider_request_id,
             approved_at=cls._utc(row.approved_at),
             approved_by=row.approved_by,
+            approval_review_reason=row.approval_review_reason,
             rejected_at=cls._utc(row.rejected_at),
             rejected_by=row.rejected_by,
             rejection_reason=row.rejection_reason,

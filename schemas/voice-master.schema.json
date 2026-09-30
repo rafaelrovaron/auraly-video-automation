@@ -449,6 +449,20 @@
       "default": null,
       "title": "Approvedby"
     },
+    "approvalReviewReason": {
+      "anyOf": [
+        {
+          "maxLength": 512,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Approvalreviewreason"
+    },
     "rejectedAt": {
       "anyOf": [
         {
