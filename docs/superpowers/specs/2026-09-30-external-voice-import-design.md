@@ -1,6 +1,6 @@
 # Voice Master externo — desenho para revisão
 
-Status: proposta; implementação e canário ainda não executados.
+Status: desenho aprovado pelo usuário em 2026-09-30; implementação e canário ainda não executados.
 
 ## Objetivo e escopo
 
