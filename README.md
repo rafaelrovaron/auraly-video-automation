@@ -37,7 +37,7 @@ entrega.
 
 ### Não entregue ainda
 
-- canário HeyGen real (D2C), com autorização específica de consumo de créditos;
+- conclusão do canário HeyGen real (D2C): envio executado, reconciliação manual pendente;
 - `EditProfile` reutilizável e resolução de overrides por vídeo/variante;
 - render final com headline, captions, música e framing configuráveis;
 - variações A/B de headline sem regenerar voz, imagem ou HeyGen;
@@ -146,7 +146,10 @@ recusada enquanto houver uma voz ativa/aprovada. Não há retry automático ou a
 
 O resultado é `review_required`, não uma aprovação. Whisper indisponível (inclusive bloqueio
 do Application Control no Windows) produz falha sanitizada, preservando os arquivos locais.
-Transcrição divergente ou headline falada impede aprovação; não substituir por texto manual.
+Transcrição `mismatched` ou headline falada impede aprovação; não substituir por texto manual.
+Para voz `imported` com comparação `review_required` e somente o achado de revisão da
+transcrição, `voice approve --review-reason "Motivo da aceitação humana" --approved-by Rafael`
+registra a exceção auditável sem mudar WAV, ASR, QC ou hashes. Não permite contornar outros achados.
 Confira `job.status`: `success: true` do worker significa que a consulta/execução retornou,
 não que um job `failed` passou no QC.
 
@@ -160,10 +163,12 @@ em uma fila real que também contenha jobs pagos.
 O próximo Goal é **D2C — HeyGen Real Canary**: validar uma geração real pequena com os assets
 aprovados, mediante autorização específica de consumo de créditos.
 
-A autorização de um canário limitado já foi dada, mas a execução permanece pendente de
-transcrição real, aprovações e OAuth. O contrato atual exige três cenas por campanha e o plano
-HeyGen inclui todas: o canário de uma cena/um render precisa de um ajuste aprovado separado,
-não de bypass de validação nem de aumento silencioso do consumo.
+A execução de 2026-09-30 aprovou o WAV existente com motivo auditável, completou upload de
+uma imagem e um áudio e despachou uma única geração, com concorrência 1. A resposta não
+forneceu ID verificável; o pipeline bloqueou, sem repetir a geração. A consulta MCP encontrou
+um vídeo concluído no horário do envio com duração 7,21733 s, mas sem callback/asset IDs.
+Vínculo manual exige confirmação; download/QC ainda pendentes. Isto não é `PROVIDER_VERIFIED`.
+Detalhes em [evidência D2C](docs/superpowers/2026-09-30-d2c-canary-verification.md).
 
 O escopo completo e os critérios de saída estão em
 [`docs/GOAL-ROADMAP.md`](docs/GOAL-ROADMAP.md).

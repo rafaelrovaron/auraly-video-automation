@@ -205,6 +205,29 @@ editor/UI não entregues. O primeiro canário planejado tem teto de um render e 
 O conflito histórico (CampaignCreate exigia três cenas) foi resolvido com ajuste separado
 aprovado para uma ou mais cenas; o planner continua incluindo todas, sem elevar o teto autorizado.
 
+### Checkpoint D2C — 2026-09-30
+
+Estado atual, supersedendo as notas de preparação acima: aprovação humana do WAV importado
+registrada com motivo, preservando `review_required`, ASR, QC e hashes. Exceção aceita apenas
+origem `imported`, headline não falada e o único achado de revisão da transcrição; jamais
+`mismatched` ou falha técnica. Migration 0010 preserva histórico e imutabilidade.
+
+Contrato MCP real usa camelCase nos argumentos de ferramentas, snake_case no objeto image,
+identidade de usuário hasheada quando workspace/id não são expostos e respostas `items`.
+Paginação inesperada bloqueia; erro pós-dispatch nunca autoriza repetir criação.
+Gate completo: 14/14 etapas, 1430 testes aprovados/19 skips, revisão sem achados críticos/importantes.
+
+Upload real da imagem e WAV concluído. Uma reserva e um envio de geração foram executados;
+sem ID verificável na resposta, render ficou `reconciliation_required`. Consulta somente leitura
+encontrou um vídeo concluído no mesmo horário e com duração do WAV, sem correlação material
+exposta pelo MCP. Confirmação humana do vínculo manual, download e QC permanecem pendentes.
+Não marcar `PROVIDER_VERIFIED`, nem executar outra geração para resolver esta ambiguidade.
+Evidência: `docs/superpowers/2026-09-30-d2c-canary-verification.md`.
+
+Limitação menor da revisão: sanitização completa do motivo é garantida pelo serviço/domínio,
+não pelo CHECK SQL isolado (trim SQLite não cobre todo whitespace Unicode). Não usar SQL direto
+para aprovações; paridade adicional de SQL está registrada como dívida antes de merge.
+
 ## 5. Contrato de importação batch de imagens
 
 O batch deve ser explícito e determinístico. Não inferir associação apenas pela ordem retornada

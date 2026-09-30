@@ -243,7 +243,7 @@ Gerar e baixar um MP4 HeyGen por variante, em lote retomável.
 
 ## D2C — HeyGen Real Canary
 
-**Status:** `PLANNED`, requer aprovação e crédito.
+**Status:** `IN_PROGRESS`; um envio real autorizado executado, vínculo manual/download/QC pendentes.
 
 ### Objetivo
 
@@ -261,6 +261,13 @@ Preparação local: campanha com uma única cena, importação de imagem/Voice M
 do WAV PCM24 extensível. O teste integrado usa provider fake e reserva somente um render
 (`max_paid_renders=1`, concorrência 1), sem geração paga. Aprovações reais de copy, imagem e
 voz e preflight OAuth continuam necessários antes do canário; isto não é `PROVIDER_VERIFIED`.
+
+Checkpoint 2026-09-30: voz aprovada com motivo auditável sem alterar evidência; OAuth/preflight
+reais e upload de imagem/WAV concluídos. Uma reserva, concorrência 1 e um dispatch de geração.
+Resposta sem ID verificável bloqueou corretamente, sem nova cobrança automática. Consulta MCP
+encontrou candidato concluído com duração 7,21733 s; confirmação humana é necessária para vínculo
+manual antes do download/QC. Gate 14/14; 1430 testes aprovados/19 skips. D3A continua planejado,
+não iniciado. Ver `docs/superpowers/2026-09-30-d2c-canary-verification.md`.
 
 ### Saída
 
