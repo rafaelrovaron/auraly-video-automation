@@ -80,7 +80,7 @@ class CampaignCreate(CampaignContract):
     config: dict[str, JsonValue]
     status: Literal["draft"] = "draft"
     copy_master: CopyMasterCreate
-    scene_variants: list[SceneVariantCreate] = Field(min_length=3)
+    scene_variants: list[SceneVariantCreate] = Field(min_length=1)
 
     @model_validator(mode="after")
     def reject_sensitive_metadata(self) -> Self:

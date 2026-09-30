@@ -204,9 +204,17 @@ def test_campaign_rejects_invalid_campaign_id(campaign_id: str) -> None:
         CampaignCreate.model_validate(data)
 
 
-def test_campaign_requires_at_least_three_scene_variants() -> None:
+@pytest.mark.parametrize("count", [1, 2, 3])
+def test_campaign_accepts_one_or_more_scene_variants(count: int) -> None:
     data = deepcopy(valid_campaign_data())
-    data["sceneVariants"] = data["sceneVariants"][:2]
+    data["sceneVariants"] = data["sceneVariants"][:count]
+    campaign = CampaignCreate.model_validate(data)
+    assert len(campaign.scene_variants) == count
+
+
+def test_campaign_requires_at_least_one_scene_variant() -> None:
+    data = deepcopy(valid_campaign_data())
+    data["sceneVariants"] = []
 
     with pytest.raises(ValidationError):
         CampaignCreate.model_validate(data)
