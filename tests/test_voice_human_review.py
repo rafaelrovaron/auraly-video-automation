@@ -24,12 +24,13 @@ REASON = "Audio accepted for this technical test."
 
 
 def test_voice_model_approval_constraint_is_valid_sql() -> None:
-    from sqlalchemy import create_engine
+    from typing import cast
+    from sqlalchemy import Table, create_engine
     from auraly_pipeline.voices.db_models import VoiceMasterRow
 
     engine = create_engine("sqlite:///:memory:")
     try:
-        VoiceMasterRow.__table__.create(engine)
+        cast(Table, VoiceMasterRow.__table__).create(engine)
     finally:
         engine.dispose()
 
