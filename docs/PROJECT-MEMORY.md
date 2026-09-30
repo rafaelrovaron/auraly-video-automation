@@ -62,6 +62,9 @@ Replay verifica artefatos e reutiliza job/voz; falha é explícita e sem retry a
 O runtime nativo de transcrição já apresentou bloqueio pelo Windows Application Control.
 Não contornar nem usar a copy esperada como transcrição: sem ASR real disponível, o canário para.
 Integração com HeyGen usa o mesmo WAV aprovado por hash; testes fake não provam o provider real.
+Probe operacional em 2026-09-30: import nativo e modelo `small.en` já em cache carregaram;
+transcrição local do MP3 selecionado reconheceu fala sem download/créditos. O bloqueio anterior
+não se reproduziu. Isso não aprova a copy nem comprova o canário pago.
 
 Artefato canônico reutilizável pelo HeyGen:
 
