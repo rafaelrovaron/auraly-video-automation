@@ -1,7 +1,7 @@
 # D2C — aprovação humana da voz e contrato MCP real
 
-Status: desenho em conversa aprovado em 2026-09-30; esta especificação aguarda
-revisão do usuário. Implementação e teste real ainda não executados.
+Status: desenho e especificação aprovados pelo usuário em 2026-09-30.
+Implementação e teste real ainda não executados.
 
 ## Resultado e limites
 
