@@ -1,6 +1,7 @@
 # Goal D2B — HeyGen Generation, Polling & Download
 
-**Estado:** design aprovado pelo usuário; produção D2B ainda não implementada.
+**Estado:** design aprovado; D2B `IMPLEMENTED`/`LOCAL_VERIFIED` em 2026-09-30.
+`PROVIDER_VERIFIED` pendente D2C. Evidência e adaptações: `../2026-09-30-goal-d2b-verification.md`.
 **Data:** 2026-09-29.
 **Base entregue:** D2A em `main`, commit `b26d8f8`, `LOCAL_VERIFIED`.
 

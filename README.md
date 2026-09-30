@@ -26,7 +26,7 @@ entrega.
   e hash, com checkpoints e reconciliação explícita;
 - CLI `heygen connect|disconnect|status|preflight|prepare-assets|reconcile`;
 - D2B implementado: batch local de vídeo por variante, reserva de budget, polling/retomada,
-  download HTTPS, QC H.264/AAC e publicação sem overwrite (validação final em andamento);
+  download HTTPS, QC H.264/AAC e publicação sem overwrite (`LOCAL_VERIFIED`);
 - runtime Google Flow/Playwright, geração, correlação de downloads e recuperação implementados e
   verificados com fixtures locais;
 - CLI JSON e harness de verificação para as capacidades acima.
@@ -81,6 +81,9 @@ submit/run reutiliza os registros. Após bloqueio com ID conhecido, reconcile co
 vídeo e libera a retomada; não chama create. Sem ID após dispatch ambíguo, informar o ID exato
 com `--video-id ID --confirm-manual-binding`; nunca criar outro vídeo para resolver ambiguidade.
 
+Após esgotar tentativas locais, reconcile vincula um novo job de recuperação ao mesmo render/ID
+remoto; preserva os jobs anteriores e sua auditoria, sem nova reserva ou geração paga.
+
 Testes locais usam fake MCP e MP4/WAV sintéticos. Eles não provam interoperabilidade real,
 custo ou engine do provider. UI/editor/A/B permanecem no roadmap, sem afetar a identidade HeyGen.
 
@@ -121,8 +124,8 @@ manifest inválido não publica nem persiste nada, e repetir o mesmo lote reutil
 
 ## Próximo slice de desenvolvimento
 
-O próximo Goal é **D2B — HeyGen Batch Generation, Polling & Download**: usar os assets remotos já
-preparados para gerar e baixar um MP4 por variante com retomada segura.
+O próximo Goal é **D2C — HeyGen Real Canary**: validar uma geração real pequena com os assets
+aprovados, mediante autorização específica de consumo de créditos.
 
 O escopo completo e os critérios de saída estão em
 [`docs/GOAL-ROADMAP.md`](docs/GOAL-ROADMAP.md).
@@ -196,7 +199,7 @@ O projeto distingue:
 - `LOCAL_VERIFIED`: o baseline determinístico passou;
 - `PROVIDER_VERIFIED`: um canário real autorizado passou.
 
-Goals 0–3, 4A–4C, D1 e D2A estão implementados e verificados localmente. ElevenLabs, Google Flow e
+Goals 0–3, 4A–4C, D1, D2A e D2B estão implementados e verificados localmente. ElevenLabs, Google Flow e
 HeyGen ainda não têm canário real registrado neste repositório. Nenhuma capacidade do roadmap deve ser
 tratada como entregue antes de código, testes e evidência correspondente.
 
@@ -205,6 +208,9 @@ Gate local completo:
 ```bash
 uv run python scripts/verify.py full
 ```
+
+Evidência D2B em 2026-09-30: gate Windows 13/13, 1357 testes aprovados e 18 skips, revisão
+independente e correções com regressões. Ver o [relatório de verificação](docs/superpowers/2026-09-30-goal-d2b-verification.md).
 
 ## Documentação
 

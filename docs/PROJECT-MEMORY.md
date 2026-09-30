@@ -157,13 +157,19 @@ está `PROVIDER_VERIFIED`.
 
 Em 2026-09-29, o slice local D2B implementa um job `heygen.video.generate` por SceneVariant,
 batch por campanha, tabela `heygen_renders` (migration 0008), reserva atômica com teto explícito
-e concorrência 1..2. Validação final/revisão em andamento; não marcar PROVIDER_VERIFIED.
+e concorrência 1..2. Em 2026-09-30, `IMPLEMENTED` e `LOCAL_VERIFIED`: gate Windows 13/13,
+1357 testes aprovados/18 skips e revisão independente com correções verificadas.
+`PROVIDER_VERIFIED` continua pendente D2C.
 
 MCP `create_video_from_image` recebe image asset + audio asset compartilhado. Não há engine
 ou idempotency key inventados: `provider_default` é validado contra schema remoto; callback
 serve apenas de correlação. `submitting` é persistido antes da chamada e o ID antes de polling.
 Resultado ambíguo bloqueia sem paid retry; ID conhecido retoma leitura/download. Sem ID, binding
 manual exige confirmação e recusa identidade contraditória/duplicada.
+
+Após esgotar tentativas locais, reconciliação explícita vincula atomicamente um job de recuperação
+ao mesmo render/ID remoto. Jobs anteriores e auditoria são preservados; nenhuma reserva/geração
+paga adicional. Há um job atual por variante, com jobs históricos adicionais nesse caso.
 
 Config material é separado de polling/concurrency na identidade. Jobs/reservas são reutilizados
 em replay; falha não devolve budget automaticamente. O WAV aprovado é validado por hash/duração,

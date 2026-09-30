@@ -10,7 +10,10 @@
 
 **Spec:** `docs/superpowers/specs/2026-09-29-goal-d2b-heygen-generation-download-design.md` (aprovado).
 
-**Execução preservada:** Native/inline, conforme escolha anterior. Plano aguardando revisão do usuário; nenhuma chamada paga nesta implementação.
+**Execução:** aprovada pelo usuário, Native/inline. Sete tasks implementados; revisão independente
+concluída com uma rodada de correções TDD. Gate Windows 13/13 em 2026-09-30
+(1357 testes aprovados/18 skips). Nenhuma chamada paga. Checkboxes abaixo preservam o roteiro
+original; evidência e adaptações em `../2026-09-30-goal-d2b-verification.md`.
 
 ## Global Constraints
 

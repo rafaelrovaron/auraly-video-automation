@@ -44,7 +44,7 @@ locais. Canary real exige autorização explícita.
 | 4D | Flow QC/Review/Provider Canary | `PAUSED` |
 | D1 | Manual Image Batch Intake | `IMPLEMENTED`, `LOCAL_VERIFIED` |
 | D2A | HeyGen Contract, Preflight & Asset Reuse | `IMPLEMENTED`, `LOCAL_VERIFIED` |
-| D2B | HeyGen Batch Generation, Polling & Download | `IMPLEMENTED`, validação final em andamento |
+| D2B | HeyGen Batch Generation, Polling & Download | `IMPLEMENTED`, `LOCAL_VERIFIED` |
 
 O código Flow permanece no repositório. Não removê-lo, reescrevê-lo ou expandi-lo durante o novo
 MVP sem um Goal específico aprovado.
@@ -55,7 +55,7 @@ MVP sem um Goal específico aprovado.
 D0  Documentation Alignment                    DONE
 D1  Manual Image Batch Intake                  DONE
 D2A HeyGen Contract, Preflight & Asset Reuse   DONE
-D2B HeyGen Batch Generation, Polling & Download IMPLEMENTED (validação final)
+D2B HeyGen Batch Generation, Polling & Download LOCAL_VERIFIED
 D2C HeyGen Real Canary                         NEXT (exige aprovação paga)
 D3A EditProfile, EditManifest & Override Resolution
 D3B Headline A/B Planning & Caption Inputs
@@ -200,7 +200,9 @@ ausente até D2C; nenhum canário real ou geração de vídeo é inferido dos te
 
 ## D2B — HeyGen Batch Generation, Polling & Download
 
-**Status:** `IMPLEMENTED` — baseline completo/revisão final em andamento; canário real permanece D2C.
+**Status:** `IMPLEMENTED`, `LOCAL_VERIFIED` — gate Windows 13/13 em 2026-09-30,
+1357 testes aprovados/18 skips; revisão independente e correções verificadas.
+Canário real permanece D2C; não `PROVIDER_VERIFIED`.
 
 ### Objetivo
 
