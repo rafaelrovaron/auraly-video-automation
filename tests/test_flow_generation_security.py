@@ -124,7 +124,7 @@ _EXPECTED_BLOCKED_POINTS = frozenset(
 @pytest.fixture(name="flow_generation_page")
 def provide_flow_generation_page() -> Iterator[Page]:
     with sync_playwright() as playwright:
-        browser = playwright.chromium.launch(headless=False)
+        browser = playwright.chromium.launch(headless=True)
         try:
             yield browser.new_page()
         finally:
