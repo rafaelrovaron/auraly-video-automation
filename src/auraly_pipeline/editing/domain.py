@@ -3,7 +3,10 @@ from __future__ import annotations
 from pathlib import PurePosixPath, PureWindowsPath
 from typing import Annotated, Any, Literal, Self
 
-from pydantic import AwareDatetime, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    AwareDatetime, ConfigDict, Field, SerializerFunctionWrapHandler,
+    field_validator, model_serializer, model_validator,
+)
 
 from auraly_pipeline.models import ContractModel
 
@@ -171,8 +174,19 @@ class FramingStyle(EditingModel):
 
 # Omitted partial fields have unvalidated None defaults, but explicit null is
 # rejected by non-nullable annotations. Always serialize partials exclude_unset.
-class TextOverride(EditingModel):
+class PartialModel(EditingModel):
     model_config = ConfigDict(revalidate_instances="never")
+
+    @model_serializer(mode="wrap")
+    def supplied_only(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        result: dict[str, Any] = handler(self)
+        allowed = self.model_fields_set | {
+            type(self).model_fields[name].alias for name in self.model_fields_set
+        }
+        return {key: value for key, value in result.items() if key in allowed}
+
+
+class TextOverride(PartialModel):
     enabled: bool = Field(default_factory=_omitted)
     style_id: Text = Field(default_factory=_omitted)
     font: AssetRef | None = None
@@ -211,8 +225,7 @@ class CaptionOverride(TextOverride):
     highlight_color: Color = Field(default_factory=_omitted)
 
 
-class MusicOverride(EditingModel):
-    model_config = ConfigDict(revalidate_instances="never")
+class MusicOverride(PartialModel):
     enabled: bool = Field(default_factory=_omitted)
     asset: AssetRef | None = None
     volume_db: Number = Field(default_factory=_omitted)
@@ -224,8 +237,7 @@ class MusicOverride(EditingModel):
     fade_out_sec: Nonnegative = Field(default_factory=_omitted)
 
 
-class FramingOverride(EditingModel):
-    model_config = ConfigDict(revalidate_instances="never")
+class FramingOverride(PartialModel):
     fit: Literal["cover", "contain"] = Field(default_factory=_omitted)
     scale: Scale = Field(default_factory=_omitted)
     x: Fraction = Field(default_factory=_omitted)
@@ -234,8 +246,7 @@ class FramingOverride(EditingModel):
     zoom_end: Scale = Field(default_factory=_omitted)
 
 
-class OutputOverride(EditingModel):
-    model_config = ConfigDict(revalidate_instances="never")
+class OutputOverride(PartialModel):
     width: int = Field(default_factory=_omitted, gt=0)
     height: int = Field(default_factory=_omitted, gt=0)
     fps: Positive = Field(default_factory=_omitted)
