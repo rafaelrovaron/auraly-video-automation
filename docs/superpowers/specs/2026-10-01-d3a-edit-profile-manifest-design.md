@@ -1,7 +1,7 @@
 # D3A — EditProfile, EditManifest e resolução de overrides
 
-Status: desenho conversacional aprovado em 2026-10-01; esta especificação
-aguarda revisão do usuário. Não há implementação D3A nem plano aprovado.
+Status: desenho e especificação aprovados pelo usuário em 2026-10-01.
+Não há implementação D3A nem plano aprovado.
 
 ## Resultado pretendido
 
