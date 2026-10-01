@@ -12,6 +12,7 @@ import typer
 from pydantic import ValidationError
 
 from auraly_pipeline.campaigns.domain import CampaignCreate
+from auraly_pipeline.editing.cli import register_editing_commands
 from auraly_pipeline.campaigns.persistence import default_database_path
 from auraly_pipeline.campaigns.service import CampaignError, CampaignService
 from auraly_pipeline.flow import FLOW_URL, FlowPreflightService, FlowWorkspaceIdentity
@@ -100,6 +101,7 @@ heygen_app = typer.Typer(
 )
 app.add_typer(heygen_app, name="heygen")
 register_video_commands(heygen_app)
+register_editing_commands(app)
 
 
 @app.command("ingest")

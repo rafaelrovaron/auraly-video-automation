@@ -1,0 +1,675 @@
+{
+  "$defs": {
+    "AssetRef": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "sha256"
+      ],
+      "title": "AssetRef",
+      "type": "object"
+    },
+    "CaptionOverride": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "styleId": {
+          "minLength": 1,
+          "title": "Styleid",
+          "type": "string"
+        },
+        "font": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AssetRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "fontWeight": {
+          "maximum": 900,
+          "minimum": 100,
+          "title": "Fontweight",
+          "type": "integer"
+        },
+        "fontSizePx": {
+          "exclusiveMinimum": 0,
+          "title": "Fontsizepx",
+          "type": "number"
+        },
+        "lineHeight": {
+          "exclusiveMinimum": 0,
+          "title": "Lineheight",
+          "type": "number"
+        },
+        "color": {
+          "pattern": "^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$",
+          "title": "Color",
+          "type": "string"
+        },
+        "strokeWidthPx": {
+          "minimum": 0,
+          "title": "Strokewidthpx",
+          "type": "number"
+        },
+        "strokeColor": {
+          "pattern": "^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$",
+          "title": "Strokecolor",
+          "type": "string"
+        },
+        "shadowEnabled": {
+          "title": "Shadowenabled",
+          "type": "boolean"
+        },
+        "shadowColor": {
+          "pattern": "^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$",
+          "title": "Shadowcolor",
+          "type": "string"
+        },
+        "shadowOffsetX": {
+          "title": "Shadowoffsetx",
+          "type": "number"
+        },
+        "shadowOffsetY": {
+          "title": "Shadowoffsety",
+          "type": "number"
+        },
+        "backgroundEnabled": {
+          "title": "Backgroundenabled",
+          "type": "boolean"
+        },
+        "backgroundColor": {
+          "pattern": "^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$",
+          "title": "Backgroundcolor",
+          "type": "string"
+        },
+        "backgroundPaddingPx": {
+          "minimum": 0,
+          "title": "Backgroundpaddingpx",
+          "type": "number"
+        },
+        "anchor": {
+          "enum": [
+            "top",
+            "center",
+            "bottom"
+          ],
+          "title": "Anchor",
+          "type": "string"
+        },
+        "x": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "X",
+          "type": "number"
+        },
+        "y": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Y",
+          "type": "number"
+        },
+        "safeTop": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Safetop",
+          "type": "number"
+        },
+        "safeRight": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Saferight",
+          "type": "number"
+        },
+        "safeBottom": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Safebottom",
+          "type": "number"
+        },
+        "safeLeft": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Safeleft",
+          "type": "number"
+        },
+        "maxLines": {
+          "exclusiveMinimum": 0,
+          "title": "Maxlines",
+          "type": "integer"
+        },
+        "fitPolicy": {
+          "enum": [
+            "wrap",
+            "shrink",
+            "error"
+          ],
+          "title": "Fitpolicy",
+          "type": "string"
+        },
+        "highlightEnabled": {
+          "title": "Highlightenabled",
+          "type": "boolean"
+        },
+        "highlightColor": {
+          "pattern": "^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$",
+          "title": "Highlightcolor",
+          "type": "string"
+        }
+      },
+      "title": "CaptionOverride",
+      "type": "object"
+    },
+    "EditOverrides": {
+      "additionalProperties": false,
+      "properties": {
+        "output": {
+          "$ref": "#/$defs/OutputOverride"
+        },
+        "headline": {
+          "$ref": "#/$defs/HeadlineOverride"
+        },
+        "captions": {
+          "$ref": "#/$defs/CaptionOverride"
+        },
+        "music": {
+          "$ref": "#/$defs/MusicOverride"
+        },
+        "framing": {
+          "$ref": "#/$defs/FramingOverride"
+        }
+      },
+      "title": "EditOverrides",
+      "type": "object"
+    },
+    "FramingOverride": {
+      "additionalProperties": false,
+      "properties": {
+        "fit": {
+          "enum": [
+            "cover",
+            "contain"
+          ],
+          "title": "Fit",
+          "type": "string"
+        },
+        "scale": {
+          "maximum": 1.25,
+          "minimum": 1,
+          "title": "Scale",
+          "type": "number"
+        },
+        "x": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "X",
+          "type": "number"
+        },
+        "y": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Y",
+          "type": "number"
+        },
+        "zoomStart": {
+          "maximum": 1.25,
+          "minimum": 1,
+          "title": "Zoomstart",
+          "type": "number"
+        },
+        "zoomEnd": {
+          "maximum": 1.25,
+          "minimum": 1,
+          "title": "Zoomend",
+          "type": "number"
+        }
+      },
+      "title": "FramingOverride",
+      "type": "object"
+    },
+    "HeadlineOverride": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "styleId": {
+          "minLength": 1,
+          "title": "Styleid",
+          "type": "string"
+        },
+        "font": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AssetRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "fontWeight": {
+          "maximum": 900,
+          "minimum": 100,
+          "title": "Fontweight",
+          "type": "integer"
+        },
+        "fontSizePx": {
+          "exclusiveMinimum": 0,
+          "title": "Fontsizepx",
+          "type": "number"
+        },
+        "lineHeight": {
+          "exclusiveMinimum": 0,
+          "title": "Lineheight",
+          "type": "number"
+        },
+        "color": {
+          "pattern": "^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$",
+          "title": "Color",
+          "type": "string"
+        },
+        "strokeWidthPx": {
+          "minimum": 0,
+          "title": "Strokewidthpx",
+          "type": "number"
+        },
+        "strokeColor": {
+          "pattern": "^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$",
+          "title": "Strokecolor",
+          "type": "string"
+        },
+        "shadowEnabled": {
+          "title": "Shadowenabled",
+          "type": "boolean"
+        },
+        "shadowColor": {
+          "pattern": "^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$",
+          "title": "Shadowcolor",
+          "type": "string"
+        },
+        "shadowOffsetX": {
+          "title": "Shadowoffsetx",
+          "type": "number"
+        },
+        "shadowOffsetY": {
+          "title": "Shadowoffsety",
+          "type": "number"
+        },
+        "backgroundEnabled": {
+          "title": "Backgroundenabled",
+          "type": "boolean"
+        },
+        "backgroundColor": {
+          "pattern": "^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$",
+          "title": "Backgroundcolor",
+          "type": "string"
+        },
+        "backgroundPaddingPx": {
+          "minimum": 0,
+          "title": "Backgroundpaddingpx",
+          "type": "number"
+        },
+        "anchor": {
+          "enum": [
+            "top",
+            "center",
+            "bottom"
+          ],
+          "title": "Anchor",
+          "type": "string"
+        },
+        "x": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "X",
+          "type": "number"
+        },
+        "y": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Y",
+          "type": "number"
+        },
+        "safeTop": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Safetop",
+          "type": "number"
+        },
+        "safeRight": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Saferight",
+          "type": "number"
+        },
+        "safeBottom": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Safebottom",
+          "type": "number"
+        },
+        "safeLeft": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Safeleft",
+          "type": "number"
+        },
+        "maxLines": {
+          "exclusiveMinimum": 0,
+          "title": "Maxlines",
+          "type": "integer"
+        },
+        "fitPolicy": {
+          "enum": [
+            "wrap",
+            "shrink",
+            "error"
+          ],
+          "title": "Fitpolicy",
+          "type": "string"
+        },
+        "text": {
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        },
+        "startSec": {
+          "minimum": 0,
+          "title": "Startsec",
+          "type": "number"
+        },
+        "endSec": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Endsec"
+        }
+      },
+      "title": "HeadlineOverride",
+      "type": "object"
+    },
+    "IdentityRef": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "hash": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Hash",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "hash"
+      ],
+      "title": "IdentityRef",
+      "type": "object"
+    },
+    "MusicOverride": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "asset": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AssetRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "volumeDb": {
+          "title": "Volumedb",
+          "type": "number"
+        },
+        "duckUnderVoiceDb": {
+          "title": "Duckundervoicedb",
+          "type": "number"
+        },
+        "loop": {
+          "title": "Loop",
+          "type": "boolean"
+        },
+        "trimStartSec": {
+          "minimum": 0,
+          "title": "Trimstartsec",
+          "type": "number"
+        },
+        "trimEndSec": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Trimendsec"
+        },
+        "fadeInSec": {
+          "minimum": 0,
+          "title": "Fadeinsec",
+          "type": "number"
+        },
+        "fadeOutSec": {
+          "minimum": 0,
+          "title": "Fadeoutsec",
+          "type": "number"
+        }
+      },
+      "title": "MusicOverride",
+      "type": "object"
+    },
+    "OutputOverride": {
+      "additionalProperties": false,
+      "properties": {
+        "width": {
+          "exclusiveMinimum": 0,
+          "title": "Width",
+          "type": "integer"
+        },
+        "height": {
+          "exclusiveMinimum": 0,
+          "title": "Height",
+          "type": "integer"
+        },
+        "fps": {
+          "exclusiveMinimum": 0,
+          "title": "Fps",
+          "type": "number"
+        },
+        "format": {
+          "const": "mp4",
+          "title": "Format",
+          "type": "string"
+        },
+        "codec": {
+          "const": "h264",
+          "title": "Codec",
+          "type": "string"
+        }
+      },
+      "title": "OutputOverride",
+      "type": "object"
+    },
+    "ProfileRef": {
+      "additionalProperties": false,
+      "properties": {
+        "profileId": {
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+          "title": "Profileid",
+          "type": "string"
+        },
+        "version": {
+          "exclusiveMinimum": 0,
+          "title": "Version",
+          "type": "integer"
+        },
+        "hash": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Hash",
+          "type": "string"
+        }
+      },
+      "required": [
+        "profileId",
+        "version",
+        "hash"
+      ],
+      "title": "ProfileRef",
+      "type": "object"
+    },
+    "SourceVideoRef": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        },
+        "id": {
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "durationSec": {
+          "exclusiveMinimum": 0,
+          "title": "Durationsec",
+          "type": "number"
+        }
+      },
+      "required": [
+        "path",
+        "sha256",
+        "id",
+        "durationSec"
+      ],
+      "title": "SourceVideoRef",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Schemaversion",
+      "type": "string"
+    },
+    "profileRef": {
+      "$ref": "#/$defs/ProfileRef"
+    },
+    "campaignId": {
+      "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+      "title": "Campaignid",
+      "type": "string"
+    },
+    "videoId": {
+      "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+      "title": "Videoid",
+      "type": "string"
+    },
+    "outputVariantId": {
+      "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+      "title": "Outputvariantid",
+      "type": "string"
+    },
+    "source": {
+      "$ref": "#/$defs/SourceVideoRef"
+    },
+    "headlineText": {
+      "minLength": 1,
+      "title": "Headlinetext",
+      "type": "string"
+    },
+    "copyRef": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/IdentityRef"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "voiceRef": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/IdentityRef"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "musicAccepted": {
+      "default": false,
+      "title": "Musicaccepted",
+      "type": "boolean"
+    },
+    "campaign": {
+      "$ref": "#/$defs/EditOverrides"
+    },
+    "video": {
+      "$ref": "#/$defs/EditOverrides"
+    },
+    "outputVariant": {
+      "$ref": "#/$defs/EditOverrides"
+    }
+  },
+  "required": [
+    "profileRef",
+    "campaignId",
+    "videoId",
+    "outputVariantId",
+    "source",
+    "headlineText"
+  ],
+  "title": "EditResolveRequest",
+  "type": "object",
+  "$id": "https://auraly.local/schemas/edit-resolve.schema.json"
+}

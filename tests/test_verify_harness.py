@@ -68,6 +68,17 @@ def load_verify_workflow() -> dict[Any, Any]:
     return loaded
 
 
+def test_editing_schemas_are_audited_by_full_gate() -> None:
+    verify = load_verify_module()
+    steps = [step for step in verify.build_full_steps() if step.name == "editing schemas"]
+    assert len(steps) == 1
+    assert steps[0].argv == ("uv", "run", "python", "-m", "auraly_pipeline.editing.schema")
+    assert steps[0].generated_files == (
+        Path("schemas/edit-profile.schema.json"), Path("schemas/edit-resolve.schema.json"),
+        Path("schemas/edit-manifest.v2.schema.json"),
+    )
+
+
 def workflow_commands(job: dict[Any, Any]) -> list[str]:
     return [step["run"] for step in job["steps"] if "run" in step]
 
@@ -233,6 +244,7 @@ def test_full_contains_agents_deterministic_baseline_in_order() -> None:
             "schemas/image-generation.schema.json",
         ),
         ("uv", "run", "python", "-m", "auraly_pipeline.voices.schema"),
+        ("uv", "run", "python", "-m", "auraly_pipeline.editing.schema"),
         ("uv", "pip", "check"),
         ("npm", "ci"),
         ("npm", "run", "hf:doctor"),
@@ -403,6 +415,7 @@ def test_full_schema_generators_declare_tracked_outputs() -> None:
         "edit schema": (Path("schemas/edit.schema.json"),),
         "image generation schema": (Path("schemas/image-generation.schema.json"),),
         "voice schemas": (Path("schemas/voice-import.schema.json"), Path("schemas/voice-master.schema.json")),
+        "editing schemas": (Path("schemas/edit-profile.schema.json"), Path("schemas/edit-resolve.schema.json"), Path("schemas/edit-manifest.v2.schema.json")),
     }
 
 

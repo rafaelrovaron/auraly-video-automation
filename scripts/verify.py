@@ -92,6 +92,13 @@ def build_full_steps(os_name: str = os.name) -> tuple[VerificationStep, ...]:
             ("uv", "run", "python", "-m", "auraly_pipeline.voices.schema"),
             generated_files=(Path("schemas/voice-import.schema.json"), Path("schemas/voice-master.schema.json")),
         ),
+        VerificationStep(
+            "editing schemas",
+            ("uv", "run", "python", "-m", "auraly_pipeline.editing.schema"),
+            generated_files=(Path("schemas/edit-profile.schema.json"),
+                             Path("schemas/edit-resolve.schema.json"),
+                             Path("schemas/edit-manifest.v2.schema.json")),
+        ),
         VerificationStep("uv dependency check", ("uv", "pip", "check")),
         VerificationStep("npm locked install", (npm, "ci")),
         VerificationStep("HyperFrames doctor", (npm, "run", "hf:doctor")),
