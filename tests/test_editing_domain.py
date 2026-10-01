@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from auraly_pipeline.editing.domain import EditOverrides, EditProfile, EditResolveRequest
+from auraly_pipeline.editing.domain import EditManifestV2, EditOverrides, EditProfile, EditResolveRequest
 from auraly_pipeline.models import EditManifest
 from tests.editing_helpers import profile_data, request_data
 
@@ -58,3 +58,21 @@ def test_contract_rejects_unsafe_ids(value: str) -> None:
 def test_legacy_still_validates() -> None:
     manifest = EditManifest.model_validate(json.loads(Path("examples/susan.edit.json").read_text()))
     assert manifest.schema_version == "1.0"
+
+
+@pytest.mark.parametrize("change", ["font", "interval", "music", "provenance", "overrides"])
+def test_manifest_enforces_resolved_semantics(change: str) -> None:
+    data = json.loads(Path("examples/edit-manifest.v2.json").read_text())
+    if change == "font":
+        data["headline"].update(enabled=True, font=None)
+    elif change == "interval":
+        data["headline"].update(startSec=3, endSec=2)
+    elif change == "music":
+        data["music"].update(enabled=True, asset=None)
+        data["musicAccepted"] = False
+    elif change == "provenance":
+        data["provenance"] = {}
+    else:
+        data["overrides"] = {}
+    with pytest.raises(ValidationError):
+        EditManifestV2.model_validate(data)

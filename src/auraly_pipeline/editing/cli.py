@@ -2,14 +2,15 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 import json
+import os
 from pathlib import Path
 from typing import Annotated, Iterator
 
 import typer
 from pydantic import ValidationError
 
-from auraly_pipeline.config_paths import configured_project_root, configured_work_root
-from auraly_pipeline.editing.domain import EditManifestV2, EditProfile, EditResolveRequest, EditingError
+from auraly_pipeline.config_paths import DEFAULT_PROJECT_ROOT, WORK_ROOT_RELATIVE
+from auraly_pipeline.editing.domain import EditManifestV2, EditProfile, EditResolveRequest, EditingError, validation_field
 from auraly_pipeline.editing.resolver import verify_manifest_hash
 from auraly_pipeline.editing.service import EditingService
 
@@ -29,7 +30,7 @@ def _errors() -> Iterator[None]:
         typer.echo(str(exc), err=True)
         raise typer.Exit(1) from None
     except ValidationError as exc:
-        field = ".".join(str(part) for part in exc.errors()[0]["loc"])
+        field = validation_field(exc)
         typer.echo(f"{field}: invalid field", err=True)
         raise typer.Exit(1) from None
     except (OSError, ValueError):
@@ -39,8 +40,9 @@ def _errors() -> Iterator[None]:
 
 def _service(project_root: Path | None, work_root: Path | None) -> EditingService:
     # Preserve supplied lexical roots until ancestor validation in the service.
-    project = project_root.absolute() if project_root else configured_project_root()
-    work = work_root.absolute() if work_root else configured_work_root(project_root=project)
+    configured = os.environ.get("AURALY_PROJECT_ROOT", "").strip()
+    project = (project_root or (Path(configured) if configured else DEFAULT_PROJECT_ROOT)).expanduser().absolute()
+    work = work_root.expanduser().absolute() if work_root else project / WORK_ROOT_RELATIVE
     return EditingService(project_root=project, work_root=work)
 
 

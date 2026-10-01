@@ -8,7 +8,7 @@ import sys
 import pytest
 
 from auraly_pipeline.editing.domain import EditProfile, EditResolveRequest, EditingError
-from auraly_pipeline.editing.resolver import profile_hash
+from auraly_pipeline.editing.resolver import content_hash, profile_hash
 from auraly_pipeline.editing.service import EditingService
 from tests.editing_helpers import file_sha, make_source, profile_data, request_data
 
@@ -157,3 +157,18 @@ def test_changed_source_hash_is_rejected(tmp_path: Path) -> None:
     with pytest.raises(EditingError) as exc:
         service.resolve(request)
     assert exc.value.field == "source.sha256"
+
+
+def test_get_rejects_consistently_rehashed_invalid_snapshot(tmp_path: Path) -> None:
+    service, request = setup(tmp_path)
+    service.resolve(request)
+    original = list((tmp_path / "work").rglob("manifest.json"))[0]
+    data = json.loads(original.read_text())
+    data["provenance"] = {}
+    sha = content_hash({key: value for key, value in data.items() if key != "manifestHash"})
+    data["manifestHash"] = sha
+    destination = original.parent.parent / sha / "manifest.json"
+    destination.parent.mkdir()
+    destination.write_text(json.dumps(data))
+    with pytest.raises(EditingError):
+        service.get_manifest("campaign-1", "video-1", "a", sha)

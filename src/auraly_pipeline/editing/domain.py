@@ -5,7 +5,7 @@ from typing import Annotated, Any, Literal, Self
 
 from pydantic import (
     AwareDatetime, ConfigDict, Field, SerializerFunctionWrapHandler,
-    field_validator, model_serializer, model_validator,
+    ValidationError, field_validator, model_serializer, model_validator,
 )
 
 from auraly_pipeline.models import ContractModel
@@ -317,3 +317,46 @@ class EditManifestV2(EditingModel):
     provenance: dict[str, Origin]
     manifest_hash: Sha
     _ids = field_validator("campaign_id", "video_id", "output_variant_id")(safe_id)
+
+    @model_validator(mode="after")
+    def resolved_invariants(self) -> Self:
+        def reject(field: str, message: str) -> None:
+            raise EditingError(field, message, self.provenance.get(field))
+
+        if set(self.overrides) != {"campaign", "video", "outputVariant"}:
+            reject("overrides", "all three override layers required")
+        expected = {
+            f"{section}.{field}" for section in ("output", "headline", "captions", "music", "framing")
+            for field in getattr(self, section).model_dump(by_alias=True)
+        }
+        if set(self.provenance) != expected:
+            reject("provenance", "complete known-field provenance required")
+        for section, style in (("headline", self.headline), ("captions", self.captions)):
+            if style.enabled and style.font is None:
+                reject(section + ".font", "local font required for enabled text")
+        if not self.headline.start_sec < self.headline.end_sec <= self.source.duration_sec:
+            reject("headline.endSec", "interval must be within source duration and after start")
+        if self.music.enabled:
+            if self.music.asset is None:
+                reject("music.asset", "local music asset required")
+            if not self.music_accepted:
+                reject("musicAccepted", "explicit operator acceptance required")
+            for field, value in (("fadeInSec", self.music.fade_in_sec), ("fadeOutSec", self.music.fade_out_sec)):
+                if value > self.source.duration_sec:
+                    reject("music." + field, "fade exceeds output duration")
+        if self.music.trim_end_sec is not None and self.music.trim_end_sec <= self.music.trim_start_sec:
+            reject("music.trimEndSec", "trim end must be after start")
+        return self
+
+
+def validation_field(exc: ValidationError) -> str:
+    """Locations may contain arbitrary input keys: expose only schema field names."""
+    known = {"manifest"}
+    for item in globals().values():
+        if isinstance(item, type) and issubclass(item, EditingModel):
+            known.update(item.model_fields)
+            known.update(field.alias for field in item.model_fields.values() if field.alias)
+    error = exc.errors()[0]
+    context = error.get("ctx", {}).get("error")
+    loc = context.field.split(".") if isinstance(context, EditingError) else error["loc"]
+    return ".".join(str(part) if part in known else "unknownField" for part in loc) or "manifest"

@@ -51,25 +51,9 @@ def resolve_manifest(profile: EditProfile, request: EditResolveRequest) -> EditM
 
     for section in ("headline", "captions"):
         style = sections[section]
-        if style["enabled"] and style["font"] is None:
-            reject(f"{section}.font", "local font required for enabled text")
         for a, b in (("safeLeft", "safeRight"), ("safeTop", "safeBottom")):
             if style[a] + style[b] >= 1:
                 reject(f"{section}.{b}", "safe zones leave no canvas area")
-    headline = sections["headline"]
-    if not headline["startSec"] < headline["endSec"] <= request.source.duration_sec:
-        reject("headline.endSec", "interval must be within source duration and after start")
-    music = sections["music"]
-    if music["enabled"] and music["asset"] is None:
-        reject("music.asset", "local music asset required")
-    if music["enabled"] and not request.music_accepted:
-        raise EditingError("musicAccepted", "explicit operator acceptance required")
-    if music["trimEndSec"] is not None and music["trimEndSec"] <= music["trimStartSec"]:
-        reject("music.trimEndSec", "trim end must be after start")
-    if music["enabled"]:
-        for field in ("fadeInSec", "fadeOutSec"):
-            if music[field] > request.source.duration_sec:
-                reject(f"music.{field}", "fade exceeds output duration")
     payload = {
         "schemaVersion": "2.0", "resolverVersion": "1.0",
         "campaignId": request.campaign_id, "videoId": request.video_id,
@@ -86,6 +70,9 @@ def resolve_manifest(profile: EditProfile, request: EditResolveRequest) -> EditM
         # Normalize through the final contract before hashing (e.g. numeric floats).
         manifest = EditManifestV2.model_validate({**payload, "manifestHash": "0" * 64})
     except ValidationError as exc:
+        context = exc.errors()[0].get("ctx", {}).get("error")
+        if isinstance(context, EditingError):
+            raise context from None
         field = ".".join(str(part) for part in exc.errors()[0]["loc"])
         raise EditingError(field, "invalid resolved field", provenance.get(field)) from None
     manifest.manifest_hash = content_hash(manifest.model_dump(mode="json", by_alias=True, exclude={"manifest_hash"}))
