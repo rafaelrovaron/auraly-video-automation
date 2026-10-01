@@ -64,7 +64,10 @@ class VoiceMasterRow(Base):
         ),
         CheckConstraint(
             "approval_review_reason IS NULL OR (status = 'approved' "
-            "AND length(trim(approval_review_reason)) BETWEEN 1 AND 512 "
+            "AND length(approval_review_reason) BETWEEN 1 AND 512 "
+            "AND instr(approval_review_reason, char(0)) = 0 "
+            "AND length(trim(approval_review_reason, char(9,10,11,12,13,28,29,30,31,32,133,160,5760,"
+            "8192,8193,8194,8195,8196,8197,8198,8199,8200,8201,8202,8232,8233,8239,8287,12288))) > 0 "
             "AND instr(approval_review_reason, char(10)) = 0 AND instr(approval_review_reason, char(13)) = 0)",
             name="voice_review_reason",
         ),

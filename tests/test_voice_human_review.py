@@ -23,6 +23,53 @@ from tests import test_voice_external_import as imports
 REASON = "Audio accepted for this technical test."
 
 
+def test_sql_review_reason_rejects_blank_unicode_and_raw_overlength(review_voice, tmp_path: Path) -> None:
+    from typing import cast
+    from sqlalchemy import CheckConstraint, Table
+    from auraly_pipeline.voices.db_models import VoiceMasterRow
+
+    _, before, _ = review_voice
+    reasons = ["", "\t \u00a0\u2003", "x" * 513, " " + "x" * 512, "Accepted.\0" + "x" * 513]
+    reasons.extend("\t\n\v\f\r\x1c\x1d\x1e\x1f \x85\xa0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000")
+    engine = create_sqlite_engine(tmp_path / "test.db")
+    try:
+        constraint = next(
+            c for c in cast(Table, VoiceMasterRow.__table__).constraints
+            if isinstance(c, CheckConstraint) and str(c.name).endswith("voice_review_reason")
+        )
+        with engine.begin() as connection:
+            connection.execute(text(f"CREATE TABLE reason_model (status TEXT, approval_review_reason TEXT, CHECK ({constraint.sqltext}))"))
+        for reason in reasons:
+            with pytest.raises(IntegrityError), engine.begin() as connection:
+                connection.execute(text("INSERT INTO reason_model VALUES ('approved', :reason)"), {"reason": reason})
+            with pytest.raises(IntegrityError), engine.begin() as connection:
+                connection.execute(text("UPDATE voice_masters SET status='approved', approved_by='rafael', approved_at=:now, approval_review_reason=:reason WHERE id=:id"),
+                                   {"now": datetime.now(UTC), "reason": reason, "id": before.voice_master_id})
+            with pytest.raises(IntegrityError, match="invalid voice review reason"), engine.begin() as connection:
+                connection.execute(text("INSERT INTO voice_masters (id, approval_review_reason) VALUES ('invalid', :reason)"), {"reason": reason})
+        with engine.begin() as connection:
+            connection.execute(text("INSERT INTO reason_model VALUES ('approved', :reason)"), {"reason": "Aceito após revisão humana."})
+    finally:
+        engine.dispose()
+
+
+def test_reason_trigger_migration_preserves_approved_voice(review_voice, tmp_path: Path) -> None:
+    voices, before, _ = review_voice
+    approved = voices.approve(before.voice_master_id, approved_by="rafael", approval_review_reason=REASON)
+    config = config_for(tmp_path / "test.db")
+    command.downgrade(config, "0010_voice_human_review")
+    command.upgrade(config, "head")
+    assert voices.get(before.voice_master_id) == approved
+    engine = create_sqlite_engine(tmp_path / "test.db")
+    try:
+        with engine.connect() as connection:
+            assert connection.execute(text("PRAGMA foreign_key_check")).all() == []
+        with pytest.raises(IntegrityError), engine.begin() as connection:
+            connection.execute(text("UPDATE voice_masters SET approval_review_reason='changed'"))
+    finally:
+        engine.dispose()
+
+
 def test_voice_model_approval_constraint_is_valid_sql() -> None:
     from typing import cast
     from sqlalchemy import Table, create_engine

@@ -54,8 +54,20 @@ No media, signed URLs, tokens or personal account data are committed. No merge/p
   user are not independently detectable; provider ownership remains authoritative.
 - Unexpected pagination and known queued uploads fail closed; no generalized retry/pagination
   subsystem added. Unknown creation never triggers another POST.
-- Minor deferred: SQLite direct-SQL reason checks accept some whitespace/sensitive strings that
-  CLI/service/domain reject. Only supported service approval was used. Tighten SQL whitespace
-  parity and explicitly document application-only sensitive-text validation before merge.
+- Original minor: SQLite direct-SQL reason checks accepted some whitespace/sensitive strings
+  rejected by CLI/service/domain. Only supported service approval was used for the canary.
+  Follow-up on 2026-10-01 fixes Unicode blank-reason and raw-length validation through migration
+  0011 INSERT/UPDATE triggers and the model CHECK, rejecting embedded NULs that truncate SQLite
+  length checks, without rebuilding the table or editing history.
+  Sensitive-text validation explicitly remains application-owned; no duplicated SQL regexes/UDFs.
 - Reviewer declined real-provider success, workspace redesign and queued-upload recovery;
   these are not claimed proven by local mocks. Baseline was run by the implementer.
+
+## SQL follow-up verification — 2026-10-01
+
+Blank Unicode and embedded-NUL/length regressions reproduced before their fixes, then passed.
+20 voice-review tests passed, including native SQL INSERT/UPDATE, model CHECK and migration
+roundtrip preserving approved evidence, foreign keys and immutability. Independent review found
+no critical/important issues; its NUL bypass finding was corrected and verified RED→GREEN.
+Final full gate: 14/14 steps, 1432 passed/19 skipped (252.84 s pytest). No provider calls,
+new dependencies, table rebuild, live media changes, merge or push in this follow-up.

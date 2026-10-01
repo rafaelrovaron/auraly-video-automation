@@ -228,9 +228,11 @@ de criação sem ID segue limitação conhecida, não resolvida por gerar outro 
 Revisão visual final continua humana; D3A é a próxima etapa planejada.
 Evidência: `docs/superpowers/2026-09-30-d2c-canary-verification.md`.
 
-Limitação menor da revisão: sanitização completa do motivo é garantida pelo serviço/domínio,
-não pelo CHECK SQL isolado (trim SQLite não cobre todo whitespace Unicode). Não usar SQL direto
-para aprovações; paridade adicional de SQL está registrada como dívida antes de merge.
+Alinhamento SQL em 2026-10-01: migration 0011 adiciona gatilhos INSERT/UPDATE que recusam motivos
+vazios com whitespace Unicode, caracteres NUL e mais de 512 caracteres antes de trim, sem reconstruir a tabela
+ou modificar aprovações existentes. O CHECK do modelo aplica a mesma regra estrutural.
+Sanitização de dados sensíveis permanece responsabilidade do serviço/domínio existente; SQL
+direto não substitui esse validador. Não duplicar regexes ou registrar funções Python no SQLite.
 
 ## 5. Contrato de importação batch de imagens
 
