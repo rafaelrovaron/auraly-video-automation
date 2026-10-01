@@ -57,8 +57,8 @@ D1  Manual Image Batch Intake                  DONE
 D2A HeyGen Contract, Preflight & Asset Reuse   DONE
 D2B HeyGen Batch Generation, Polling & Download LOCAL_VERIFIED
 D2C HeyGen Real Canary                         PROVIDER_VERIFIED (vínculo manual)
-D3A EditProfile, EditManifest & Override Resolution NEXT
-D3B Headline A/B Planning & Caption Inputs
+D3A EditProfile, EditManifest & Override Resolution LOCAL_VERIFIED
+D3B Headline A/B Planning & Caption Inputs NEXT
 D4A FastAPI Operational API
 D4B React Operations UI & Approximate Preview
 D5A Deterministic Renderer
@@ -268,8 +268,8 @@ Resposta sem ID verificável bloqueou corretamente, sem nova cobrança automáti
 encontrou candidato concluído com duração 7,21733 s. Rafael confirmou o vínculo manual; download/QC
 passaram (H.264/AAC, 1080×1920, 7,224 s, full decode). Replay sem novo dispatch/reserva.
 Resposta automática sem ID permanece limitação, não recuperação automática verificada.
-Gate 14/14; 1430 testes aprovados/19 skips. D3A continua planejado,
-não iniciado. Ver `docs/superpowers/2026-09-30-d2c-canary-verification.md`.
+Gate daquele checkpoint: 14/14; 1430 testes aprovados/19 skips, antes do D3A.
+Ver `docs/superpowers/2026-09-30-d2c-canary-verification.md`.
 
 ### Saída
 
@@ -278,7 +278,14 @@ não iniciado. Ver `docs/superpowers/2026-09-30-d2c-canary-verification.md`.
 
 ## D3A — EditProfile, EditManifest & Override Resolution
 
-**Status:** `PLANNED`.
+**Status:** `IMPLEMENTED`, `LOCAL_VERIFIED`; revisão independente e correções concluídas.
+
+Contratos/schemas/CLI novos coexistem com v1 sem migração automática. Persistência
+JSON versionada, resolver puro, precedence/provenance e validação de assets locais.
+Teste somente leitura com MP4 real D2C passou, replay com mesmo hash e fonte intacta,
+sem paid calls. Sem UI, renderer, Jobs ou tabelas adicionais.
+Evidência: `docs/superpowers/2026-10-01-d3a-verification.md`.
+Gate Windows pós-correções 15/15, 1491 testes aprovados/20 skips; não há nova evidência de provider.
 
 ### Objetivo
 

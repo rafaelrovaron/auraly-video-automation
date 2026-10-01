@@ -36,10 +36,11 @@ entrega.
 - runtime Google Flow/Playwright, geração, correlação de downloads e recuperação implementados e
   verificados com fixtures locais;
 - CLI JSON e harness de verificação para as capacidades acima.
+- D3A: profiles locais versionados, manifest v2, resolver tipado com hash/provenance,
+  persistência exclusiva e CLI `edit`, sem renderer ou chamadas de provider.
 
 ### Não entregue ainda
 
-- `EditProfile` reutilizável e resolução de overrides por vídeo/variante;
 - render final com headline, captions, música e framing configuráveis;
 - variações A/B de headline sem regenerar voz, imagem ou HeyGen;
 - API FastAPI e interface React local;
@@ -161,8 +162,8 @@ em uma fila real que também contenha jobs pagos.
 
 ## Próximo slice de desenvolvimento
 
-O próximo Goal de desenvolvimento é **D3A — EditProfile, EditManifest & Override Resolution**.
-Antes, revisar visualmente o vídeo do canário e decidir a integração da branch.
+O próximo Goal após D3A é **D3B — Headline A/B Planning & Caption Inputs**.
+Revisão visual final do vídeo do canário continua humana; configurar um manifest não aprova o vídeo.
 
 A execução de 2026-09-30 aprovou o WAV existente com motivo auditável, completou upload de
 uma imagem e um áudio e despachou uma única geração, com concorrência 1. A resposta não
@@ -187,10 +188,12 @@ O escopo completo e os critérios de saída estão em
 - sem multiusuário, cloud sync próprio, publicação social ou infraestrutura distribuída;
 - sem timeline, drag-and-drop livre ou preview frame-perfect.
 
-## Contratos de edição planejados
+## Configurar edição local (D3A)
 
-`EditProfile` guarda defaults reutilizáveis de estilo. `EditManifest` registra a configuração
-resolvida e imutável de cada render.
+`EditProfile` v1 guarda defaults reutilizáveis de estilo, sem texto de campanha/MP4.
+`EditManifest` v2 registra um snapshot hashável da configuração resolvida; não é um render.
+O `edit.json` legado v1, ingest e seu schema permanecem intactos. Não há conversão
+automática de cuts, punch-ins ou b-roll para o novo contrato.
 
 Precedência:
 
@@ -198,9 +201,34 @@ Precedência:
 EditProfile < campaign defaults < video override < output variant override
 ```
 
-Os overrides serão restritos a campos editoriais conhecidos. Uma variante de headline altera
-somente `headline.text` e recebe outro output/version ID; não cria nova Voice Master, imagem ou
-geração HeyGen.
+Overrides são restritos a campos conhecidos. Omitir herda; false/zero são explícitos;
+null só vale para referências/end nullable. A origem fica registrada por campo.
+Trocar `headline.text` muda o hash downstream, sem alterar fonte/voz/imagem/HeyGen.
+O planejador em lote e texto/timing de captions ainda pertencem ao D3B.
+
+```powershell
+uv run python -m auraly_pipeline.cli edit profile-create --request examples/edit-profile.json
+uv run python -m auraly_pipeline.cli edit profile-list
+uv run python -m auraly_pipeline.cli edit profile-get --profile-id plain --version 1
+uv run python -m auraly_pipeline.cli edit resolve --request minha-edicao.json --dry-run
+uv run python -m auraly_pipeline.cli edit resolve --request minha-edicao.json
+uv run python -m auraly_pipeline.cli edit validate --manifest meu-manifest-v2.json
+```
+
+`examples/edit-resolve.json` e `edit-manifest.v2.json` são contratos sintéticos:
+substitua IDs, path, SHA-256 e duração pelo MP4 local real e o hash do profile publicado.
+Headline/captions/music vêm desabilitadas, sem presumir fontes instaladas.
+Para habilitar texto, forneça fonte TTF/OTF local com path/hash; música exige asset
+local e `musicAccepted=true`. Paths de assets são POSIX relativos ao project root.
+
+Comandos de serviço aceitam `--project-root`/`--work-root`. Profiles ficam em
+`editing/profiles/<id>/<version>/profile.json` sob work root, com checksum de conteúdo;
+manifests em `campaigns/<campaign>/editing/<video>/<output-variant>/<hash>/manifest.json`.
+Replay íntegro é reutilizado; conflito/corrupção não sobrescreve. Alterar profile usa
+`edit profile-new-version --profile-id plain --base-version 1 --request novo-profile.json`
+com versão 2 no documento. Nenhuma tabela SQL ou Job é criado.
+
+Evidência e limites: [D3A verification](docs/superpowers/2026-10-01-d3a-verification.md).
 
 ## Interface local planejada
 

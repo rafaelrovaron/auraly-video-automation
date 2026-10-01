@@ -26,16 +26,19 @@ genérico e não terá timeline estilo CapCut ou preview frame-perfect.
 - domínio/review de imagens;
 - importação batch de imagens manuais, dry-run, provenance e CLI JSON;
 - D2A upload/reuso de assets via MCP/OAuth e D2B geração/polling/download via CLI implementados;
-  D2B `LOCAL_VERIFIED` (gate Windows 13/13 e revisão independente); HeyGen real não é PROVIDER_VERIFIED;
+  D2B `LOCAL_VERIFIED` (gate Windows 13/13 e revisão independente); D2C confirmou
+  um canário real com vínculo manual, não escala em lote ou recuperação automática do ID;
 - automação Google Flow implementada e localmente verificada;
 - contrato `edit.json` legado, ingestão e inspeção de mídia;
+- D3A: EditProfile versionado, EditManifest v2, resolver de overrides/provenance,
+  persistência JSON local e CLI, sem UI/render ou caption timing;
 - CLI e harness de verificação.
 
 ### 2.2 Capacidade alvo deste PRD
 
 - uploads e geração HeyGen em batch;
 - polling retomável e download dos MP4;
-- EditProfile + EditManifest + overrides;
+- integração dos profiles/manifests/overrides D3A com a UI e renderer;
 - headline/captions/music/framing configuráveis;
 - A/B de headline downstream;
 - API FastAPI e UI React local;
@@ -800,3 +803,12 @@ Voz importada permite aceitação humana auditável somente de `review_required`
 ASR/QC/WAV/hashes; divergência grave, headline falada e outros achados continuam bloqueantes.
 UI/editor/A/B continuam capacidades alvo. Evidência em
 `docs/superpowers/2026-09-30-d2c-canary-verification.md`.
+
+Atualização 2026-10-01: D3A implementa configuração editorial e snapshots v2,
+coexistindo com o contrato legado v1 intacto. Profiles locais versionados com hash,
+resolução pura profile/campaign/video/outputVariant e provenance por campo;
+persistência exclusiva, dry-run e CLI `edit`. Sem novas tabelas, Jobs ou paid calls.
+Caption style está disponível; caption text/timing e planejamento A/B batch ficam
+no D3B. UI/preview/render continuam capacidades alvo. Evidência D3A em
+`docs/superpowers/2026-10-01-d3a-verification.md`. D3A `IMPLEMENTED`/`LOCAL_VERIFIED`,
+gate Windows pós-correções 15/15 (1491 passed/20 skipped), revisão independente concluída.

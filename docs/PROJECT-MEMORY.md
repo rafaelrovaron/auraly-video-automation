@@ -1,6 +1,6 @@
 # Auraly Mass Video Pipeline — Memória do Projeto
 
-**Atualizado em:** 2026-09-30
+**Atualizado em:** 2026-10-01
 **Decisão vigente:** MVP delivery-first para uso local e pessoal
 
 Este documento guarda decisões duráveis e fatos verificados. O estado entregue aparece separado
@@ -225,7 +225,7 @@ exposta pelo MCP. Rafael confirmou o vínculo manual; download/QC concluíram e 
 Replay de plan/submit/run preservou o mesmo render, sem nova reserva ou chamada paga.
 `PROVIDER_VERIFIED` somente para este canário com reconciliação manual; a resposta automática
 de criação sem ID segue limitação conhecida, não resolvida por gerar outro vídeo.
-Revisão visual final continua humana; D3A é a próxima etapa planejada.
+Revisão visual final continua humana; este checkpoint precede o D3A descrito abaixo.
 Evidência: `docs/superpowers/2026-09-30-d2c-canary-verification.md`.
 
 Alinhamento SQL em 2026-10-01: migration 0011 adiciona gatilhos INSERT/UPDATE que recusam motivos
@@ -301,7 +301,25 @@ lote inteiro. O lote deve:
 - URL assinada somente em memória/log sanitizado;
 - source MP4 nunca sobrescrito.
 
-## 7. Modelo de edição alvo
+## 7. Modelo de edição: D3A entregue e capacidades alvo
+
+D3A implementou contratos `EditProfile` v1 e `EditManifestV2` v2 separados do legado,
+resolver puro, overrides tipados, provenance por campo e hash determinístico.
+Profiles são arquivos versionados com envelope/checksum, não tabelas SQL; alterações
+criam nova versão. Manifests são snapshots sem timestamps ou renderer version inventada.
+Precedência profile/campaign/video/outputVariant; omissão herda, false/zero são valores,
+null explícito só em campos nullable. Headline continua visual-only.
+
+CLI `edit` cria/lista/consulta/versiona profiles, resolve com dry-run, consulta e valida
+manifests v2. Paths relativos ao project root, assets verificados, writes exclusivos,
+replay íntegro e recusa de corrupção. V1 continua em ingest/validate legado sem conversão
+que descarte cuts/punch-ins/b-roll. Sem provider, DB mutation ou auto-approval.
+Texto/timing de captions e planejamento A/B em lote ficam no D3B; UI/preview/render depois.
+Evidência local em `docs/superpowers/2026-10-01-d3a-verification.md`.
+`IMPLEMENTED`, `LOCAL_VERIFIED`: gate pós-correções 15/15, 1491 passed/20 skipped.
+Revisão independente encontrou três Important corrigidos com RED→GREEN; nenhum Minor adiado.
+
+O restante desta seção descreve o modelo alvo, não capacidades adicionais entregues.
 
 ### 7.1 EditProfile
 

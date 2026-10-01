@@ -1,7 +1,8 @@
 # D3A — EditProfile, EditManifest e resolução de overrides
 
 Status: desenho e especificação aprovados pelo usuário em 2026-10-01.
-Não há implementação D3A nem plano aprovado.
+Plano aprovado pelo usuário em 2026-10-01; implementação/evidência registradas
+em `docs/superpowers/2026-10-01-d3a-verification.md`.
 
 ## Resultado pretendido
 
