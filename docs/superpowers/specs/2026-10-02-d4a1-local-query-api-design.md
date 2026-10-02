@@ -1,7 +1,7 @@
 # D4A.1 — Local Query API & Campaign Status
 
 Date: 2026-10-02.
-Status: design direction approved in conversation; written spec awaiting user review.
+Status: written spec approved by the user; implementation plan awaiting user review.
 Base: main at 3409965, with D3B implemented/local verified and Linux/Windows Actions passing.
 
 ## Intent and milestone boundary
