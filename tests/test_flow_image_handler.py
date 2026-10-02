@@ -770,7 +770,8 @@ def test_local_playwright_flow_job_ingests_two_2k_candidates(tmp_path: Path) -> 
                     yield LocalSession()
 
                 return FlowGenerationRuntime(
-                    FlowGenerationConfig(generation_timeout_seconds=1, download_timeout_seconds=1),
+                    # Real browser downloads can exceed one second on hosted Windows runners.
+                    FlowGenerationConfig(generation_timeout_seconds=1, download_timeout_seconds=10),
                     _session_factory=session_factory,
                     _locator_target=LOCAL_TARGET,
                     artifact_context=context,  # type: ignore[arg-type]

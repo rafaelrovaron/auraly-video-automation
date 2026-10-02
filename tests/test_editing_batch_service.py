@@ -91,8 +91,13 @@ def test_missing_or_wrong_upstream(tmp_path: Path, mp4: bytes, case: str) -> Non
     elif case == "schema":
         db = tmp_path / "empty.db"
         sqlite3.connect(db).close()
-    elif case in {"source", "wav"}:
-        next(work.rglob("source.mp4" if case == "source" else "voice.wav")).write_bytes(b"bad")
+    elif case == "source":
+        with sqlite3.connect(db) as connection:
+            row = connection.execute("SELECT source_json FROM heygen_renders WHERE id=?",
+                                     (request.render_id,)).fetchone()
+        (work / json.loads(row[0])["path"]).write_bytes(b"bad")
+    elif case == "wav":
+        next(work.rglob("voice.wav")).write_bytes(b"bad")
     else:
         with sqlite3.connect(db) as connection:
             if case == "not_ready":
