@@ -63,6 +63,16 @@ def test_caption_timing_coverage_and_identity() -> None:
     assert caption.origin == "manual" and caption.accepted_by == "tester"
 
 
+def test_enabled_caption_states() -> None:
+    data = batch_data()
+    data["video"] = {"captions": {"enabled": True,
+                                 "font": {"path": "font.ttf", "sha256": "a" * 64}}}
+    missing = plan_for(data)
+    assert all(o.caption_state == "timing_missing" for o in missing.outputs)
+    provided = plan_for(data, valid_timing())
+    assert all(o.caption_state == "timing_provided" for o in provided.outputs)
+
+
 @pytest.mark.parametrize("case", ["gap", "overlap", "duplicate", "duration", "copy", "source", "audio"])
 def test_invalid_timing_fails(case: str) -> None:
     data = valid_timing()

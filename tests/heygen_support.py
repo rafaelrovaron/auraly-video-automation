@@ -5,6 +5,8 @@ from pathlib import Path
 
 from sqlalchemy import text
 
+from auraly_pipeline.campaigns.domain import CopyMasterContent
+
 from auraly_pipeline.campaigns.persistence import create_sqlite_engine, migrate_database
 
 
@@ -17,6 +19,7 @@ def create_ready_campaign(
     *,
     duplicate_first_two_images: bool = False,
     voice_content: bytes = b"voice",
+    canonical_copy: bool = False,
 ) -> None:
     migrate_database(database)
     assets = work_root / "campaigns" / "campaign-one"
@@ -53,9 +56,11 @@ def create_ready_campaign(
                 "INSERT INTO copy_masters (id,campaign_id,version,source_text,headline,hook,body,cta,"
                 "spoken_text,sha256,approval_state,approved_by,approved_at,created_at,updated_at) "
                 "VALUES ('10000000-0000-4000-8000-000000000000','campaign-one',1,'source','head',"
-                "'hook','body','cta','spoken',:sha,'approved','tester',:now,:now,:now)"
+                "'hook','body','cta',:spoken,:sha,'approved','tester',:now,:now,:now)"
             ),
-            {"sha": "a" * 64, "now": NOW},
+            {"sha": (CopyMasterContent(source_text="source", headline="head", hook="hook",
+                                      body="body", cta="cta").sha256 if canonical_copy else "a" * 64),
+             "spoken": "hook\n\nbody\n\ncta" if canonical_copy else "spoken", "now": NOW},
         )
         for index, (relative_path, sha, size) in enumerate(image_facts):
             scene_id = f"20000000-0000-4000-8000-00000000000{index}"

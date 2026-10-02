@@ -9,7 +9,7 @@ from auraly_pipeline.heygen.service import HeyGenService
 from tests.heygen_support import create_ready_campaign
 
 
-def ready_video_campaign(database: Path, root: Path, provider: FakeHeyGenProvider) -> None:
+def ready_video_campaign(database: Path, root: Path, provider: FakeHeyGenProvider, *, canonical_copy: bool = False) -> None:
     content = io.BytesIO()
     with wave.open(content, "wb") as audio:
         audio.setnchannels(1)
@@ -17,7 +17,8 @@ def ready_video_campaign(database: Path, root: Path, provider: FakeHeyGenProvide
         audio.setframerate(44100)
         audio.writeframes(b"\0\0" * 44100)
     create_ready_campaign(
-        database, root, duplicate_first_two_images=True, voice_content=content.getvalue()
+        database, root, duplicate_first_two_images=True, voice_content=content.getvalue(),
+        canonical_copy=canonical_copy,
     )
     service = HeyGenService.for_database(database, root, provider)
     submitted = service.submit_assets(service.plan_assets("campaign-one"))
