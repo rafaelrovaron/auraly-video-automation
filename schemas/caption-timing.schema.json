@@ -1,0 +1,105 @@
+{
+  "$defs": {
+    "CaptionTimingCue": {
+      "additionalProperties": false,
+      "properties": {
+        "startSec": {
+          "minimum": 0,
+          "title": "Startsec",
+          "type": "number"
+        },
+        "endSec": {
+          "exclusiveMinimum": 0,
+          "title": "Endsec",
+          "type": "number"
+        },
+        "tokenStart": {
+          "minimum": 0,
+          "title": "Tokenstart",
+          "type": "integer"
+        },
+        "tokenEnd": {
+          "exclusiveMinimum": 0,
+          "title": "Tokenend",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "startSec",
+        "endSec",
+        "tokenStart",
+        "tokenEnd"
+      ],
+      "title": "CaptionTimingCue",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Schemaversion",
+      "type": "string"
+    },
+    "sourceSha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Sourcesha256",
+      "type": "string"
+    },
+    "copyMasterId": {
+      "minLength": 1,
+      "title": "Copymasterid",
+      "type": "string"
+    },
+    "copyHash": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Copyhash",
+      "type": "string"
+    },
+    "processedAudioSha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Processedaudiosha256",
+      "type": "string"
+    },
+    "timebase": {
+      "const": "source_mp4",
+      "title": "Timebase",
+      "type": "string"
+    },
+    "origin": {
+      "enum": [
+        "manual",
+        "external_alignment"
+      ],
+      "title": "Origin",
+      "type": "string"
+    },
+    "acceptedBy": {
+      "minLength": 1,
+      "title": "Acceptedby",
+      "type": "string"
+    },
+    "cues": {
+      "items": {
+        "$ref": "#/$defs/CaptionTimingCue"
+      },
+      "minItems": 1,
+      "title": "Cues",
+      "type": "array"
+    }
+  },
+  "required": [
+    "sourceSha256",
+    "copyMasterId",
+    "copyHash",
+    "processedAudioSha256",
+    "timebase",
+    "origin",
+    "acceptedBy",
+    "cues"
+  ],
+  "title": "CaptionTimingInput",
+  "type": "object",
+  "$id": "https://auraly.local/schemas/caption-timing.schema.json"
+}

@@ -76,6 +76,8 @@ def test_editing_schemas_are_audited_by_full_gate() -> None:
     assert steps[0].generated_files == (
         Path("schemas/edit-profile.schema.json"), Path("schemas/edit-resolve.schema.json"),
         Path("schemas/edit-manifest.v2.schema.json"),
+        Path("schemas/edit-batch-request.schema.json"), Path("schemas/caption-timing.schema.json"),
+        Path("schemas/edit-batch-plan.schema.json"),
     )
 
 
@@ -415,7 +417,8 @@ def test_full_schema_generators_declare_tracked_outputs() -> None:
         "edit schema": (Path("schemas/edit.schema.json"),),
         "image generation schema": (Path("schemas/image-generation.schema.json"),),
         "voice schemas": (Path("schemas/voice-import.schema.json"), Path("schemas/voice-master.schema.json")),
-        "editing schemas": (Path("schemas/edit-profile.schema.json"), Path("schemas/edit-resolve.schema.json"), Path("schemas/edit-manifest.v2.schema.json")),
+        "editing schemas": (Path("schemas/edit-profile.schema.json"), Path("schemas/edit-resolve.schema.json"), Path("schemas/edit-manifest.v2.schema.json"),
+                            Path("schemas/edit-batch-request.schema.json"), Path("schemas/caption-timing.schema.json"), Path("schemas/edit-batch-plan.schema.json")),
     }
 
 

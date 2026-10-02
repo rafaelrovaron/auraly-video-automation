@@ -349,10 +349,10 @@ class EditManifestV2(EditingModel):
         return self
 
 
-def validation_field(exc: ValidationError) -> str:
+def validation_field(exc: ValidationError, *, extra_models: tuple[type[EditingModel], ...] = ()) -> str:
     """Locations may contain arbitrary input keys: expose only schema field names."""
     known = {"manifest"}
-    for item in globals().values():
+    for item in (*globals().values(), *extra_models):
         if isinstance(item, type) and issubclass(item, EditingModel):
             known.update(item.model_fields)
             known.update(field.alias for field in item.model_fields.values() if field.alias)

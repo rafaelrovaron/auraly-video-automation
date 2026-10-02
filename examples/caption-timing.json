@@ -1,0 +1,23 @@
+{
+  "sourceSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "copyMasterId": "copy-one",
+  "copyHash": "0784f52915e9468fe2702c396c3d013962024035b4c1c5a724f870589c0369b4",
+  "processedAudioSha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "timebase": "source_mp4",
+  "origin": "manual",
+  "acceptedBy": "tester",
+  "cues": [
+    {
+      "startSec": 0,
+      "endSec": 1,
+      "tokenStart": 0,
+      "tokenEnd": 2
+    },
+    {
+      "startSec": 2,
+      "endSec": 4,
+      "tokenStart": 2,
+      "tokenEnd": 6
+    }
+  ]
+}

@@ -4,13 +4,16 @@ import json
 from pathlib import Path
 
 from auraly_pipeline.editing.domain import EditManifestV2, EditProfile, EditResolveRequest, EditingModel
+from auraly_pipeline.editing.batch_domain import EditBatchRequest, CaptionTimingInput, EditBatchPlan
 
 
-def export_editing_schemas(output_dir: Path) -> tuple[Path, Path, Path]:
+def export_editing_schemas(output_dir: Path) -> tuple[Path, ...]:
     paths = (output_dir / "edit-profile.schema.json", output_dir / "edit-resolve.schema.json",
-             output_dir / "edit-manifest.v2.schema.json")
+             output_dir / "edit-manifest.v2.schema.json", output_dir / "edit-batch-request.schema.json",
+             output_dir / "caption-timing.schema.json", output_dir / "edit-batch-plan.schema.json")
     output_dir.mkdir(parents=True, exist_ok=True)
-    models: tuple[type[EditingModel], ...] = (EditProfile, EditResolveRequest, EditManifestV2)
+    models: tuple[type[EditingModel], ...] = (
+        EditProfile, EditResolveRequest, EditManifestV2, EditBatchRequest, CaptionTimingInput, EditBatchPlan)
     for model, path in zip(models, paths, strict=True):
         schema = model.model_json_schema(by_alias=True, mode="validation")
         schema["$id"] = f"https://auraly.local/schemas/{path.name}"

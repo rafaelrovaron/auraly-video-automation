@@ -1,0 +1,40 @@
+{
+  "campaignId": "campaign-one",
+  "renderId": "11111111-1111-4111-8111-111111111111",
+  "videoId": "video-one",
+  "profileRef": {
+    "profileId": "plain",
+    "version": 1,
+    "hash": "031b96d3ae6dfee11d4f30f8f79c9af23487d0772e8bc191c4586a8b1476bffb"
+  },
+  "headlineText": "Visual only",
+  "variants": [
+    {
+      "key": "a",
+      "label": "A",
+      "overrides": {
+        "headline": {
+          "text": "Visual a"
+        }
+      }
+    },
+    {
+      "key": "b",
+      "label": "B",
+      "overrides": {
+        "headline": {
+          "text": "Visual b"
+        }
+      }
+    },
+    {
+      "key": "c",
+      "label": "C",
+      "overrides": {
+        "headline": {
+          "text": "Visual c"
+        }
+      }
+    }
+  ]
+}
