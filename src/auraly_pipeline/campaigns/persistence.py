@@ -4,12 +4,15 @@ from contextlib import contextmanager
 import importlib
 import os
 from pathlib import Path
+import sqlite3
 import time
 from typing import Any, BinaryIO, Iterator
 
 from alembic import command
 from alembic.config import Config
-from sqlalchemy import Engine, URL, create_engine, event, text
+from alembic.script import ScriptDirectory
+from sqlalchemy import Engine, URL, create_engine, event, inspect, text
+from sqlalchemy.pool import NullPool
 
 
 def _local_path(value: str | Path) -> Path:
@@ -49,6 +52,46 @@ def create_sqlite_engine(database_path: Path) -> Engine:
             cursor.close()
 
     return engine
+
+
+def create_readonly_sqlite_engine(database_path: Path) -> Engine:
+    database = _local_path(database_path).absolute()
+    if not database.is_file() or database.is_symlink():
+        raise ValueError("existing regular database required")
+
+    def connect() -> sqlite3.Connection:
+        connection = sqlite3.connect(database.as_uri() + "?mode=ro", uri=True,
+                                     check_same_thread=False)
+        connection.execute("PRAGMA foreign_keys=ON")
+        connection.execute("PRAGMA busy_timeout=5000")
+        return connection
+
+    return create_engine("sqlite://", creator=connect, poolclass=NullPool)
+
+
+def validate_api_database(engine: Engine) -> None:
+    from auraly_pipeline.campaigns.db_models import Base
+    import auraly_pipeline.heygen.db_models  # noqa: F401
+    import auraly_pipeline.images.db_models  # noqa: F401
+    import auraly_pipeline.jobs.db_models  # noqa: F401
+    import auraly_pipeline.voices.db_models  # noqa: F401
+
+    config = Config()
+    config.set_main_option("script_location", str(Path(__file__).parent / "migrations"))
+    head = ScriptDirectory.from_config(config).get_current_head()
+    with engine.connect() as connection:
+        inspector = inspect(connection)
+        if not inspector.has_table("alembic_version"):
+            raise ValueError("incompatible database")
+        revisions = connection.execute(text("SELECT version_num FROM alembic_version")).scalars()
+        if list(revisions) != [head]:
+            raise ValueError("incompatible database")
+        for name, table in Base.metadata.tables.items():
+            if not inspector.has_table(name):
+                raise ValueError("incompatible database")
+            columns = {column["name"] for column in inspector.get_columns(name)}
+            if not set(table.columns.keys()).issubset(columns):
+                raise ValueError("incompatible database")
 
 
 def _try_lock_file(lock_file: BinaryIO) -> bool:

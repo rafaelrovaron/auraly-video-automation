@@ -34,6 +34,11 @@ def _safe_path(root: Path, path: Path) -> Path:
     return path
 
 
+def validate_editing_path(root: Path, path: Path) -> Path:
+    """Validate lexical trusted paths before callers canonicalize them."""
+    return _safe_path(root, path)
+
+
 def _read(root: Path, path: Path) -> dict[str, Any]:
     try:
         _safe_path(root, path)
