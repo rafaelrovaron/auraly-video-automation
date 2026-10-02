@@ -30,6 +30,10 @@ class EditingError(ValueError):
         super().__init__(f"{layer + '.' if layer else ''}{field}: {message}")
 
 
+class EditingArtifactNotFoundError(EditingError):
+    """A requested artifact does not exist; distinct from corrupt content."""
+
+
 def _omitted() -> Any:
     """Internal absent value, never serialized as an explicit partial field."""
     return None

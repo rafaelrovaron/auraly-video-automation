@@ -1,13 +1,24 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 import os
 from pathlib import Path
-from typing import Literal
+from typing import Generic, Literal, TypeVar
+
+from auraly_pipeline.campaigns.domain import CopyMaster, SceneVariant
 
 from auraly_pipeline.campaigns.persistence import default_database_path
 from auraly_pipeline.config_paths import DEFAULT_PROJECT_ROOT, WORK_ROOT_RELATIVE
 from auraly_pipeline.editing.service import validate_editing_path
+from auraly_pipeline.editing.domain import EditProfile, IdentityRef, SourceVideoRef
+from auraly_pipeline.editing.batch_domain import CopyRef
+from auraly_pipeline.heygen.video_domain import HeyGenRenderStatus, VideoSource
+from auraly_pipeline.images.domain import ImageCandidateReviewStatus, ImageSourceKind
+from auraly_pipeline.jobs.domain import RetrySafety
+from auraly_pipeline.jobs.state_machine import JobStatus
+from auraly_pipeline.models import ContractModel
+from auraly_pipeline.voices.domain import TranscriptMatchStatus, VoiceMasterStatus
 
 ErrorCode = Literal[
     "invalid_request", "not_found", "artifact_invalid", "storage_unavailable",
@@ -63,3 +74,138 @@ class ApiSettings:
         )
         return cls(project, work_root if work_root is not None else project / WORK_ROOT_RELATIVE,
                    database if database is not None else default_database_path())
+
+
+T = TypeVar("T")
+
+
+class Items(ContractModel, Generic[T]):
+    items: list[T]
+
+
+class CampaignDetail(ContractModel):
+    campaign_id: str
+    character: Literal["susan-smith", "soul-constellation"]
+    stored_status: str
+    scene_count: int
+    created_at: datetime
+    updated_at: datetime
+    proof_object: str
+    voice_preset: str
+    edit_preset: str
+    copy_masters: list[CopyMaster]
+    scene_variants: list[SceneVariant]
+
+
+class ImageSummary(ContractModel):
+    image_candidate_id: str
+    scene_variant_id: str
+    source_kind: ImageSourceKind
+    image_generation_id: str | None
+    review_status: ImageCandidateReviewStatus
+    sha256: str
+    source_path: str
+    width: int
+    height: int
+    size_bytes: int
+    format: str
+    approved_at: datetime | None
+    approved_by: str | None
+    rejected_at: datetime | None
+    rejected_by: str | None
+    rejection_reason: str | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class SceneImages(Items[ImageSummary]):
+    scene_variant_id: str
+
+
+class VoiceSummary(ContractModel):
+    voice_master_id: str
+    campaign_id: str
+    copy_master_id: str
+    copy_master_version: int
+    generation: int
+    provider: Literal["elevenlabs", "imported"]
+    status: VoiceMasterStatus
+    processed_audio_path: str | None
+    processed_sha256: str | None
+    duration_seconds: float | None
+    transcript_match_status: TranscriptMatchStatus | None
+    headline_spoken: bool | None
+    qc_findings: list[str]
+    approved_at: datetime | None
+    approved_by: str | None
+    approval_review_reason: str | None
+    rejected_at: datetime | None
+    rejected_by: str | None
+    rejection_reason: str | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class RenderSummary(ContractModel):
+    render_id: str
+    campaign_id: str
+    scene_variant_id: str
+    image_candidate_id: str
+    voice_master_id: str
+    job_id: str
+    status: HeyGenRenderStatus
+    remote_video_id: str | None
+    manual_binding: bool
+    image_sha256: str
+    audio_sha256: str
+    source: VideoSource | None
+    error_code: str | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class JobSummary(ContractModel):
+    job_id: str
+    job_type: str
+    campaign_id: str | None
+    scene_variant_id: str | None
+    status: JobStatus
+    attempt_count: int
+    max_attempts: int
+    retry_safety: RetrySafety
+    created_at: datetime
+    updated_at: datetime
+    queued_at: datetime
+    started_at: datetime | None
+    completed_at: datetime | None
+    cancelled_at: datetime | None
+    next_retry_at: datetime | None
+    last_error_code: str | None
+
+
+class ProfileView(ContractModel):
+    profile: EditProfile
+    profile_hash: str
+
+
+class OutputSummary(ContractModel):
+    key: str
+    label: str
+    output_variant_id: str
+    manifest_hash: str
+    output_hash: str
+    filename: str
+    caption_state: Literal["disabled", "timing_missing", "timing_provided"]
+
+
+class PlanSummary(ContractModel):
+    video_id: str
+    render_id: str
+    plan_hash: str
+    output_count: int
+    max_outputs: int
+    timing_status: Literal["missing", "provided"]
+    copy_ref: CopyRef
+    voice_ref: IdentityRef
+    source: SourceVideoRef
+    outputs: list[OutputSummary]

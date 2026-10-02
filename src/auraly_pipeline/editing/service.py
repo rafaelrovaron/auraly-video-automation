@@ -14,7 +14,8 @@ from typing import Any
 from pydantic import TypeAdapter, ValidationError
 
 from auraly_pipeline.editing.domain import (
-    AssetRef, EditManifestV2, EditProfile, EditResolveRequest, EditingError, Sha, safe_id,
+    AssetRef, EditManifestV2, EditProfile, EditResolveRequest, EditingError,
+    EditingArtifactNotFoundError, Sha, safe_id,
 )
 from auraly_pipeline.editing.resolver import profile_hash, resolve_manifest, verify_manifest_hash
 from auraly_pipeline.probe import ProbeError, probe_media
@@ -42,6 +43,8 @@ def validate_editing_path(root: Path, path: Path) -> Path:
 def _read(root: Path, path: Path) -> dict[str, Any]:
     try:
         _safe_path(root, path)
+        if not path.exists():
+            raise EditingArtifactNotFoundError("artifact", "artifact not found")
         if not path.is_file():
             raise EditingError("artifact", "regular JSON file required")
         payload = json.loads(path.read_text(encoding="utf-8"))

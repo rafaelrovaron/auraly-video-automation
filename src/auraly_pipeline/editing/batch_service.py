@@ -128,3 +128,14 @@ class EditBatchService:
             return plan
         except ValidationError:
             raise EditingError("plan", "invalid stored plan contract") from None
+
+    def list_plans(self, campaign_id: str) -> list[EditBatchPlan]:
+        try:
+            safe_id(campaign_id)
+        except ValueError:
+            raise EditingError("campaignId", "invalid campaign identity") from None
+        root = _safe_path(self.work_root, self.work_root / "campaigns" / campaign_id /
+                          "editing" / "plans")
+        plans = [self.get_plan(campaign_id, path.parent.parent.name, path.parent.name)
+                 for path in root.glob("*/*/plan.json")]
+        return sorted(plans, key=lambda plan: (plan.video_id, plan.plan_hash))
