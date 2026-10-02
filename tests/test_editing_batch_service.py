@@ -185,3 +185,14 @@ def test_database_link_is_rejected(tmp_path: Path, mp4: bytes) -> None:
         pytest.skip("OS does not permit symlinks")
     with pytest.raises(EditingError):
         EditBatchService(project_root=tmp_path, work_root=work).plan(request, database_path=link)
+
+
+def test_database_missing_columns_is_sanitized(tmp_path: Path, mp4: bytes) -> None:
+    _, work, request = setup_batch(tmp_path, mp4)
+    db = tmp_path / "old.db"
+    with sqlite3.connect(db) as connection:
+        connection.execute("CREATE TABLE heygen_renders (id TEXT, status TEXT)")
+        connection.execute("INSERT INTO heygen_renders VALUES (?, 'ready')", (request.render_id,))
+    with pytest.raises(EditingError, match="cannot verify local campaign inputs"):
+        EditBatchService(project_root=tmp_path, work_root=work).plan(request, database_path=db)
+    assert not list(work.rglob("plan.json"))

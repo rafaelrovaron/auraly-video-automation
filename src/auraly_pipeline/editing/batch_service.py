@@ -83,7 +83,7 @@ class EditBatchService:
             )
         except EditingError:
             raise
-        except (sqlite3.Error, ValidationError, ValueError, TypeError, KeyError, OSError):
+        except (sqlite3.Error, ValidationError, ValueError, TypeError, KeyError, IndexError, OSError):
             raise EditingError("database", "cannot verify local campaign inputs") from None
         finally:
             if connection is not None:
