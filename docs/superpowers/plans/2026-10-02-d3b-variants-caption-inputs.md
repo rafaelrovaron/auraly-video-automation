@@ -69,19 +69,19 @@ Source.id deriva do renderId local; imageRef.hash é SHA da imagem; voiceRef.has
 é SHA do WAV processado. IDs de entidades existentes podem ser UUID; somente
 IDs/key usados como segmentos obedecem safe_id.
 
-- [ ] Escrever `test_default_limit_is_three`: `assert request.max_outputs == 3`.
+- [x] Escrever `test_default_limit_is_three`: `assert request.max_outputs == 3`.
   `test_limit_and_keys`: rejeitar 4 outputs com limite 3, lista vazia, key duplicada,
   maxOutputs bool/zero/float, extras, IDs reservados/paths inválidos.
   `test_timing_contract`: origem/timebase inválidas, NaN/Infinity, índices não
   inteiros, cue end<=start e acceptedBy sensível falham; zero startSec válido.
-- [ ] Rodar `rtk uv run python -m pytest tests/test_editing_batch_domain.py -q`;
+- [x] Rodar `rtk uv run python -m pytest tests/test_editing_batch_domain.py -q`;
   confirmar RED pelo contrato ausente.
-- [ ] Implementar contratos, limites e relações locais (missing/provided,
+- [x] Implementar contratos, limites e relações locais (missing/provided,
   metadados/cues coerentes); revalidar no limite do serviço. Usar validação pública
   de identidade do operador já existente e mensagens com campos conhecidos.
-- [ ] Rodar `rtk uv run python scripts/verify.py fast --pytest tests/test_editing_batch_domain.py tests/test_editing_domain.py`;
+- [x] Rodar `rtk uv run python scripts/verify.py fast --pytest tests/test_editing_batch_domain.py tests/test_editing_domain.py`;
   exigir PASS.
-- [ ] Commit `feat: add editing batch and caption input contracts`.
+- [x] Commit `feat: add editing batch and caption input contracts`.
 
 ### Task 2: Planner puro, captions e identidade determinística
 
@@ -101,13 +101,13 @@ Output hash: payload exato `{manifest, captionInput, plannerVersion}`; serializa
 aliases/defaults normalizados. Filename `<outputVariantId>-<outputHash>.mp4`.
 Plan hash exclui somente planHash; labels/limites incluídos. Nenhum campo aleatório.
 
-- [ ] Escrever `test_three_headlines_reuse_upstream`: `assert plan.output_count == 3`;
+- [x] Escrever `test_three_headlines_reuse_upstream`: `assert plan.output_count == 3`;
   `assert len({o.manifest.headline.text for o in plan.outputs}) == 3`;
   `assert all(o.manifest.source == inputs.source for o in plan.outputs)`.
   `test_order_and_replay`: request reversed gera model_dump/hash/filenames iguais.
   `test_headline_is_not_caption_text`: caption.text==copy.spoken_text e não concatena headline;
   tokens da fala coincidentes com headline não são removidos.
-- [ ] Escrever `test_caption_timing_coverage_and_identity`: cues de todos tokens
+- [x] Escrever `test_caption_timing_coverage_and_identity`: cues de todos tokens
   em ordem produzem textos esperados; gaps/overlap/duplicação, hash/copy/timebase
   divergentes, intervalos fora da duração falham. Sem timing: cues=[], status missing;
   enabled por variante determina disabled/timing_missing/timing_provided.
@@ -115,16 +115,16 @@ Plan hash exclui somente planHash; labels/limites incluídos. Nenhum campo aleat
   mudar label mantém outputHash/filename e muda planHash.
   `test_rehashed_semantically_invalid_plan`: rejeitar contagem, ID, source refs,
   manifestHash, cue.text/index/provenance e filename incoerentes mesmo rehashed.
-- [ ] Rodar `rtk uv run python -m pytest tests/test_editing_batch_planner.py -q`;
+- [x] Rodar `rtk uv run python -m pytest tests/test_editing_batch_planner.py -q`;
   confirmar RED por funções ausentes.
-- [ ] Implementar geração de requests e plano, textos de cue por tokens canônicos,
+- [x] Implementar geração de requests e plano, textos de cue por tokens canônicos,
   cobertura completa e checks cross-field. Revalidar inputs/planos recebidos;
   verificar manifests v2, IDs/hashes/filenames, referências comuns, estado captions,
   outputCount==len(outputs)<=maxOutputs e ordem/keys únicas. Relatar key/campo
   sanitizado; incluir origin/acceptedBy/timebase dentro do snapshot.
-- [ ] Rodar `rtk uv run python scripts/verify.py fast --pytest tests/test_editing_batch_domain.py tests/test_editing_batch_planner.py tests/test_editing_resolver.py`;
+- [x] Rodar `rtk uv run python scripts/verify.py fast --pytest tests/test_editing_batch_domain.py tests/test_editing_batch_planner.py tests/test_editing_resolver.py`;
   exigir PASS.
-- [ ] Commit `feat: plan deterministic headline variants and caption inputs`.
+- [x] Commit `feat: plan deterministic headline variants and caption inputs`.
 
 ### Task 3: Serviço local readonly e publicação exclusiva
 
@@ -149,13 +149,13 @@ Construir BatchInputs com refs verificadas, source path convertido work→projec
 Validar WAV processado por path/hash e MP4 por serviço D3A; transcrição/ASR não
 vira timing. Metadata de source_json não substitui hash/probe reais.
 
-- [ ] Escrever `test_readonly_plan_and_replay`: setup usa fixtures existentes com
+- [x] Escrever `test_readonly_plan_and_replay`: setup usa fixtures existentes com
   FakeHeyGenProvider/MP4 sintético e fecha serviços antes de snapshot SQL; execução
   D3B não toca provider. Comparar dados SQL/Jobs/IDs e SHA/mtime MP4/WAV antes/depois;
   `assert second.plan_hash == first.plan_hash` e get_plan==first.
   `test_pinned_copy_not_latest`: nova copy aprovada não troca copyRef/text da voz original.
   `test_db_uri_special_characters`: path com espaço/#/? quando SO permitir, sem novoarquivo.
-- [ ] Escrever `test_missing_or_wrong_upstream`: DB/schema ausente, render não ready,
+- [x] Escrever `test_missing_or_wrong_upstream`: DB/schema ausente, render não ready,
   campanha/row/item divergentes, voz/copy não aprovada, hash errado, MP4/WAV
   adulterado falham sem publicar. DB ausente não é criado; SQL error sem path bruto.
   `test_last_invalid_variant_publishes_nothing`: primeira válida, última endSec
@@ -165,17 +165,17 @@ vira timing. Metadata de source_json não substitui hash/probe reais.
   JSON truncado/hash inválido e invariantes inválidas rehashed falham no replay/get.
   Paths POSIX/Windows, ancestors junction/symlink, roots fora de contenção e
   timing adulterado não são aceitos; skip apenas link impossível pelo SO.
-- [ ] Rodar `rtk uv run python -m pytest tests/test_editing_batch_service.py -q`;
+- [x] Rodar `rtk uv run python -m pytest tests/test_editing_batch_service.py -q`;
   confirmar RED pelo serviço ausente.
-- [ ] Implementar leitura readonly, ligação de registros e assets, timing opcional,
+- [x] Implementar leitura readonly, ligação de registros e assets, timing opcional,
   variant_requests → EditingService.resolve(persist=False) → build_batch_plan.
   Publicar somente plano completo em campaigns/<campaign>/editing/plans/<video>/<hash>/plan.json
   com helpers seguros de editing; replay/get validam schema/hash/invariantes/identidade
   do path. Não persistir v2s duplicados. Serializar somente refs públicas, sem
   account refs, signed URLs ou paths absolutos; erros sem valores de entrada.
-- [ ] Rodar `rtk uv run python scripts/verify.py fast --pytest tests/test_editing_batch_service.py tests/test_editing_batch_planner.py tests/test_editing_service.py`;
+- [x] Rodar `rtk uv run python scripts/verify.py fast --pytest tests/test_editing_batch_service.py tests/test_editing_batch_planner.py tests/test_editing_service.py`;
   exigir PASS.
-- [ ] Commit `feat: persist editing batch plans from read-only campaign inputs`.
+- [x] Commit `feat: persist editing batch plans from read-only campaign inputs`.
 
 ### Task 4: CLI, schemas e exemplos sintéticos
 
@@ -195,34 +195,34 @@ Extensão compatível: `validation_field(exc: ValidationError, *,
 extra_models: tuple[type[EditingModel], ...] = ()) -> str`; CLI fornece os modelos
 batch, reutilizando a whitelist existente. Nenhum schema D3A muda.
 
-- [ ] Escrever CliRunner tests `test_plan_dry_run_and_get`, `test_plan_errors_are_sanitized`:
+- [x] Escrever CliRunner tests `test_plan_dry_run_and_get`, `test_plan_errors_are_sanitized`:
   `assert result.exit_code == 0`; stdout valida EditBatchPlan; dry-run não publica;
   limite/campo inválido/DB ausente exit=1 sem stdout parcial/paths/URLs/tokens.
   Default/env root junction é recusado. Fluxos CLI legado/v2 continuam funcionando.
-- [ ] Escrever tests de schemas/example validation/extras e drift: três schemas D3A
+- [x] Escrever tests de schemas/example validation/extras e drift: três schemas D3A
   e legado byte-identical; cada novo schema aparece em generated_files do step
   editing schemas; seis exports determinísticos, sem step redundante no harness.
-- [ ] Rodar `rtk uv run python -m pytest tests/test_editing_batch_cli.py tests/test_editing_schema.py tests/test_verify_harness.py -q`;
+- [x] Rodar `rtk uv run python -m pytest tests/test_editing_batch_cli.py tests/test_editing_schema.py tests/test_verify_harness.py -q`;
   confirmar RED por comandos/schemas ausentes.
-- [ ] Implementar CLI fina, exporter expandido e exemplos sintéticos coerentes.
+- [x] Implementar CLI fina, exporter expandido e exemplos sintéticos coerentes.
   Exemplo sem timing e exemplo sidecar completo não alegam ter mídia disponível;
   schemas seguem aliases/defaults/extra-forbid. Atualizar registro generated_files.
-- [ ] Rodar `rtk uv run python -m auraly_pipeline.editing.schema` e
+- [x] Rodar `rtk uv run python -m auraly_pipeline.editing.schema` e
   `rtk uv run python scripts/verify.py fast --pytest tests/test_editing_batch_cli.py tests/test_editing_schema.py tests/test_verify_harness.py tests/test_editing_cli.py tests/test_schema.py`;
   exigir PASS/sem drift.
-- [ ] Commit `feat: expose editing batch planning CLI and schemas`.
+- [x] Commit `feat: expose editing batch planning CLI and schemas`.
 
 ### Task 5: Evidência completa e handoff
 
 **Files:** Modify README.md, docs/PROJECT-MEMORY.md, docs/GOAL-ROADMAP.md,
 docs/PRD-MVP-MASS-VIDEO-AUTOMATION.md; create docs/superpowers/2026-10-02-d3b-verification.md.
 
-- [ ] Documentar CLI, refs/caption states, caminhos, pendência de timing e plano
+- [x] Documentar CLI, refs/caption states, caminhos, pendência de timing e plano
   separado do manifest v2. Capacidades D3B só marcadas entregues após evidência;
   UI/render/alinhamento continuam futuros. Atualizar checkboxes conforme execução.
-- [ ] Rodar `rtk uv run python scripts/verify.py full`; exigir todos steps PASS,
+- [x] Rodar `rtk uv run python scripts/verify.py full`; exigir todos steps PASS,
   registrar contagem observada, não a estimada.
-- [ ] Smoke com render D2C existente: consultar DB real somente leitura, executar
+- [x] Smoke com render D2C existente: consultar DB real somente leitura, executar
   dry-run com três headlines e profile exclusivo `d3b-smoke` no diretório
   editing/profiles do work root operacional (fora de campaigns/d2c-001).
   Se esse ID já existir, usar versão já compatível ou outro ID explícito sem overwrite.
@@ -231,12 +231,12 @@ docs/PRD-MVP-MASS-VIDEO-AUTOMATION.md; create docs/superpowers/2026-10-02-d3b-ve
   conferir replay estável, source/WAV/SQL intactos, zero paid calls. Não inserir
   sidecar fictício para alegar timing real; registrar missing no áudio importado.
   Não escrever na pasta de canário; se input indisponível, registrar bloqueio real.
-- [ ] Executar uma revisão independente do diff completo conforme skill de execução
+- [x] Executar uma revisão independente do diff completo conforme skill de execução
   Nativa, focada em contratos, SQL readonly, paths/publicação e spec. Corrigir
   findings relevantes com RED→GREEN, commits estreitos e gate repetido.
-- [ ] Revisar diff por secrets/mídia/paths privados/scope, rodar
+- [x] Revisar diff por secrets/mídia/paths privados/scope, rodar
   `rtk git diff --check`; commit `docs: record D3B planning verification and usage`.
-- [ ] Handoff com evidência IMPLEMENTED/LOCAL_VERIFIED e limitações de timing;
+- [x] Handoff com evidência IMPLEMENTED/LOCAL_VERIFIED e limitações de timing;
   nenhum novo PROVIDER_VERIFIED. Merge/push de implementação só quando solicitado.
 
 ## Revisão e execução
@@ -249,4 +249,4 @@ inclui spec/plano commitados. Não começar implementação nesta etapa de plane
 Self-review: contratos→Task 1; identidade/captions→Task 2; upstream/SQL/arquivos→Task 3;
 CLI/schemas→Task 4; verificação/docs→Task 5. Cinco Review Focus têm testes nas tarefas
 proprietárias; assinaturas/types dos produtores e consumidores coincidem. Este
-plano aguarda revisão e aprovação do usuário.
+plano foi aprovado pelo usuário em 2026-10-02; execução Nativa concluída, gate 15/15 (1555 passed/21 skipped), revisão e correção verificadas.

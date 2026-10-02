@@ -32,6 +32,8 @@ genérico e não terá timeline estilo CapCut ou preview frame-perfect.
 - contrato `edit.json` legado, ingestão e inspeção de mídia;
 - D3A: EditProfile versionado, EditManifest v2, resolver de overrides/provenance,
   persistência JSON local e CLI, sem UI/render ou caption timing;
+- D3B: planejamento A/B em lote, inputs de captions da copy/voz aprovadas,
+  timing opcional validado e CLI; sem renderização ou alinhamento automático;
 - CLI e harness de verificação.
 
 ### 2.2 Capacidade alvo deste PRD
@@ -801,14 +803,24 @@ não para recuperação automática do ID nem escala real. Review visual continu
 Gate atual 14/14 (1430 testes/19 skips).
 Voz importada permite aceitação humana auditável somente de `review_required` isolado, preservando
 ASR/QC/WAV/hashes; divergência grave, headline falada e outros achados continuam bloqueantes.
-UI/editor/A/B continuam capacidades alvo. Evidência em
+UI/editor/render A/B continuam capacidades alvo. Evidência em
 `docs/superpowers/2026-09-30-d2c-canary-verification.md`.
 
 Atualização 2026-10-01: D3A implementa configuração editorial e snapshots v2,
 coexistindo com o contrato legado v1 intacto. Profiles locais versionados com hash,
 resolução pura profile/campaign/video/outputVariant e provenance por campo;
 persistência exclusiva, dry-run e CLI `edit`. Sem novas tabelas, Jobs ou paid calls.
-Caption style está disponível; caption text/timing e planejamento A/B batch ficam
+Naquele checkpoint, caption text/timing e planejamento A/B batch ficaram
 no D3B. UI/preview/render continuam capacidades alvo. Evidência D3A em
 `docs/superpowers/2026-10-01-d3a-verification.md`. D3A `IMPLEMENTED`/`LOCAL_VERIFIED`,
 gate Windows pós-correções 15/15 (1491 passed/20 skipped), revisão independente concluída.
+
+Atualização 2026-10-02: D3B acrescenta lista explícita de variantes com limite default 3,
+plano JSON separado com manifests v2, IDs/hashes/filenames estáveis e refs upstream.
+Banco somente leitura, copy exata vinculada ao WAV aprovado e captions sem headline.
+Timing manual/external_alignment precisa de hashes MP4/copy/WAV, acceptedBy, timebase
+source_mp4 e cobertura válida; sem sidecar, timing fica missing. Todos os outputs são
+validados antes de publicar; dry-run e replay sem novas gerações HeyGen.
+Smoke real com três headlines preservou SQL/MP4/WAV e consumiu zero créditos, sem timing
+artificial. UI, preview, renderer e alinhamento automático continuam futuros.
+Evidência: `docs/superpowers/2026-10-02-d3b-verification.md`.

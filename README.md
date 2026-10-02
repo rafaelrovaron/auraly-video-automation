@@ -38,11 +38,13 @@ entrega.
 - CLI JSON e harness de verificação para as capacidades acima.
 - D3A: profiles locais versionados, manifest v2, resolver tipado com hash/provenance,
   persistência exclusiva e CLI `edit`, sem renderer ou chamadas de provider.
+- D3B: planejamento A/B em lote, captions ligadas à copy/voz aprovadas, sidecar de timing
+  validado quando fornecido e CLI `edit plan|plan-get`, sem gerar mídia.
 
 ### Não entregue ainda
 
 - render final com headline, captions, música e framing configuráveis;
-- variações A/B de headline sem regenerar voz, imagem ou HeyGen;
+- renderização das variações A/B já planejadas, reutilizando voz, imagem e HeyGen;
 - API FastAPI e interface React local;
 - preview aproximado e fluxo end-to-end operável pela interface.
 
@@ -162,7 +164,7 @@ em uma fila real que também contenha jobs pagos.
 
 ## Próximo slice de desenvolvimento
 
-O próximo Goal após D3A é **D3B — Headline A/B Planning & Caption Inputs**.
+O próximo Goal após D3B é **D4A — FastAPI Operational API**.
 Revisão visual final do vídeo do canário continua humana; configurar um manifest não aprova o vídeo.
 
 A execução de 2026-09-30 aprovou o WAV existente com motivo auditável, completou upload de
@@ -204,7 +206,7 @@ EditProfile < campaign defaults < video override < output variant override
 Overrides são restritos a campos conhecidos. Omitir herda; false/zero são explícitos;
 null só vale para referências/end nullable. A origem fica registrada por campo.
 Trocar `headline.text` muda o hash downstream, sem alterar fonte/voz/imagem/HeyGen.
-O planejador em lote e texto/timing de captions ainda pertencem ao D3B.
+O D3B acrescenta planejamento em lote e inputs de captions, separados do manifest v2.
 
 ```powershell
 uv run python -m auraly_pipeline.cli edit profile-create --request examples/edit-profile.json
@@ -229,6 +231,36 @@ Replay íntegro é reutilizado; conflito/corrupção não sobrescreve. Alterar p
 com versão 2 no documento. Nenhuma tabela SQL ou Job é criado.
 
 Evidência e limites: [D3A verification](docs/superpowers/2026-10-01-d3a-verification.md).
+
+## Planejar variantes A/B (D3B)
+
+```powershell
+uv run python -m auraly_pipeline.cli edit plan --request meu-batch.json --database caminho/auraly.db --project-root ROOT --work-root WORK --dry-run
+uv run python -m auraly_pipeline.cli edit plan --request meu-batch.json --database caminho/auraly.db --project-root ROOT --work-root WORK
+uv run python -m auraly_pipeline.cli edit plan-get --campaign-id CAMPAIGN --video-id VIDEO --plan-hash HASH --project-root ROOT --work-root WORK
+```
+
+O banco existente precisa estar sob `ROOT`, assim como `WORK` e os assets. A consulta é
+somente leitura, sem migrations. `renderId` é o ID local de `heygen_renders`, não scene ID
+nem ID remoto. `videoId` é uma chave editorial segura escolhida pelo operador.
+Use `examples/edit-batch-request.json` como contrato sintético: substitua IDs e profileRef
+pelos reais. Os exemplos de plano/timing não são sidecars prontos para seu áudio.
+
+A lista explícita tem limite `maxOutputs=3` por padrão, sem produto cartesiano.
+Cada output embute um manifest v2 intacto, refs de origem, hashes e filename determinísticos.
+Todos são validados antes de publicar um único
+`campaigns/<campaign>/editing/plans/<video>/<planHash>/plan.json` sob WORK.
+Dry-run não publica planos/manifests; replay não sobrescreve corrupção nem cria jobs HeyGen.
+
+O texto de captions vem da copy aprovada vinculada ao WAV do render, nunca da headline
+ou da versão mais nova da campanha. `timingStatus=missing` preserva a pendência.
+Um `timingRef` opcional aponta para JSON local por path/hash: origem `manual` ou
+`external_alignment`, operador `acceptedBy`, timebase `source_mp4`, hashes exatos de
+MP4/copy/WAV e cues cobrindo os tokens `split()` em intervalos inicial inclusivo/final exclusivo.
+Não há ASR/alinhamento automático. Por output: `disabled`, `timing_missing` ou
+`timing_provided`; texto habilitado exige fonte local válida. Planejar não renderiza MP4.
+
+Evidência: [D3B verification](docs/superpowers/2026-10-02-d3b-verification.md).
 
 ## Interface local planejada
 
@@ -273,8 +305,9 @@ O projeto distingue:
 - `LOCAL_VERIFIED`: o baseline determinístico passou;
 - `PROVIDER_VERIFIED`: um canário real autorizado passou.
 
-Goals 0–3, 4A–4C, D1, D2A e D2B estão implementados e verificados localmente. ElevenLabs, Google Flow e
-HeyGen ainda não têm canário real registrado neste repositório. Nenhuma capacidade do roadmap deve ser
+Goals 0–3, 4A–4C, D1, D2A, D2B, D3A e D3B estão implementados e verificados localmente.
+HeyGen tem somente o canário D2C com vínculo manual; ElevenLabs e Google Flow não têm canário
+real registrado. D3A/D3B são locais, sem nova verificação de provider. Nenhuma capacidade do roadmap deve ser
 tratada como entregue antes de código, testes e evidência correspondente.
 
 Gate local completo:

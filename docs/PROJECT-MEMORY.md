@@ -1,6 +1,6 @@
 # Auraly Mass Video Pipeline — Memória do Projeto
 
-**Atualizado em:** 2026-10-01
+**Atualizado em:** 2026-10-02
 **Decisão vigente:** MVP delivery-first para uso local e pessoal
 
 Este documento guarda decisões duráveis e fatos verificados. O estado entregue aparece separado
@@ -314,10 +314,31 @@ CLI `edit` cria/lista/consulta/versiona profiles, resolve com dry-run, consulta 
 manifests v2. Paths relativos ao project root, assets verificados, writes exclusivos,
 replay íntegro e recusa de corrupção. V1 continua em ingest/validate legado sem conversão
 que descarte cuts/punch-ins/b-roll. Sem provider, DB mutation ou auto-approval.
-Texto/timing de captions e planejamento A/B em lote ficam no D3B; UI/preview/render depois.
+Naquele checkpoint, texto/timing de captions e planejamento A/B em lote ficaram no D3B.
+O checkpoint D3B abaixo supersede essa pendência; UI/preview/render continuam futuros.
 Evidência local em `docs/superpowers/2026-10-01-d3a-verification.md`.
 `IMPLEMENTED`, `LOCAL_VERIFIED`: gate pós-correções 15/15, 1491 passed/20 skipped.
 Revisão independente encontrou três Important corrigidos com RED→GREEN; nenhum Minor adiado.
+
+### Checkpoint D3B — 2026-10-02
+
+Planner de lista explícita com `maxOutputs` estrito (default 3), keys únicas, overrides
+e IDs/hashes/filenames determinísticos. `EditBatchPlan` separado embute manifests v2 intactos;
+label afeta planHash, não outputHash. Caption input também participa do outputHash.
+CLI `edit plan|plan-get`, schemas/exemplos e publicação JSON exclusiva por planHash.
+Todos os outputs validam antes da publicação; dry-run não escreve planos/manifests.
+Sem novas tabelas, migrations, Jobs, providers ou dependências.
+
+SQLite existente é aberto somente leitura: render ready, copy exata vinculada ao WAV
+aprovado, refs de imagem/voz e conteúdo local verificados. Captions usam spoken_text
+da copy, nunca headline. Timing opcional validado por hashes, operador, origem,
+timebase source_mp4, intervalos e cobertura completa dos tokens; ausência fica missing.
+Não implementa alinhamento automático, UI ou renderer.
+
+Smoke real D2C: três headlines, replay estável, SQL/source/WAV intactos e zero paid calls.
+Profile local de teste publicado fora da campanha: `editing/profiles/d3b-smoke/1/profile.json`.
+Timing real ausente; captions desabilitadas no smoke, sem fingir legendas sincronizadas.
+Evidência e gate em `docs/superpowers/2026-10-02-d3b-verification.md`.
 
 O restante desta seção descreve o modelo alvo, não capacidades adicionais entregues.
 

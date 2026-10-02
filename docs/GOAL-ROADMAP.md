@@ -58,8 +58,8 @@ D2A HeyGen Contract, Preflight & Asset Reuse   DONE
 D2B HeyGen Batch Generation, Polling & Download LOCAL_VERIFIED
 D2C HeyGen Real Canary                         PROVIDER_VERIFIED (vínculo manual)
 D3A EditProfile, EditManifest & Override Resolution LOCAL_VERIFIED
-D3B Headline A/B Planning & Caption Inputs NEXT
-D4A FastAPI Operational API
+D3B Headline A/B Planning & Caption Inputs LOCAL_VERIFIED
+D4A FastAPI Operational API NEXT
 D4B React Operations UI & Approximate Preview
 D5A Deterministic Renderer
 D5B Render QC, Review & Delivery
@@ -318,7 +318,14 @@ Separar estilo reutilizável de configuração resolvida por render.
 
 ## D3B — Headline A/B Planning & Caption Inputs
 
-**Status:** `PLANNED`.
+**Status:** `IMPLEMENTED`, `LOCAL_VERIFIED`.
+
+Lista explícita limitada, IDs/hashes/filenames determinísticos, plano separado dos manifests
+v2 e CLI `edit plan|plan-get`. SQLite somente leitura; copy exata vinculada à voz do render.
+Timing opcional validado por hashes/cobertura/provenance, ausência explicitamente missing;
+sem ASR/alinhamento, UI/render, novas tabelas ou Jobs. Dry-run real D2C de três headlines
+passou com replay estável, SQL/MP4/WAV intactos, zero paid calls; captions desabilitadas
+e timing ausente neste smoke. Evidência: `docs/superpowers/2026-10-02-d3b-verification.md`.
 
 ### Objetivo
 
