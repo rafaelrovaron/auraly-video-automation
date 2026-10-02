@@ -1,7 +1,7 @@
 # D3B — Planejamento A/B e entradas de legenda
 
 Status: direção conversacional aprovada em 2026-10-02; esta especificação
-aguarda revisão do usuário. D3B ainda não implementado.
+aprovada pelo usuário em 2026-10-02. D3B ainda não implementado.
 
 ## Resultado e escopo
 
