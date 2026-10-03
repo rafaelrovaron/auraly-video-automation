@@ -19,7 +19,9 @@ def serve_command(
     """Serve existing local metadata without starting workers or migrating storage."""
     try:
         settings = ApiSettings.from_options(project_root=project_root, work_root=work_root, database=database)
-        uvicorn.run(create_app(settings), host="127.0.0.1", port=port, workers=1, access_log=False)
+        # Lifespan ERROR logs contain absolute paths; the CLI owns the static failure message.
+        uvicorn.run(create_app(settings), host="127.0.0.1", port=port, workers=1,
+                    access_log=False, log_level="critical")
     except (Exception, SystemExit):
         typer.echo("Local API could not start. Check local storage and configuration.", err=True)
         raise typer.Exit(1) from None

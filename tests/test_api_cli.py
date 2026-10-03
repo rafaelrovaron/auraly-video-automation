@@ -1,4 +1,6 @@
 from pathlib import Path
+import subprocess
+import sys
 from typing import Any
 
 import pytest
@@ -51,3 +53,17 @@ def test_api_serve_disables_access_logs(tmp_path: Path, monkeypatch: pytest.Monk
     result = CliRunner().invoke(app, ["api", "serve", "--project-root", str(tmp_path)])
     assert result.exit_code == 0, result.output
     assert calls[0]["access_log"] is False
+
+
+def test_real_api_startup_error_is_sanitized(tmp_path: Path) -> None:
+    result = subprocess.run(
+        [sys.executable, "-m", "auraly_pipeline.cli", "api", "serve", "--project-root", str(tmp_path),
+         "--database", str(tmp_path / "missing-private.db")],
+        capture_output=True, text=True, timeout=30,
+    )
+    output = result.stdout + result.stderr
+    assert result.returncode == 1
+    assert "Local API could not start" in output
+    assert "Traceback" not in output
+    assert str(Path.cwd()) not in output
+    assert str(tmp_path) not in output

@@ -180,6 +180,8 @@ Defaults preservam `AURALY_PROJECT_ROOT` e `AURALY_DATABASE_PATH`. Work root dev
 do project root; o banco pode ficar fora. O servidor escuta exclusivamente em `127.0.0.1`,
 com um processo, sem reload, CORS ou logs de acesso. Documentação em
 `http://127.0.0.1:8000/docs`; contrato em `/openapi.json`; saúde em `/health`.
+Logs rotineiros do Uvicorn ficam desativados para não expor paths em falhas de startup;
+o comando apresenta uma mensagem estática e sai com erro.
 
 As consultas cobrem campanhas, imagens, vozes, renders HeyGen, jobs, profiles e planos
 editoriais. Coleções retornam `{"items": [...]}`; erros usam `{error: {code, message, field}}`.
