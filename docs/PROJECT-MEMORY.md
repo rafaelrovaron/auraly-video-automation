@@ -1,6 +1,6 @@
 # Auraly Mass Video Pipeline — Memória do Projeto
 
-**Atualizado em:** 2026-10-02
+**Atualizado em:** 2026-10-03
 **Decisão vigente:** MVP delivery-first para uso local e pessoal
 
 Este documento guarda decisões duráveis e fatos verificados. O estado entregue aparece separado
@@ -426,6 +426,18 @@ exibir o número de outputs antes de renderizar para evitar explosão combinató
 ## 8. Interface local alvo
 
 Stack: React/TypeScript + FastAPI, servidos em loopback.
+
+D4A foi dividido em duas entregas. D4A.1 está implementado, com verificação integral pendente:
+API de consultas/status, `auraly api serve --port 8000`, OpenAPI e DTOs allowlisted sobre
+serviços existentes. SQLite abre somente leitura, exige revision/tabelas/colunas atuais e não
+migra/cria storage. Consultas preservam renders e planos históricos por ID/hash; Flow pausado
+não bloqueia o status. Leituras não executam provider, ASR, probes ou workers.
+
+D4A.2 permanece planejado: ações operacionais e ciclo de workers, com design próprio antes
+de execução. React/preview (D4B), renderer (D5) e o D4A completo não estão entregues.
+O comando aceita roots/DB locais confiáveis, bind fixo 127.0.0.1, um processo e sem access logs.
+Banco fora do project root é permitido; work root fora não. Nenhum canário pago é necessário
+para D4A.1, e a evidência histórica PROVIDER_VERIFIED não foi ampliada.
 
 Telas mínimas:
 

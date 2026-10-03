@@ -40,12 +40,14 @@ entrega.
   persistência exclusiva e CLI `edit`, sem renderer ou chamadas de provider.
 - D3B: planejamento A/B em lote, captions ligadas à copy/voz aprovadas, sidecar de timing
   validado quando fornecido e CLI `edit plan|plan-get`, sem gerar mídia.
+- D4A.1 implementado: API FastAPI de consultas locais, status factual por campanha,
+  profiles/plans verificados e OpenAPI; verificação integral pendente nesta entrega.
 
 ### Não entregue ainda
 
 - render final com headline, captions, música e framing configuráveis;
 - renderização das variações A/B já planejadas, reutilizando voz, imagem e HeyGen;
-- API FastAPI e interface React local;
+- ações operacionais da API (D4A.2) e interface React local (D4B);
 - preview aproximado e fluxo end-to-end operável pela interface.
 
 ### Google Flow: preservado, mas pausado
@@ -162,9 +164,33 @@ Revisão/aprovação usam o work root configurado por `AURALY_PROJECT_ROOT`; se 
 intake, mantenha a mesma configuração para aprovar e preparar assets. Não usar o worker genérico
 em uma fila real que também contenha jobs pagos.
 
+## API local de consultas (D4A.1)
+
+Requer um banco existente e atualizado pelo fluxo CLI habitual. A API abre SQLite em modo
+somente leitura: não cria banco, não aplica migrations e não executa workers/providers.
+
+```powershell
+uv run auraly api serve --port 8000
+# Overrides opcionais: --project-root PATH --work-root PATH --database PATH
+Invoke-RestMethod http://127.0.0.1:8000/api/v1/campaigns
+Invoke-RestMethod http://127.0.0.1:8000/api/v1/campaigns/CAMPAIGN_ID/status
+```
+
+Defaults preservam `AURALY_PROJECT_ROOT` e `AURALY_DATABASE_PATH`. Work root deve estar dentro
+do project root; o banco pode ficar fora. O servidor escuta exclusivamente em `127.0.0.1`,
+com um processo, sem reload, CORS ou logs de acesso. Documentação em
+`http://127.0.0.1:8000/docs`; contrato em `/openapi.json`; saúde em `/health`.
+
+As consultas cobrem campanhas, imagens, vozes, renders HeyGen, jobs, profiles e planos
+editoriais. Coleções retornam `{"items": [...]}`; erros usam `{error: {code, message, field}}`.
+Não aceita query parameters. Diretório editorial ausente significa lista vazia; artefato
+presente e corrompido retorna erro, sem esconder a falha. Status é informação para o operador,
+não autorização de geração paga. Não há media serving, ações POST ou render final nesta etapa.
+
 ## Próximo slice de desenvolvimento
 
-O próximo Goal após D3B é **D4A — FastAPI Operational API**.
+O próximo slice é **D4A.2 — ações operacionais e integração de workers**, com design separado.
+D4A só estará completo após as duas partes; D4B adicionará React/preview e D5 o renderer.
 Revisão visual final do vídeo do canário continua humana; configurar um manifest não aprova o vídeo.
 
 A execução de 2026-09-30 aprovou o WAV existente com motivo auditável, completou upload de

@@ -34,6 +34,8 @@ genérico e não terá timeline estilo CapCut ou preview frame-perfect.
   persistência JSON local e CLI, sem UI/render ou caption timing;
 - D3B: planejamento A/B em lote, inputs de captions da copy/voz aprovadas,
   timing opcional validado e CLI; sem renderização ou alinhamento automático;
+- D4A.1: API local de consultas/status, profiles/plans verificados e OpenAPI implementados;
+  verificação integral pendente. Sem mutações, workers, providers ou media serving;
 - CLI e harness de verificação.
 
 ### 2.2 Capacidade alvo deste PRD
@@ -43,7 +45,7 @@ genérico e não terá timeline estilo CapCut ou preview frame-perfect.
 - integração dos profiles/manifests/overrides D3A com a UI e renderer;
 - headline/captions/music/framing configuráveis;
 - A/B de headline downstream;
-- API FastAPI e UI React local;
+- ações operacionais FastAPI (D4A.2) e UI React local (D4B);
 - preview aproximado;
 - render, QC, review e entrega local.
 

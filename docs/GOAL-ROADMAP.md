@@ -59,7 +59,8 @@ D2B HeyGen Batch Generation, Polling & Download LOCAL_VERIFIED
 D2C HeyGen Real Canary                         PROVIDER_VERIFIED (vínculo manual)
 D3A EditProfile, EditManifest & Override Resolution LOCAL_VERIFIED
 D3B Headline A/B Planning & Caption Inputs LOCAL_VERIFIED
-D4A FastAPI Operational API NEXT
+D4A.1 Local Query API & Campaign Status IMPLEMENTED (full gate pending)
+D4A.2 Operational Actions & Worker Integration NEXT DESIGN
 D4B React Operations UI & Approximate Preview
 D5A Deterministic Renderer
 D5B Render QC, Review & Delivery
@@ -350,7 +351,16 @@ Criar output variants baratos sem refazer assets upstream.
 
 ## D4A — FastAPI Operational API
 
-**Status:** `PLANNED`.
+**Status:** parcialmente implementado; não concluído.
+
+### Slices aprovados
+
+- D4A.1: consultas/status, readonly SQLite, DTOs públicos, profiles/plans verificados,
+  OpenAPI e CLI loopback implementados. Verificação integral e revisão final pendentes.
+- D4A.2: ações operacionais e integração de workers `PLANNED`; próximo design/plano.
+
+D4A.1 não inclui mutações, media serving, render ou execução de providers. O critério de
+saída de D4A inteiro abaixo só poderá ser atendido após D4A.2.
 
 ### Objetivo
 
