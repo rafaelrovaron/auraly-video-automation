@@ -43,6 +43,21 @@ class QueryError(ValueError):
         super().__init__(ERROR_MESSAGES[code])
 
 
+class ErrorDetail(ContractModel):
+    code: ErrorCode
+    message: str
+    field: str | None = None
+
+
+class ErrorBody(ContractModel):
+    error: ErrorDetail
+
+
+class Health(ContractModel):
+    status: Literal["ok"] = "ok"
+    api_version: Literal[1] = 1
+
+
 @dataclass(frozen=True)
 class ApiSettings:
     project_root: Path

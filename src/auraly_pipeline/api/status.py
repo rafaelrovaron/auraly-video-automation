@@ -36,11 +36,14 @@ def pending(code: PendingCode, entity_id: str) -> PendingItem:
 
 
 def job_pending(job: Job) -> PendingItem | None:
+    item: PendingItem | None = None
     if job.status in {"failed", "blocked"}:
-        return pending("attention_required", job.job_id)
-    if job.status in {"queued", "running", "retry_scheduled"}:
-        return pending("wait_for_job", job.job_id)
-    return None
+        item = pending("attention_required", job.job_id)
+    elif job.status in {"queued", "running", "retry_scheduled"}:
+        item = pending("wait_for_job", job.job_id)
+    if item and job.job_type == "voice.generate":
+        return item.model_copy(update={"stage": "voice"})
+    return item
 
 
 def compute_campaign_status(

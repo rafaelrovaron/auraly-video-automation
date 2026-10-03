@@ -22,6 +22,8 @@ dependencies = [
   "Pillow>=11,<12",
   "mcp>=2,<3",
   "keyring>=25,<26",
+  "fastapi<1",
+  "uvicorn<1",
 ]
 
 [project.scripts]

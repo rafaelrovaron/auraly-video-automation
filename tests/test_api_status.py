@@ -63,6 +63,14 @@ def test_status_priority_and_pending_match(observed: Any, render_status: Any, ex
     assert status.scenes[0].pending[0].code == code
 
 
+def test_voice_job_reports_voice_stage(observed: Any) -> None:
+    campaign, facts, _, _ = observed
+    facts["renders"] = []
+    facts["voices"] = [facts["voices"][0].model_copy(update={"status": VoiceMasterStatus.GENERATING})]
+    facts["jobs"] = [next(j for j in facts["jobs"] if j.job_type == "voice.generate")]
+    assert compute(campaign, **facts).next_pending.stage == "voice"
+
+
 def test_ready_render_retains_pinned_history(observed: Any) -> None:
     campaign, facts, _, _ = observed
     draft = campaign.copy_masters[0].model_copy(update={"version": 2, "approval_state": "draft"})
