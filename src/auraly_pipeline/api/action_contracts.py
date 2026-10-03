@@ -24,32 +24,32 @@ class OperationRequest(ContractModel):
 
 
 class ImagePrepareOperation(OperationRequest):
-    operation: Literal["image_prepare"]
+    operation: Literal["image_prepare"] = "image_prepare"
     output_path: str = Field(min_length=1)
 
 
 class ImageImportOperation(OperationRequest):
-    operation: Literal["image_import"]
+    operation: Literal["image_import"] = "image_import"
     manifest_path: str = Field(min_length=1)
     mode: Literal["dry_run", "execute"]
     manifest_sha256: Sha | None = None
 
 
 class EditPlanOperation(OperationRequest):
-    operation: Literal["edit_plan"]
+    operation: Literal["edit_plan"] = "edit_plan"
     request: EditBatchRequest
     persist: bool = True
 
 
 class VoiceImportOperation(OperationRequest):
-    operation: Literal["voice_import"]
+    operation: Literal["voice_import"] = "voice_import"
     request: VoiceImportRequest
     source_path: str = Field(min_length=1)
     request_id: str = Field(min_length=1, max_length=120)
 
 
 class VoiceReviewOperation(OperationRequest):
-    operation: Literal["voice_review"]
+    operation: Literal["voice_review"] = "voice_review"
     voice_id: str = Field(min_length=1)
     action: Literal["approve", "reject"]
     actor: str = Field(min_length=1, max_length=120)
@@ -70,7 +70,7 @@ class VoiceReviewOperation(OperationRequest):
 
 
 class HeyGenAssetsOperation(OperationRequest):
-    operation: Literal["heygen_assets"]
+    operation: Literal["heygen_assets"] = "heygen_assets"
     request_id: str = Field(min_length=1, max_length=120)
 
 
@@ -81,11 +81,11 @@ class HeyGenVideoOperation(OperationRequest):
 
 
 class HeyGenVideoPlanOperation(HeyGenVideoOperation):
-    operation: Literal["heygen_video_plan"]
+    operation: Literal["heygen_video_plan"] = "heygen_video_plan"
 
 
 class HeyGenVideoSubmitOperation(HeyGenVideoOperation):
-    operation: Literal["heygen_video_submit"]
+    operation: Literal["heygen_video_submit"] = "heygen_video_submit"
     approved_by: str = Field(min_length=1, max_length=200)
     _actor = field_validator("approved_by")(
         lambda value: validate_safe_identifier(value, "approved_by", max_length=200)
@@ -93,7 +93,7 @@ class HeyGenVideoSubmitOperation(HeyGenVideoOperation):
 
 
 class HeyGenReconcileOperation(OperationRequest):
-    operation: Literal["heygen_reconcile"]
+    operation: Literal["heygen_reconcile"] = "heygen_reconcile"
     request_id: str = Field(min_length=1, max_length=120)
     render_id: str = Field(min_length=1)
     video_id: str | None = Field(default=None, min_length=1, max_length=200)
@@ -210,3 +210,22 @@ class WorkerState(ContractModel):
     campaign_id: str | None = None
     kind: WorkerKind | None = None
     error_code: ErrorCode | None = None
+
+
+class WorkerStartAction(OperationRequest):
+    kind: WorkerKind
+
+
+class ImageReviewAction(OperationRequest):
+    action: Literal["approve", "reject", "replace"]
+    actor: str = Field(min_length=1, max_length=120)
+    reason: str | None = Field(default=None, min_length=1, max_length=512)
+    _actor = field_validator("actor")(lambda value: validate_safe_identifier(value, "actor", max_length=120))
+
+    @model_validator(mode="after")
+    def valid_reason(self) -> Self:
+        if self.action == "reject" and self.reason is None:
+            raise ValueError("rejection reason required")
+        if self.reason is not None:
+            validate_safe_error_message(self.reason, "reason")
+        return self

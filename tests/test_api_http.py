@@ -47,9 +47,10 @@ def test_all_spec_get_routes_and_openapi(tmp_path: Path, mp4: bytes) -> None:
         assert client.get("/api/v1/editing/profiles/plain/1").status_code == 200
         assert client.get("/docs").status_code == 200
         schema = client.get("/openapi.json").json()
-        assert len(schema["paths"]) == 13
+        assert sum("get" in path for path in schema["paths"].values()) == 15
         for path in schema["paths"].values():
-            assert set(path) == {"get"}
+            if "get" not in path:
+                continue
             assert "422" in path["get"]["responses"]
             assert path["get"]["responses"]["200"]["content"]["application/json"]["schema"]
 
@@ -105,12 +106,13 @@ def test_http_errors_follow_contract(tmp_path: Path, monkeypatch: pytest.MonkeyP
         assert response.json()["error"]["code"] == "storage_unavailable"
 
 
-def test_http_mutations_are_405(tmp_path: Path) -> None:
+def test_http_unsupported_mutations_are_405(tmp_path: Path) -> None:
     with client_for(create_api_fixture(tmp_path)) as client:
-        for method in ["POST", "PUT", "PATCH", "DELETE"]:
+        for method in ["PUT", "PATCH", "DELETE"]:
             response = client.request(method, "/api/v1/campaigns")
             assert response.status_code == 405
             assert response.json()["error"]["code"] == "method_not_allowed"
+        assert client.post("/health", json={}).status_code == 405
 
 
 def test_http_host_restricted(tmp_path: Path) -> None:
@@ -134,13 +136,13 @@ def test_http_startup_and_shutdown(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(Engine, "dispose", dispose)
     with client_for(settings) as client:
         assert client.get("/health").status_code == 200
-    assert len(disposed) == 1
+    assert len(disposed) == 2
     with sqlite3.connect(settings.database) as connection:
         connection.execute("UPDATE alembic_version SET version_num='old'")
     with pytest.raises(QueryError, match="Local storage"):
         with client_for(settings):
             pass
-    assert len(disposed) == 2
+    assert len(disposed) == 3
     missing = tmp_path / "missing" / "private.db"
     with pytest.raises(QueryError) as error:
         with client_for(ApiSettings(tmp_path, settings.work_root, missing)):

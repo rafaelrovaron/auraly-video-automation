@@ -99,15 +99,16 @@ class EditingService:
             raise EditingError("profileRef", "invalid profile identifier/version") from None
         return _safe_path(self.work_root, self.work_root / "editing" / "profiles" / profile_id / str(version) / "profile.json")
 
-    def create_profile(self, profile: EditProfile) -> Path:
+    def create_profile(self, profile: EditProfile, *, validate_assets: bool = True) -> Path:
         profile = EditProfile.model_validate(profile.model_dump(mode="json", by_alias=True))
         path = self._profile_path(profile.profile_id, profile.version)
-        for field, asset in (("headline.font", profile.defaults.headline.font),
-                             ("captions.font", profile.defaults.captions.font)):
-            if asset:
-                self._font(asset, field)
-        if profile.defaults.music.asset:
-            self._audio_duration(profile.defaults.music.asset)
+        if validate_assets:
+            for field, asset in (("headline.font", profile.defaults.headline.font),
+                                 ("captions.font", profile.defaults.captions.font)):
+                if asset:
+                    self._font(asset, field)
+            if profile.defaults.music.asset:
+                self._audio_duration(profile.defaults.music.asset)
         if path.exists():
             existing = self.get_profile(profile.profile_id, profile.version)
             if profile_hash(existing) != profile_hash(profile):
@@ -143,11 +144,13 @@ class EditingService:
             profiles.append(self.get_profile(path.parent.parent.name, version))
         return sorted(profiles, key=lambda item: (item.profile_id, item.version))
 
-    def create_profile_version(self, profile_id: str, base_version: int, replacement: EditProfile) -> Path:
+    def create_profile_version(
+        self, profile_id: str, base_version: int, replacement: EditProfile, *, validate_assets: bool = True,
+    ) -> Path:
         self.get_profile(profile_id, base_version)
         if replacement.profile_id != profile_id or replacement.version != base_version + 1:
             raise EditingError("profileRef", "replacement must be the next version of this profile")
-        return self.create_profile(replacement)
+        return self.create_profile(replacement, validate_assets=validate_assets)
 
     def _asset(self, asset: AssetRef, field: str) -> Path:
         try:

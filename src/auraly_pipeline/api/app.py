@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
+import asyncio
 from typing import Annotated, Any, cast
 
 from fastapi import Depends, FastAPI, Path, Request
@@ -19,7 +20,9 @@ from auraly_pipeline.api.contracts import (
     ProfileView, QueryError, RenderSummary, SceneImages, VoiceSummary,
 )
 from auraly_pipeline.api.queries import ApiQueries
-from auraly_pipeline.campaigns.persistence import create_readonly_sqlite_engine, validate_api_database
+from auraly_pipeline.campaigns.persistence import create_readonly_sqlite_engine, create_existing_sqlite_engine, validate_api_database
+from auraly_pipeline.api.commands import ApiCommands
+from auraly_pipeline.api.worker import LocalApiWorker
 from auraly_pipeline.editing.batch_domain import EditBatchPlan
 from auraly_pipeline.editing.domain import Sha, safe_id
 from auraly_pipeline.heygen.video_domain import UUID_PATTERN
@@ -32,6 +35,7 @@ PlanHash = Annotated[Sha, Path()]
 STATUS: dict[ErrorCode, int] = {
     "invalid_request": 422, "not_found": 404, "artifact_invalid": 409,
     "storage_unavailable": 503, "internal_error": 500, "method_not_allowed": 405,
+    "operation_conflict": 409, "operation_not_allowed": 409,
 }
 
 
@@ -56,21 +60,34 @@ def create_app(settings: ApiSettings) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         engine: Engine | None = None
+        write_engine: Engine | None = None
+        worker: LocalApiWorker | None = None
         try:
             try:
                 engine = create_readonly_sqlite_engine(settings.database)
                 validate_api_database(engine)
                 app.state.engine = engine
                 app.state.queries = ApiQueries(settings, engine)
+                write_engine = create_existing_sqlite_engine(settings.database)
+                app.state.write_engine = write_engine
+                app.state.commands = ApiCommands(settings, write_engine)
+                worker = LocalApiWorker(app.state.commands)
+                app.state.worker = worker
             except (SQLAlchemyError, ValueError, OSError):
                 raise QueryError("storage_unavailable") from None
             yield
         finally:
-            if engine is not None:
-                engine.dispose()
+            try:
+                if worker is not None:
+                    await asyncio.to_thread(worker.shutdown)
+            finally:
+                if write_engine is not None:
+                    write_engine.dispose()
+                if engine is not None:
+                    engine.dispose()
 
     errors: dict[int | str, dict[str, Any]] = {code: {"model": ErrorBody} for code in (400, 404, 405, 409, 422, 500, 503)}
-    app = FastAPI(title="Auraly Local Query API", version="1", lifespan=lifespan,
+    app = FastAPI(title="Auraly Local Operational API", version="1", lifespan=lifespan,
                   responses=errors, redoc_url=None, debug=False)
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=["localhost", "127.0.0.1"], www_redirect=False)
 
@@ -91,6 +108,12 @@ def create_app(settings: ApiSettings) -> FastAPI:
     async def query_boundary(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
         if request.query_params:
             return error_response("invalid_request")
+        if request.method == "POST":
+            origins = request.headers.getlist("origin")
+            expected_origin = f"{request.url.scheme}://{request.url.netloc}"
+            if (request.headers.get("content-type", "").split(";", 1)[0].strip().lower() != "application/json"
+                    or len(origins) > 1 or (origins and origins[0] != expected_origin)):
+                return error_response("invalid_request")
         try:
             response = await call_next(request)
             if response.status_code == 400:
@@ -157,4 +180,6 @@ def create_app(settings: ApiSettings) -> FastAPI:
     def plan(campaignId: CampaignId, videoId: EditId, planHash: PlanHash, queries: Queries) -> EditBatchPlan:
         return queries.get_plan(campaignId, videoId, planHash)
 
+    from auraly_pipeline.api.action_routes import register_action_routes
+    register_action_routes(app)
     return app

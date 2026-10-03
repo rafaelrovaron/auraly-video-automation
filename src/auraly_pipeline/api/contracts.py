@@ -31,7 +31,7 @@ ERROR_MESSAGES: dict[ErrorCode, str] = {
     "artifact_invalid": "Stored artifact is invalid.",
     "storage_unavailable": "Local storage is unavailable or incompatible.",
     "internal_error": "The local query failed safely.",
-    "method_not_allowed": "This API is read-only.",
+    "method_not_allowed": "HTTP method is not supported.",
     "operation_conflict": "Another local operation is running.",
     "operation_not_allowed": "The operation is not allowed in the current state.",
 }

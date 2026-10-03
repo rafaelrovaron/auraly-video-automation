@@ -61,6 +61,11 @@ change before claiming D4A.2 LOCAL_VERIFIED. Windows/local success is not Linux 
   reused submissions. Defaults preserve existing CLI behavior. HeyGen wrappers carry
   a caller-stable requestId: retry reuses the checkpoint; a fresh operator action after
   changed prerequisites uses a new requestId without weakening native idempotency.
+- EditingService.create_profile/create_profile_version accept an optional
+  validate_assets flag, default True for existing CLI callers. The API uses False
+  to publish only typed immutable profile metadata (201). Full media hash/font/music
+  checks remain mandatory in the existing resolve path executed by queued edit_plan;
+  a saved profile is configuration, not evidence that referenced media is valid.
 - Short mutations delegate to services in the request. Media hashing/probes/ASR/media copies,
   external calls and polling run in queued work, not route handlers.
 - API-only long operations use narrow handlers on the existing Job framework, not a

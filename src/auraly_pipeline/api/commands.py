@@ -17,14 +17,21 @@ from auraly_pipeline.api.action_contracts import (
     VoiceImportOperation, VoiceImportResult, VoiceReviewOperation, VoiceReviewResult,
     HeyGenAssetsOperation, HeyGenAssetsResult, HeyGenVideoPlanOperation, HeyGenVideoPlanResult,
     HeyGenVideoSubmitOperation, HeyGenVideoSubmitResult, HeyGenReconcileOperation, HeyGenReconcileResult,
+    ImageReviewAction,
 )
-from auraly_pipeline.api.contracts import ApiSettings, ERROR_MESSAGES, ErrorCode, QueryError, RenderSummary
+from auraly_pipeline.api.contracts import (
+    ApiSettings, ERROR_MESSAGES, ErrorCode, QueryError, RenderSummary,
+    CampaignDetail, ImageSummary, ProfileView, JobSummary,
+)
+from auraly_pipeline.api.queries import ApiQueries
 from auraly_pipeline.api.operations import ApiOperationHandler, LOCAL_OPERATION_JOB
-from auraly_pipeline.campaigns.service import CampaignNotFoundError, CampaignService
+from auraly_pipeline.campaigns.service import CampaignNotFoundError, CampaignService, CampaignError
+from auraly_pipeline.campaigns.domain import CampaignCreate, CopyMasterCreate
 from auraly_pipeline.editing.batch_planner import verify_batch_plan
 from auraly_pipeline.editing.batch_service import EditBatchService
-from auraly_pipeline.editing.domain import EditingError, relative_path
-from auraly_pipeline.editing.service import validate_editing_path
+from auraly_pipeline.editing.domain import EditingError, EditingArtifactNotFoundError, EditProfile, relative_path
+from auraly_pipeline.editing.resolver import profile_hash
+from auraly_pipeline.editing.service import validate_editing_path, EditingService
 from auraly_pipeline.heygen.provider import HeyGenMcpAdapter
 from auraly_pipeline.heygen.fake_provider import FakeHeyGenProvider
 from auraly_pipeline.heygen.handler import HeyGenAssetUploadHandler
@@ -34,10 +41,11 @@ from auraly_pipeline.heygen.video_handler import HeyGenVideoHandler
 from auraly_pipeline.heygen.video_repository import HeyGenVideoRepository
 from auraly_pipeline.heygen.video_service import HeyGenVideoService
 from auraly_pipeline.images.import_batch import ImageImportBatch, ImageImportError, ImageImportService
+from auraly_pipeline.images.service import ImageService, ImageError, ImageCandidateNotFoundError
 from auraly_pipeline.jobs.db_models import JobRow
 from auraly_pipeline.jobs.domain import JobSubmit, RetrySafety
 from auraly_pipeline.jobs.repository import JobRepository
-from auraly_pipeline.jobs.service import JobNotFoundError, JobService
+from auraly_pipeline.jobs.service import JobNotFoundError, JobService, JobTransitionError
 from auraly_pipeline.voices.domain import VoiceGenerateRequest, VoiceMaster
 from auraly_pipeline.voices.handler import SpeechProvider, TranscriptProvider, VoiceGenerateHandler
 from auraly_pipeline.voices.import_audio import VoiceImportError, VoiceImportHandler, VoiceImportService
@@ -84,6 +92,68 @@ class ApiCommands:
         self.voice_import = VoiceImportService(
             self._sessions, self.jobs, settings.project_root, settings.work_root,
         )
+        self.queries = ApiQueries(settings, engine)
+        self.image_review = ImageService(engine, self.jobs, work_root=settings.work_root)
+        self.profiles = EditingService(project_root=settings.project_root, work_root=settings.work_root)
+
+    def create_campaign(self, request: CampaignCreate) -> CampaignDetail:
+        try:
+            campaign = self.campaigns.create_campaign(request)
+        except CampaignError:
+            raise QueryError("operation_not_allowed") from None
+        return self.queries.get_campaign(campaign.campaign_id)
+
+    def add_copy(self, campaign_id: str, request: CopyMasterCreate) -> CampaignDetail:
+        self.require_campaign(campaign_id)
+        self.campaigns.add_copy_master_version(campaign_id, request)
+        return self.queries.get_campaign(campaign_id)
+
+    def review_image(self, campaign_id: str, candidate_id: str, request: ImageReviewAction) -> ImageSummary:
+        self.require_campaign(campaign_id)
+        try:
+            candidate = self.image_review.get_candidate(candidate_id)
+        except ImageCandidateNotFoundError:
+            raise QueryError("not_found") from None
+        scene_ids = {scene.scene_variant_id for scene in self.campaigns.get_campaign(campaign_id).scene_variants}
+        if candidate.scene_variant_id not in scene_ids:
+            raise QueryError("not_found")
+        try:
+            if request.action == "approve":
+                reviewed = self.image_review.approve_candidate(candidate_id, request.actor)
+            elif request.action == "reject":
+                assert request.reason is not None
+                reviewed = self.image_review.reject_candidate(candidate_id, request.actor, request.reason)
+            else:
+                reviewed = self.image_review.replace_approved_candidate(
+                    candidate.scene_variant_id, candidate_id, request.actor,
+                )
+        except ImageError:
+            raise QueryError("operation_not_allowed") from None
+        return ImageSummary.model_validate(reviewed.model_dump(include=set(ImageSummary.model_fields)))
+
+    def publish_profile(self, profile: EditProfile, *, base_version: int | None = None) -> ProfileView:
+        if base_version is not None and profile.version != base_version + 1:
+            raise QueryError("invalid_request")
+        try:
+            if base_version is None:
+                self.profiles.create_profile(profile, validate_assets=False)
+            else:
+                self.profiles.create_profile_version(
+                    profile.profile_id, base_version, profile, validate_assets=False,
+                )
+        except EditingArtifactNotFoundError:
+            raise QueryError("not_found") from None
+        except EditingError:
+            raise QueryError("artifact_invalid") from None
+        return ProfileView(profile=profile, profile_hash=profile_hash(profile))
+
+    def change_job(self, campaign_id: str, job_id: str, *, resume: bool) -> JobSummary:
+        self.queries.get_job(campaign_id, job_id)
+        try:
+            job = self.jobs.resume_job(job_id) if resume else self.jobs.cancel_job(job_id)
+        except JobTransitionError:
+            raise QueryError("operation_not_allowed") from None
+        return JobSummary.model_validate(job.model_dump(include=set(JobSummary.model_fields)))
 
     @property
     def heygen_jobs(self) -> JobService:
