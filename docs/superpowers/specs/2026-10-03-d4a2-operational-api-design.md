@@ -1,7 +1,7 @@
 # D4A.2 — Operational Actions & Local Worker
 
 Date: 2026-10-03.
-Status: conversational design approved; written spec awaiting user review.
+Status: conversational design and written spec approved; implementation plan awaiting review.
 Base: main cc6f849, D4A.1 implemented and locally verified.
 
 ## Intent and boundary
