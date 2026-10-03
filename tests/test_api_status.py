@@ -45,6 +45,7 @@ def test_missing_voice_status(tmp_path: Path) -> None:
     assert callable(getattr(queries, "get_status", None)), "status query missing"
     status = queries.get_status("campaign-one")
     assert status.operational_status == "needs_input"
+    assert status.next_pending is not None
     assert status.next_pending.code == "voice_missing"
 
 
