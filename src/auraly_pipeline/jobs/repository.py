@@ -493,7 +493,14 @@ class JobRepository:
             session.commit()
             return self._reload(session, row.id)
 
-    def activate_due_retries(self, now: datetime) -> None:
+    def activate_due_retries(
+        self, now: datetime, *, campaign_id: str | None = None, job_type: str | None = None,
+    ) -> None:
+        scope = []
+        if campaign_id is not None:
+            scope.append(JobRow.campaign_id == campaign_id)
+        if job_type is not None:
+            scope.append(JobRow.job_type == job_type)
         with self._session_factory() as session:
             self._begin_immediate(session)
             rows = list(
@@ -502,6 +509,7 @@ class JobRepository:
                     .where(
                         JobRow.status == JobStatus.RETRY_SCHEDULED.value,
                         JobRow.next_retry_at <= now,
+                        *scope,
                     )
                     .order_by(JobRow.next_retry_at, JobRow.id)
                 ).all()
@@ -671,7 +679,14 @@ class JobRepository:
         )
         session.flush()
 
-    def recover_stale(self, now: datetime) -> list[JobRow]:
+    def recover_stale(
+        self, now: datetime, *, campaign_id: str | None = None, job_type: str | None = None,
+    ) -> list[JobRow]:
+        scope = []
+        if campaign_id is not None:
+            scope.append(JobRow.campaign_id == campaign_id)
+        if job_type is not None:
+            scope.append(JobRow.job_type == job_type)
         recovered_ids: list[str] = []
         with self._session_factory() as session:
             self._begin_immediate(session)
@@ -681,6 +696,7 @@ class JobRepository:
                     .where(
                         JobRow.status == JobStatus.RUNNING.value,
                         JobRow.lease_expires_at <= now,
+                        *scope,
                     )
                     .options(selectinload(JobRow.attempts))
                     .order_by(JobRow.lease_expires_at, JobRow.id)

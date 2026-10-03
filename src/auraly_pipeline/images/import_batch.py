@@ -12,6 +12,7 @@ from typing import Literal, Self, cast
 from uuid import uuid4
 
 from pydantic import Field, PrivateAttr, field_validator, model_validator
+from sqlalchemy import Engine
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -154,11 +155,21 @@ class ImageImportResult(ContractModel):
 class ImageImportService:
     def __init__(self, database_path: Path, *, work_root: Path) -> None:
         migrate_database(database_path)
-        self._engine = create_sqlite_engine(database_path)
+        self._initialize(create_sqlite_engine(database_path), work_root=work_root, owns_engine=True)
+
+    def _initialize(self, engine: Engine, *, work_root: Path, owns_engine: bool) -> None:
+        self._engine = engine
+        self._owns_engine = owns_engine
         self._sessions = sessionmaker(self._engine, expire_on_commit=False, class_=Session)
         self._campaigns = CampaignService(self._engine)
         self._repository = ImageRepository(self._sessions)
         self._work_root = work_root
+
+    @classmethod
+    def from_engine(cls, engine: Engine, *, work_root: Path) -> ImageImportService:
+        service = cls.__new__(cls)
+        service._initialize(engine, work_root=work_root, owns_engine=False)
+        return service
 
     @classmethod
     def for_database(
@@ -167,7 +178,8 @@ class ImageImportService:
         return cls(database_path, work_root=work_root or Path("work"))
 
     def close(self) -> None:
-        self._engine.dispose()
+        if self._owns_engine:
+            self._engine.dispose()
 
     def prepare_directory(self, campaign_id: str, output: Path) -> ImageImportPrepared:
         try:

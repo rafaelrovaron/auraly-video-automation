@@ -326,8 +326,8 @@ class JobService:
     ) -> Job | None:
         self._validate_worker(worker_id, lease_seconds)
         now = self._as_utc(self._clock())
-        self._repository.recover_stale(now)
-        self._repository.activate_due_retries(now)
+        self._repository.recover_stale(now, campaign_id=campaign_id, job_type=job_type)
+        self._repository.activate_due_retries(now, campaign_id=campaign_id, job_type=job_type)
         try:
             row = self._repository.claim_next(
                 worker_id,

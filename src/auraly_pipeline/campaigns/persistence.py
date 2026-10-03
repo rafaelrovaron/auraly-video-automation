@@ -55,12 +55,26 @@ def create_sqlite_engine(database_path: Path) -> Engine:
 
 
 def create_readonly_sqlite_engine(database_path: Path) -> Engine:
+    return _existing_sqlite_engine(database_path, mode="ro")
+
+
+def create_existing_sqlite_engine(database_path: Path) -> Engine:
+    engine = _existing_sqlite_engine(database_path, mode="rw")
+    try:
+        validate_api_database(engine)
+    except Exception:
+        engine.dispose()
+        raise
+    return engine
+
+
+def _existing_sqlite_engine(database_path: Path, *, mode: str) -> Engine:
     database = _local_path(database_path).absolute()
     if not database.is_file() or database.is_symlink():
         raise ValueError("existing regular database required")
 
     def connect() -> sqlite3.Connection:
-        connection = sqlite3.connect(database.as_uri() + "?mode=ro", uri=True,
+        connection = sqlite3.connect(database.as_uri() + f"?mode={mode}", uri=True,
                                      check_same_thread=False)
         connection.execute("PRAGMA foreign_keys=ON")
         connection.execute("PRAGMA busy_timeout=5000")

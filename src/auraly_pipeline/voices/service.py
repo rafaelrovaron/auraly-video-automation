@@ -413,8 +413,14 @@ class VoiceMasterService:
             self.get(voice_master_id), self._jobs.get_job(job_id)
         )
 
-    def worker_once(self, worker_id: str, *, lease_seconds: int = 300) -> Job | None:
-        return self._jobs.worker_once(worker_id, lease_seconds=lease_seconds)
+    def worker_once(
+        self, worker_id: str, *, lease_seconds: int = 300,
+        campaign_id: str | None = None, job_type: str | None = None,
+    ) -> Job | None:
+        return self._jobs.worker_once(
+            worker_id, lease_seconds=lease_seconds,
+            campaign_id=campaign_id, job_type=job_type,
+        )
 
     def get(self, voice_master_id: str) -> VoiceMaster:
         with self._sessions() as session:
