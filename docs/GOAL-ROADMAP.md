@@ -351,7 +351,7 @@ Criar output variants baratos sem refazer assets upstream.
 
 ## D4A — FastAPI Operational API
 
-**Status:** D4A.1 e D4A.2 implementados; verificação final D4A.2 registrada abaixo.
+**Status:** D4A.1 e D4A.2 `IMPLEMENTED`, `LOCAL_VERIFIED`.
 
 ### Slices aprovados
 
@@ -378,7 +378,14 @@ metadados imutáveis; o Job valida assets. D4B é o próximo slice, D5 permanece
 Gate final local D4A.2 de 2026-10-03 no código `21b9d5d`: Windows 15/15 etapas,
 1.697 passed/24 skipped em 393,13 s; Ruff, mypy source/tests, quatro schemas e audit
 production aprovados. Docker indisponível no diagnóstico opcional do doctor; não há
-runner Linux local. Revisão independente da branch pendente antes do handoff final.
+runner Linux local. Esse foi o gate anterior à revisão final.
+
+Revisão independente única da branch encontrou três achados relevantes. Uma rodada de
+correção RED→GREEN resolveu recuperação pública de checkpoint sem novo dispatch, DB externo
+no plano editorial e race do manifest entre verificação/leitura. Gate pós-fix no código
+`73ca3587ebfd94aa8d3f42a6b9b0744b61b07168`: Windows 15/15, 1.701 passed/24 skipped
+em 396,42 s. Sem minors pendentes. Não houve re-review; regressões e gate pós-fix são
+a evidência das correções. CI desse código ainda depende de publicação autorizada.
 
 ### Objetivo
 

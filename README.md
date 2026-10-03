@@ -44,7 +44,7 @@ entrega.
   profiles/plans verificados e OpenAPI (`IMPLEMENTED`, `LOCAL_VERIFIED`);
   gate Windows 15/15, 1.627 testes aprovados e 23 skips; sem novo canário de provider.
 - D4A.2 implementado: 19 ações POST, fila tipada e worker local explícito. Gate Windows
-  15/15 no código `21b9d5d`, 1.697 testes aprovados / 24 skips; E2E fake até MP4/plano A/B.
+  15/15 no código `73ca358`, 1.701 testes aprovados / 24 skips; E2E fake até MP4/plano A/B.
   Revisão final independente é registrada na memória; CI do código posterior a `0693674`
   aguarda publicação. Sem novo canário pago.
 

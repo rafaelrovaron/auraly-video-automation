@@ -466,7 +466,21 @@ Não houve nova chamada paga nem ampliação de `PROVIDER_VERIFIED`.
 Verificação D4A.2 local no código `21b9d5d` em 2026-10-03: gate Windows 15/15,
 1.697 passed/24 skipped em 393,13 s; Ruff, mypy source/tests, quatro schemas e audit
 production aprovados. Doctor sinaliza Docker indisponível, sem impedir o harness;
-nenhum runner Linux local está disponível. Revisão final independente ainda pendente.
+nenhum runner Linux local está disponível. Esse foi o gate anterior à revisão final.
+
+Revisão independente única em `1ae3eec..ca00f47`: três achados Important, sem Critical
+ou Minor. Corrigidos em uma rodada com regressões RED→GREEN: resume público recupera
+somente checkpoint durável validado (sem executar novamente a mutação), planner aceita
+o DB externo explicitamente configurado, e import verifica/interpreta o mesmo snapshot
+do manifest e confere a campanha antes de executar. Auditoria de tentativas falhas é
+preservada; wrappers single-attempt sem checkpoint não ganham force-resume. Contratos
+públicos mínimos foram registrados no spec; CLI padrão e roots de mídia não mudaram.
+
+Gate pós-fix no código `73ca3587ebfd94aa8d3f42a6b9b0744b61b07168`: Windows 15/15,
+1.701 passed/24 skipped em 396,42 s; quatro regressões finais passaram, inclusive a
+negação de resume sem checkpoint. Sem re-review: testes e gate verificam as correções.
+D4A completo `IMPLEMENTED`, `LOCAL_VERIFIED`; D4B React/preview é o próximo passo.
+Sem push/merge dessa atualização ou execução Linux/Actions posterior a `0693674`.
 
 Telas mínimas:
 

@@ -43,6 +43,9 @@ genérico e não terá timeline estilo CapCut ou preview frame-perfect.
   ou auto-dispatch; JSON/Origin loopback, aprovações e budget preservados. Fluxo HTTP
   fake com mídia real até MP4 e plano A/B sem nova geração; evidência local no roadmap.
   Profiles publicam metadados sem validar mídia na request; resolver valida no Job;
+  `IMPLEMENTED`, `LOCAL_VERIFIED`: gate pós-revisão Windows 15/15, 1.701 testes / 24
+  skips em `73ca358`. Recuperação explícita de checkpoint não repete mutações; DB externo
+  configurado é aceito sem relaxar roots de mídia; manifest é validado por snapshot;
 - CLI e harness de verificação.
 
 ### 2.2 Capacidade alvo deste PRD
