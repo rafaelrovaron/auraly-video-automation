@@ -5,7 +5,7 @@ import sqlite3
 
 from pydantic import TypeAdapter, ValidationError
 
-from auraly_pipeline.campaigns.domain import CopyMaster
+from auraly_pipeline.campaigns.domain import CampaignCreate, CopyMaster
 from auraly_pipeline.editing.batch_domain import BatchInputs, CaptionTimingInput, EditBatchPlan, EditBatchRequest
 from auraly_pipeline.editing.batch_planner import build_batch_plan, variant_requests, verify_batch_plan
 from auraly_pipeline.editing.domain import AssetRef, EditingError, IdentityRef, Sha, SourceVideoRef, relative_path, safe_id
@@ -131,7 +131,7 @@ class EditBatchService:
 
     def list_plans(self, campaign_id: str) -> list[EditBatchPlan]:
         try:
-            safe_id(campaign_id)
+            TypeAdapter(CampaignCreate.model_fields["campaign_id"].rebuild_annotation()).validate_python(campaign_id)
         except ValueError:
             raise EditingError("campaignId", "invalid campaign identity") from None
         root = _safe_path(self.work_root, self.work_root / "campaigns" / campaign_id /

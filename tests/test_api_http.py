@@ -174,3 +174,27 @@ def test_empty_existing_database(tmp_path: Path) -> None:
     with client_for(ApiSettings(tmp_path, tmp_path / "work", database)) as client:
         assert client.get("/api/v1/campaigns").json() == {"items": []}
         assert client.get("/api/v1/editing/profiles").json() == {"items": []}
+
+
+@pytest.mark.parametrize("campaign_id", ["a" * 65, "a" * 100, "con"])
+def test_existing_campaign_ids_remain_queryable(tmp_path: Path, campaign_id: str) -> None:
+    from auraly_pipeline.campaigns.domain import CampaignCreate
+    from auraly_pipeline.campaigns.service import CampaignService
+    from tests.test_campaign_domain import valid_campaign_data
+
+    settings = create_api_fixture(tmp_path)
+    data = valid_campaign_data()
+    data["campaignId"] = campaign_id
+    service = CampaignService.for_database(settings.database)
+    try:
+        service.create_campaign(CampaignCreate.model_validate(data))
+    finally:
+        service.close()
+    with client_for(settings) as client:
+        response = client.get("/api/v1/campaigns")
+        assert response.status_code == 200, response.text
+        assert campaign_id in {item["campaignId"] for item in response.json()["items"]}
+        for suffix in ["", "/status", "/editing/plans"]:
+            response = client.get(f"/api/v1/campaigns/{campaign_id}{suffix}")
+            assert response.status_code == 200, response.text
+        assert response.json() == {"items": []}

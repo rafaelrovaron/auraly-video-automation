@@ -24,7 +24,7 @@ from auraly_pipeline.editing.batch_domain import EditBatchPlan
 from auraly_pipeline.editing.domain import Sha, safe_id
 from auraly_pipeline.heygen.video_domain import UUID_PATTERN
 
-CampaignId = Annotated[str, Path(pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*$", max_length=80)]
+CampaignId = Annotated[str, Path(pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*$")]
 EditId = Annotated[str, Path(), AfterValidator(safe_id)]
 JobId = Annotated[str, Path(pattern=UUID_PATTERN)]
 Version = Annotated[int, Path(gt=0)]
