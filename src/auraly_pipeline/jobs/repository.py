@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session, selectinload, sessionmaker
 
 from auraly_pipeline.campaigns.db_models import CampaignRow, SceneVariantRow
 from auraly_pipeline.jobs.db_models import JobAttemptRow, JobEventRow, JobRow
-from auraly_pipeline.jobs.domain import JobExecutionResult, JobSubmit, RetrySafety
+from auraly_pipeline.jobs.domain import Job, JobExecutionResult, JobSubmit, RetrySafety
 from auraly_pipeline.jobs.state_machine import InvalidJobTransition, JobStatus, ensure_transition
 
 
@@ -553,6 +553,37 @@ class JobRepository:
                     metadata_json={},
                 )
             )
+            session.commit()
+            return self._reload(session, row.id)
+
+    def complete_checkpointed(self, expected: Job, now: datetime) -> JobRow | None:
+        """Complete a domain-validated durable result without another attempt or dispatch."""
+        with self._session_factory() as session:
+            self._begin_immediate(session)
+            row = session.get(JobRow, expected.job_id)
+            if row is None:
+                return None
+            if (row.status not in {"failed", "blocked"} or row.status != expected.status
+                    or row.retry_safety != RetrySafety.MANUAL_ONLY.value
+                    or row.attempt_count != 1 or row.max_attempts != 1
+                    or row.job_type != expected.job_type or row.campaign_id != expected.campaign_id
+                    or row.request_fingerprint != expected.request_fingerprint
+                    or row.idempotency_key != expected.idempotency_key
+                    or row.scene_variant_id != expected.scene_variant_id
+                    or row.input_json != expected.input or not row.output_json
+                    or row.output_json != expected.output
+                    or row.worker_id is not None or row.lease_expires_at is not None):
+                raise InvalidJobTransition("invalid checkpoint recovery")
+            previous = row.status
+            row.status = JobStatus.COMPLETED.value
+            row.completed_at = now
+            row.updated_at = now
+            row.last_error_code = row.last_error_message = None
+            session.add_all([
+                JobEventRow(id=str(uuid4()), job_id=row.id, event_type=event, timestamp=now,
+                            metadata_json={"previousStatus": previous, "reason": "durable_checkpoint"})
+                for event in ("job.checkpoint_recovered", "job.completed")
+            ])
             session.commit()
             return self._reload(session, row.id)
 

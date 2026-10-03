@@ -214,6 +214,7 @@ Após prepare concluir, coloque imagens em `images/` da pasta retornada e preenc
 envie `/images/import` com `manifestPath` e `mode: "dry_run"` ou `"execute"`, depois inicie
 `local_operations`. Caminhos relativos de entrada partem do project root; `outputPath` do
 prepare parte do work root. Não altere o manifest depois de enfileirar: seu hash fica fixado.
+O planner verifica e interpreta o mesmo snapshot, inclusive a campanha do plano.
 No Windows, escolha um work root curto para não atingir limites legados de caminhos.
 
 Worker kinds: `local_operations`, `voice_generate`, `voice_import`, `heygen_assets` e
@@ -221,6 +222,9 @@ Worker kinds: `local_operations`, `voice_generate`, `voice_import`, `heygen_asse
 start concorrente retorna 409. Stop impede novas claims, deixando o trabalho ativo terminar
 e salvar checkpoints. Retries futuros exigem outro start quando estiverem disponíveis.
 Shutdown drena o worker antes de fechar engines; restart não executa nada automaticamente.
+Após stale recovery, resume de um wrapper de voz/HeyGen com checkpoint durável validado
+pode retornar `completed` diretamente, sem nova tentativa/reserva/dispatch. Wrappers sem
+checkpoint continuam single-attempt; a API não força retries de mutações parcialmente feitas.
 
 Upload/reserva e geração HeyGen são fases explícitas separadas. Aprovações, cap de renders,
 budget e reconciliação continuam obrigatórios; OAuth permanece no CLI. `requestId` de voz/

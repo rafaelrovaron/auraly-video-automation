@@ -219,9 +219,12 @@ class ImageImportService:
             variant_count=len(campaign.scene_variants),
         )
 
-    def plan(self, manifest_path: Path) -> ImageImportPlan:
+    def plan(self, manifest_path: Path, *, expected_sha256: str | None = None) -> ImageImportPlan:
         try:
-            payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+            snapshot = manifest_path.read_bytes()
+            if expected_sha256 is not None and hashlib.sha256(snapshot).hexdigest() != expected_sha256:
+                raise ImageImportSourceChangedError
+            payload = json.loads(snapshot.decode("utf-8"))
             batch = ImageImportBatch.model_validate(payload)
         except (OSError, ValueError) as exc:
             raise ImageImportValidationError(

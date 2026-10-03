@@ -71,7 +71,7 @@ class ApiCommands:
         self.campaigns = CampaignService(engine)
         self.images = ImageImportService.from_engine(engine, work_root=settings.work_root)
         self.editing = EditBatchService(
-            project_root=settings.project_root, work_root=settings.work_root,
+            project_root=settings.project_root, work_root=settings.work_root, database_path=settings.database,
         )
         self.jobs = JobService(
             engine, JobRepository(self._sessions),
@@ -150,7 +150,19 @@ class ApiCommands:
     def change_job(self, campaign_id: str, job_id: str, *, resume: bool) -> JobSummary:
         self.queries.get_job(campaign_id, job_id)
         try:
-            job = self.jobs.resume_job(job_id) if resume else self.jobs.cancel_job(job_id)
+            current = self.jobs.get_job(job_id)
+            if (resume and current.job_type == LOCAL_OPERATION_JOB
+                    and current.status in {"failed", "blocked"} and current.output):
+                operation: LocalOperationRequest = TypeAdapter(LocalOperationRequest).validate_python(current.input)
+                if not isinstance(operation, (VoiceImportOperation, HeyGenAssetsOperation,
+                                              HeyGenVideoSubmitOperation, HeyGenReconcileOperation)):
+                    raise QueryError("operation_not_allowed")
+                result = self.execute_operation(operation, job_id=job_id)
+                if result.model_dump(mode="json", by_alias=True) != current.output:
+                    raise QueryError("artifact_invalid")
+                job = self.jobs.complete_checkpointed_job(current)
+            else:
+                job = self.jobs.resume_job(job_id) if resume else self.jobs.cancel_job(job_id)
         except JobTransitionError:
             raise QueryError("operation_not_allowed") from None
         return JobSummary.model_validate(job.model_dump(include=set(JobSummary.model_fields)))
@@ -513,7 +525,9 @@ class ApiCommands:
                 path, digest = self._manifest(request.manifest_path, request.campaign_id)
                 if digest != request.manifest_sha256:
                     raise QueryError("artifact_invalid")
-                plan = self.images.plan(path)
+                plan = self.images.plan(path, expected_sha256=request.manifest_sha256)
+                if plan.batch.campaign_id != request.campaign_id:
+                    raise QueryError("artifact_invalid")
                 if request.mode == "dry_run":
                     return ImageImportOperationResult(
                         mode=request.mode, total=len(plan.items), created=0, reused=0, approved=0,

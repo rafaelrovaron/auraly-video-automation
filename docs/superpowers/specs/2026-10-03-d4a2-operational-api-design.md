@@ -116,6 +116,22 @@ Existing D4A.1 job responses do not suddenly expose their input/output fields.
 
 ## Long operation Jobs and retries
 
+Final-review execution refinements (2026-10-03): single-attempt wrappers remain
+manual_only. Explicit `/jobs/{jobId}/resume` may complete a failed/blocked Voice import
+or HeyGen asset/submit/reconcile wrapper from its validated durable checkpoint, without
+rerunning the mutation, allocating an attempt or calling a provider. The public
+`JobService.complete_checkpointed_job(expected: Job)` transaction compares persisted
+status, identity, input/output and single-attempt/manual-only constraints, then records
+`job.checkpoint_recovered` and `job.completed`; failed attempt history remains intact.
+Uncheckpointed/exhausted mutations retain ordinary resume rejection, never force-resume.
+Caller validates domain child IDs/ownership before this narrow public completion contract.
+
+`ImageImportService.plan(..., expected_sha256=None)` verifies and parses one byte snapshot
+when pinned by the API; CLI defaults are unchanged. API also checks plan campaign identity.
+`EditBatchService(..., database_path=None)` optionally pins the startup-selected validated
+database independently of media roots, and rejects a different database argument. Default
+CLI containment remains unchanged; all media still must stay within project/work roots.
+
 Use fixed typed local-operation job kinds for image preparation/intake, voice import submission/review, HeyGen asset preparation,
 video preview/submission/reconciliation and editorial planning. Preserve existing
 voice.generate, voice.import, heygen.asset.upload and heygen.video.generate Jobs.

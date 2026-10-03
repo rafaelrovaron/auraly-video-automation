@@ -443,6 +443,16 @@ class JobService:
             raise JobNotFoundError
         return self._to_domain(row)
 
+    def complete_checkpointed_job(self, expected: Job) -> Job:
+        """Caller validates the checkpoint; repository compares identity, input and output."""
+        try:
+            row = self._repository.complete_checkpointed(expected, self._as_utc(self._clock()))
+        except InvalidJobTransition as exc:
+            raise JobTransitionError from exc
+        if row is None:
+            raise JobNotFoundError
+        return self._to_domain(row)
+
     def resume_job(self, job_id: str) -> Job:
         try:
             row = self._repository.resume(job_id, self._as_utc(self._clock()))

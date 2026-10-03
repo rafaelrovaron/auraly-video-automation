@@ -14,13 +14,22 @@ from auraly_pipeline.heygen.video_domain import VideoPlanItem, VideoSource
 
 
 class EditBatchService:
-    def __init__(self, *, project_root: Path, work_root: Path) -> None:
+    def __init__(self, *, project_root: Path, work_root: Path,
+                 database_path: Path | None = None) -> None:
         self.editing = EditingService(project_root=project_root, work_root=work_root)
         self.project_root = self.editing.project_root
         self.work_root = self.editing.work_root
+        self.database_path = None if database_path is None else _safe_path(
+            database_path.absolute().parent, database_path.absolute(),
+        )
 
     def _inputs(self, request: EditBatchRequest, database_path: Path) -> BatchInputs:
-        database = _safe_path(self.project_root, database_path)
+        database = _safe_path(
+            self.project_root if self.database_path is None else self.database_path.parent,
+            database_path,
+        )
+        if self.database_path is not None and database != self.database_path:
+            raise EditingError("database", "configured database required")
         if not database.is_file():
             raise EditingError("database", "existing local database required")
         connection: sqlite3.Connection | None = None
