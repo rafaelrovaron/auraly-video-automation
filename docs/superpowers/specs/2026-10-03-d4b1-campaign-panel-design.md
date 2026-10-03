@@ -2,7 +2,7 @@
 
 Data: 2026-10-03
 
-Status: design escrito; aguardando aprovação antes do plano de implementação.
+Status: design aprovado pelo usuário em 2026-10-03; implementação ainda não iniciada.
 
 ## Objetivo e ponto de partida
 
