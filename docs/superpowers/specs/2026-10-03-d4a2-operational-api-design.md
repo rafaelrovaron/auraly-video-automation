@@ -1,7 +1,7 @@
 # D4A.2 — Operational Actions & Local Worker
 
 Date: 2026-10-03.
-Status: conversational design and written spec approved; implementation plan awaiting review.
+Status: design/spec and implementation plan approved; Native implementation in progress.
 Base: main cc6f849, D4A.1 implemented and locally verified.
 
 ## Intent and boundary
@@ -49,6 +49,11 @@ change before claiming D4A.2 LOCAL_VERIFIED. Windows/local success is not Linux 
   unfiltered queue: add optional public campaign/type filters before API usage.
 - No private Job repository access from the API. Reuse linked submission transactions
   where domain entities and Jobs already require atomic persistence.
+- Execution refinement: VoiceImportService.import_audio accepts an optional public
+  before_commit(Session, JobRow) callback for its child creation/reuse transaction.
+  The API callback stores safe child IDs on the local operation Job before committing,
+  closing the crash window between creating a child and recording its identity.
+  The CLI default is None, preserving its behavior and engine ownership.
 - Short mutations delegate to services in the request. Media hashing/probes/ASR/media copies,
   external calls and polling run in queued work, not route handlers.
 - API-only long operations use narrow handlers on the existing Job framework, not a

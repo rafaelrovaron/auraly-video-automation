@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Callable
+
 import hashlib
 import json
 import os
@@ -8,6 +10,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import NAMESPACE_URL, uuid5
 
+from sqlalchemy import text
 from sqlalchemy.orm import Session, sessionmaker
 
 from auraly_pipeline.campaigns.db_models import CopyMasterRow
@@ -112,7 +115,8 @@ class VoiceImportService:
         )
 
     def import_audio(
-        self, request: VoiceImportRequest, *, source: Path
+        self, request: VoiceImportRequest, *, source: Path,
+        before_commit: Callable[[Session, JobRow], None] | None = None,
     ) -> VoiceGenerationSubmission:
         source = _safe_path(source, self._project_root)
         info = source.stat()
@@ -203,14 +207,24 @@ class VoiceImportService:
                 updated_at=now,
             )
             repository.add(row)
+            if before_commit is not None:
+                before_commit(session, job)
             return VoiceMasterService._to_domain(row)
 
         def existing(job: Job) -> VoiceMaster:
             with self._sessions() as session:
+                if before_commit is not None:
+                    session.execute(text("BEGIN IMMEDIATE"))
                 row = session.get(VoiceMasterRow, voice_id)
                 if row is None or row.job_id != job.job_id:
                     raise VoiceImportError
                 _verify_artifacts(row, self._work_root)
+                if before_commit is not None:
+                    child = session.get(JobRow, job.job_id)
+                    if child is None:
+                        raise VoiceImportError
+                    before_commit(session, child)
+                    session.commit()
                 return VoiceMasterService._to_domain(row)
 
         linked = self._jobs.submit_linked_job(

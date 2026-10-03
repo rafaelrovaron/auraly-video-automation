@@ -23,6 +23,7 @@ from auraly_pipeline.voices.domain import TranscriptMatchStatus, VoiceMasterStat
 ErrorCode = Literal[
     "invalid_request", "not_found", "artifact_invalid", "storage_unavailable",
     "internal_error", "method_not_allowed",
+    "operation_conflict", "operation_not_allowed",
 ]
 ERROR_MESSAGES: dict[ErrorCode, str] = {
     "invalid_request": "Invalid request.",
@@ -31,6 +32,8 @@ ERROR_MESSAGES: dict[ErrorCode, str] = {
     "storage_unavailable": "Local storage is unavailable or incompatible.",
     "internal_error": "The local query failed safely.",
     "method_not_allowed": "This API is read-only.",
+    "operation_conflict": "Another local operation is running.",
+    "operation_not_allowed": "The operation is not allowed in the current state.",
 }
 
 

@@ -26,7 +26,7 @@ class ApiOperationHandler:
             request: LocalOperationRequest = TypeAdapter(LocalOperationRequest).validate_python(context.input)
             if request.campaign_id != context.campaign_id:
                 raise QueryError("invalid_request")
-            result = self.commands.execute_operation(request)
+            result = self.commands.execute_operation(request, job_id=context.job_id)
             return JobExecutionResult(
                 outcome=JobExecutionOutcome.SUCCESS,
                 result=cast(dict[str, JsonValue], result.model_dump(mode="json", by_alias=True)),

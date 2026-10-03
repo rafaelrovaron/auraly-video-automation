@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
 
@@ -13,6 +14,7 @@ from auraly_pipeline.api.action_contracts import (
     EditPlanOperation, EditPlanResult, ImageImportItemResult, ImageImportOperation,
     ImageImportOperationResult, ImagePrepareOperation, ImagePrepareResult,
     LocalOperationRequest, OperationResult, OperationSubmission, OperationView,
+    VoiceImportOperation, VoiceImportResult, VoiceReviewOperation, VoiceReviewResult,
 )
 from auraly_pipeline.api.contracts import ApiSettings, ERROR_MESSAGES, ErrorCode, QueryError
 from auraly_pipeline.api.operations import ApiOperationHandler, LOCAL_OPERATION_JOB
@@ -23,10 +25,14 @@ from auraly_pipeline.editing.domain import EditingError, relative_path
 from auraly_pipeline.editing.service import validate_editing_path
 from auraly_pipeline.heygen.provider import HeyGenProvider
 from auraly_pipeline.images.import_batch import ImageImportBatch, ImageImportError, ImageImportService
+from auraly_pipeline.jobs.db_models import JobRow
 from auraly_pipeline.jobs.domain import JobSubmit, RetrySafety
 from auraly_pipeline.jobs.repository import JobRepository
 from auraly_pipeline.jobs.service import JobNotFoundError, JobService
-from auraly_pipeline.voices.handler import SpeechProvider, TranscriptProvider
+from auraly_pipeline.voices.domain import VoiceGenerateRequest, VoiceMaster
+from auraly_pipeline.voices.handler import SpeechProvider, TranscriptProvider, VoiceGenerateHandler
+from auraly_pipeline.voices.import_audio import VoiceImportError, VoiceImportHandler, VoiceImportService
+from auraly_pipeline.voices.service import VoiceMasterError, VoiceMasterNotFoundError, VoiceMasterService
 
 
 class ApiCommands:
@@ -40,15 +46,51 @@ class ApiCommands:
         self._speech_provider = speech_provider
         self._transcriber = transcriber
         self._heygen_provider = heygen_provider
+        self._sessions = sessionmaker(engine, expire_on_commit=False, class_=Session)
         self.campaigns = CampaignService(engine)
         self.images = ImageImportService.from_engine(engine, work_root=settings.work_root)
         self.editing = EditBatchService(
             project_root=settings.project_root, work_root=settings.work_root,
         )
         self.jobs = JobService(
-            engine, JobRepository(sessionmaker(engine, expire_on_commit=False, class_=Session)),
-            handlers={LOCAL_OPERATION_JOB: ApiOperationHandler(self)},
+            engine, JobRepository(self._sessions),
+            handlers={
+                LOCAL_OPERATION_JOB: ApiOperationHandler(self),
+                "voice.generate": VoiceGenerateHandler(
+                    self._sessions, work_root=settings.work_root,
+                    provider=speech_provider, transcriber=transcriber,
+                ),
+                "voice.import": VoiceImportHandler(
+                    self._sessions, work_root=settings.work_root, transcriber=transcriber,
+                ),
+            },
         )
+        self.voices = VoiceMasterService(
+            engine, work_root=settings.work_root, provider=speech_provider, transcriber=transcriber,
+        )
+        self.voice_import = VoiceImportService(
+            self._sessions, self.jobs, settings.project_root, settings.work_root,
+        )
+
+    def submit_voice(self, request: VoiceGenerateRequest) -> OperationSubmission:
+        self.require_campaign(request.campaign_id)
+        try:
+            submission = self.voices.generate(request)
+        except VoiceMasterError:
+            raise QueryError("operation_not_allowed") from None
+        return OperationSubmission(
+            operation="voice_generate", campaign_id=request.campaign_id,
+            job_id=submission.job.job_id, voice_master_id=submission.voice_master.voice_master_id,
+        )
+
+    def require_voice(self, campaign_id: str, voice_id: str) -> VoiceMaster:
+        try:
+            voice = self.voices.get(voice_id)
+        except VoiceMasterNotFoundError:
+            raise QueryError("not_found") from None
+        if voice.campaign_id != campaign_id:
+            raise QueryError("not_found")
+        return voice
 
     def require_campaign(self, campaign_id: str) -> None:
         try:
@@ -96,8 +138,15 @@ class ApiCommands:
                 "manifest_path": path.relative_to(self.settings.project_root).as_posix(),
                 "manifest_sha256": digest,
             })
-        elif request.request.campaign_id != request.campaign_id:
+        elif isinstance(request, (EditPlanOperation, VoiceImportOperation)) and request.request.campaign_id != request.campaign_id:
             raise QueryError("invalid_request")
+        if isinstance(request, VoiceImportOperation):
+            path = self._path(request.source_path)
+            request = request.model_copy(update={
+                "source_path": path.relative_to(self.settings.project_root).as_posix(),
+            })
+        elif isinstance(request, VoiceReviewOperation):
+            self.require_voice(request.campaign_id, request.voice_id)
         payload = cast(dict[str, JsonValue], request.model_dump(mode="json", by_alias=True))
         identity = hashlib.sha256(json.dumps(
             payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
@@ -151,9 +200,67 @@ class ApiCommands:
         except (ValueError, OSError):
             raise QueryError("artifact_invalid") from None
 
-    def execute_operation(self, request: LocalOperationRequest) -> OperationResult:
+    def execute_operation(
+        self, request: LocalOperationRequest, *, job_id: str | None = None,
+    ) -> OperationResult:
         self.require_campaign(request.campaign_id)
         try:
+            if isinstance(request, VoiceImportOperation):
+                if job_id is None:
+                    raise QueryError("invalid_request")
+                if request.request.campaign_id != request.campaign_id:
+                    raise QueryError("invalid_request")
+                wrapper = self.jobs.get_job(job_id)
+                if (wrapper.job_type != LOCAL_OPERATION_JOB
+                        or wrapper.campaign_id != request.campaign_id
+                        or wrapper.input != request.model_dump(mode="json", by_alias=True)):
+                    raise QueryError("artifact_invalid")
+                if wrapper.output:
+                    result = VoiceImportResult.model_validate(wrapper.output)
+                    voice = self.require_voice(request.campaign_id, result.voice_master_id)
+                    child = self.jobs.get_job(result.job_id)
+                    if (child.job_type != "voice.import"
+                            or child.campaign_id != request.campaign_id
+                            or child.input != {"voiceMasterId": voice.voice_master_id}):
+                        raise QueryError("artifact_invalid")
+                    return result
+
+                def checkpoint(session: Session, child: JobRow) -> None:
+                    row = session.get(JobRow, job_id)
+                    if (row is None or row.status != "running" or row.attempt_count != 1
+                            or row.campaign_id != request.campaign_id
+                            or row.job_type != LOCAL_OPERATION_JOB
+                            or row.input_json != wrapper.input
+                            or row.lease_expires_at is None
+                            or row.lease_expires_at.replace(tzinfo=UTC) <= datetime.now(UTC)):
+                        raise QueryError("operation_not_allowed")
+                    result = VoiceImportResult(
+                        voice_master_id=str(child.input_json["voiceMasterId"]), job_id=child.id,
+                    )
+                    row.output_json = result.model_dump(mode="json", by_alias=True)
+
+                submitted = self.voice_import.import_audio(
+                    request.request, source=self._path(request.source_path), before_commit=checkpoint,
+                )
+                return VoiceImportResult(
+                    voice_master_id=submitted.voice_master.voice_master_id, job_id=submitted.job.job_id,
+                )
+            if isinstance(request, VoiceReviewOperation):
+                voice = self.require_voice(request.campaign_id, request.voice_id)
+                if request.action == "approve":
+                    if not (voice.status == "approved" and voice.approved_by == request.actor
+                            and voice.approval_review_reason == request.reason):
+                        voice = self.voices.approve(
+                            request.voice_id, approved_by=request.actor,
+                            approval_review_reason=request.reason,
+                        )
+                elif not (voice.status == "rejected" and voice.rejected_by == request.actor
+                          and voice.rejection_reason == request.reason):
+                    assert request.reason is not None
+                    voice = self.voices.reject(
+                        request.voice_id, rejected_by=request.actor, reason=request.reason,
+                    )
+                return VoiceReviewResult(voice_master_id=voice.voice_master_id, status=voice.status)
             if isinstance(request, ImagePrepareOperation):
                 prepared = self.images.prepare_directory(
                     request.campaign_id, self._path(request.output_path, root=self.settings.work_root),
@@ -195,4 +302,6 @@ class ApiCommands:
                 )
         except (ImageImportError, EditingError, OSError):
             raise QueryError("artifact_invalid") from None
+        except (VoiceImportError, VoiceMasterError):
+            raise QueryError("operation_not_allowed") from None
         raise QueryError("invalid_request")
