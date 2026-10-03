@@ -83,13 +83,61 @@ class Items(ContractModel, Generic[T]):
     items: list[T]
 
 
-class CampaignDetail(ContractModel):
+OperationalStatus = Literal[
+    "needs_input", "needs_review", "in_progress", "needs_attention",
+    "ready_for_editing", "editing_planned",
+]
+PendingCode = Literal[
+    "attention_required", "wait_for_job", "editing_plan_missing", "caption_timing_missing",
+    "renderer_not_implemented", "copy_approval_missing", "voice_review_required",
+    "voice_missing", "image_review_required", "image_missing", "heygen_render_missing",
+]
+
+
+class PendingItem(ContractModel):
+    code: PendingCode
+    stage: Literal["copy", "voice", "images", "heygen", "editing"]
+    entity_id: str
+    message: str
+
+
+class SceneStatus(ContractModel):
+    scene_variant_id: str
+    variant_id: str
+    current_copy_id: str | None
+    current_voice_id: str | None
+    approved_image_id: str | None
+    ready_render_ids: list[str]
+    plan_hashes: list[str]
+    pending: list[PendingItem]
+
+
+class CampaignStatus(ContractModel):
+    campaign_id: str
+    stored_status: str
+    operational_status: OperationalStatus
+    next_pending: PendingItem | None
+    scene_count: int
+    approved_copy_count: int
+    approved_voice_count: int
+    approved_image_count: int
+    ready_render_count: int
+    plan_count: int
+    scenes: list[SceneStatus]
+
+
+class CampaignSummary(ContractModel):
     campaign_id: str
     character: Literal["susan-smith", "soul-constellation"]
     stored_status: str
     scene_count: int
     created_at: datetime
     updated_at: datetime
+    operational_status: OperationalStatus
+    next_pending: PendingItem | None
+
+
+class CampaignDetail(CampaignSummary):
     proof_object: str
     voice_preset: str
     edit_preset: str

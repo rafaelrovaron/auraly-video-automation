@@ -4,7 +4,8 @@ from sqlalchemy import Engine
 from sqlalchemy.orm import sessionmaker
 
 from auraly_pipeline.api.contracts import (
-    ApiSettings, CampaignDetail, ImageSummary, JobSummary, OutputSummary, PlanSummary, ProfileView,
+    ApiSettings, CampaignDetail, CampaignStatus, CampaignSummary, ImageSummary, JobSummary,
+    OutputSummary, PlanSummary, ProfileView,
     QueryError, RenderSummary, SceneImages, VoiceSummary,
 )
 from auraly_pipeline.campaigns.domain import Campaign
@@ -19,6 +20,7 @@ from auraly_pipeline.images.service import ImageService
 from auraly_pipeline.jobs.repository import JobRepository
 from auraly_pipeline.jobs.service import JobNotFoundError, JobService
 from auraly_pipeline.voices.service import VoiceMasterService
+from auraly_pipeline.api.status import compute_campaign_status
 
 
 class ApiQueries:
@@ -40,6 +42,7 @@ class ApiQueries:
 
     def get_campaign(self, campaign_id: str) -> CampaignDetail:
         campaign = self.campaign(campaign_id)
+        status = self.get_status(campaign_id)
         return CampaignDetail(
             campaign_id=campaign.campaign_id, character=campaign.character,
             stored_status=campaign.status, scene_count=len(campaign.scene_variants),
@@ -47,7 +50,27 @@ class ApiQueries:
             proof_object=campaign.proof_object, voice_preset=campaign.voice_preset,
             edit_preset=campaign.edit_preset, copy_masters=campaign.copy_masters,
             scene_variants=campaign.scene_variants,
+            operational_status=status.operational_status, next_pending=status.next_pending,
         )
+
+    def list_campaigns(self) -> list[CampaignSummary]:
+        return [CampaignSummary.model_validate(self.get_campaign(campaign.campaign_id).model_dump(
+            include=set(CampaignSummary.model_fields)))
+            for campaign in sorted(self.campaigns.list_campaigns(), key=lambda c: c.campaign_id)]
+
+    def get_status(self, campaign_id: str) -> CampaignStatus:
+        campaign = self.campaign(campaign_id)
+        try:
+            return compute_campaign_status(
+                campaign, images=[image for scene in campaign.scene_variants
+                                  for image in self.images.list_candidates_for_scene(scene.scene_variant_id)],
+                voices=self.voices.list(campaign_id=campaign_id),
+                renders=self.renders.list_campaign(campaign_id),
+                jobs=self.jobs.list_jobs(campaign_id=campaign_id),
+                plans=self.batches.list_plans(campaign_id),
+            )
+        except EditingError:
+            raise QueryError("artifact_invalid") from None
 
     def list_images(self, campaign_id: str) -> list[SceneImages]:
         campaign = self.campaign(campaign_id)
