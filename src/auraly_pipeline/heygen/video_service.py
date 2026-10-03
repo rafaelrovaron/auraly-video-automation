@@ -196,7 +196,9 @@ class HeyGenVideoService:
     def list_videos(self, campaign_id: str) -> list[HeyGenRender]:
         return self._repo.list_campaign(campaign_id)
 
-    def run_videos(self, campaign_id: str) -> VideoRunSummary:
+    def run_videos(
+        self, campaign_id: str, *, stop_requested: Callable[[], bool] | None = None,
+    ) -> VideoRunSummary:
         renders = self.list_videos(campaign_id)
         if not renders:
             raise ValueError("no reserved videos in campaign")
@@ -215,7 +217,7 @@ class HeyGenVideoService:
 
         def worker(index: int) -> None:
             worker_id = f"heygen-video-{uuid4()}-{index}"
-            while (
+            while not (stop_requested is not None and stop_requested()) and (
                 self._jobs.worker_once(
                     worker_id,
                     campaign_id=campaign_id,

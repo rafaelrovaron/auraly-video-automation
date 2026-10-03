@@ -200,3 +200,13 @@ class OperationView(OperationSubmission):
     status: JobStatus
     result: OperationResult | None = None
     error_code: ErrorCode | None = None
+
+
+WorkerKind = Literal["local_operations", "voice_generate", "voice_import", "heygen_assets", "heygen_videos"]
+
+
+class WorkerState(ContractModel):
+    state: Literal["idle", "running", "stopping"] = "idle"
+    campaign_id: str | None = None
+    kind: WorkerKind | None = None
+    error_code: ErrorCode | None = None
