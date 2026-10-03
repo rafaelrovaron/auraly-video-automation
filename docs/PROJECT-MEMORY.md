@@ -433,8 +433,16 @@ serviços existentes. SQLite abre somente leitura, exige revision/tabelas/coluna
 migra/cria storage. Consultas preservam renders e planos históricos por ID/hash; Flow pausado
 não bloqueia o status. Leituras não executam provider, ASR, probes ou workers.
 
-D4A.2 permanece planejado: ações operacionais e ciclo de workers, com design próprio antes
-de execução. React/preview (D4B), renderer (D5) e o D4A completo não estão entregues.
+D4A.2 implementa 19 POSTs tipados sobre os serviços existentes e um worker local explícito.
+GET preserva o engine readonly; ações usam outro engine existente RW, sem migrations/DDL.
+Operações longas apenas enfileiram Jobs: import de imagens/voz, review de voz, preparação/
+reserva/reconciliação HeyGen e planejamento editorial. O runner tem escopo campanha/tipo,
+start/status/stop e shutdown que drena a execução antes de fechar engines. Nenhum startup
+faz dispatch. Até dry-run persiste um Job, não seus efeitos de domínio. Profiles publicam
+metadados imutáveis sem mídia na request; o resolver no Job verifica os assets antes do plano.
+Bodies JSON/Origin loopback, aprovações, budget, idempotência e checkpoints são preservados.
+Uso enqueue/start/poll/stop e import manual está no README. React/preview (D4B) e renderer
+(D5) continuam planejados; sem timeline ou preview frame-perfect.
 O comando aceita roots/DB locais confiáveis, bind fixo 127.0.0.1, um processo e sem access logs.
 Banco fora do project root é permitido; work root fora não. Nenhum canário pago é necessário
 para D4A.1, e a evidência histórica PROVIDER_VERIFIED não foi ampliada.
@@ -445,7 +453,20 @@ Evidência local de 2026-10-03: `uv run python scripts/verify.py full`, 15/15 et
 problemas relevantes; testes RED→GREEN e o gate final confirmaram as correções de IDs
 existentes de campanha, status de jobs `voice.import` e traceback de startup do Uvicorn.
 Logs rotineiros ficam suprimidos; falhas de startup usam mensagem CLI estática.
-Não há nova evidência Linux/Actions ou execução real de provider nesta entrega.
+Essa evidência histórica D4A.1 não incluiu nova execução Linux/Actions ou real de provider.
+
+Em D4A.2, Actions 37125176378 confirmou a correção de filenames SQLite no Linux no SHA
+`0693674c9e6caf9783201a721a04e92eb2c85052`: 1.677 passed/6 skipped, harness 15/15.
+Windows focado nesse SHA: 951 passed/12 skipped, 3/3. Isso cobre Tasks 1–4, não o código
+posterior ainda local. PR #2 permanece draft, sem merge. O teste HTTP ponta a ponta usa
+mídia local real e provider/transcriber fake: import manual, WAV/review, uploads, três MP4s
+e dois manifests A/B com source/voz/copy fixados, sem chamadas adicionais ao provider.
+Não houve nova chamada paga nem ampliação de `PROVIDER_VERIFIED`.
+
+Verificação D4A.2 local no código `21b9d5d` em 2026-10-03: gate Windows 15/15,
+1.697 passed/24 skipped em 393,13 s; Ruff, mypy source/tests, quatro schemas e audit
+production aprovados. Doctor sinaliza Docker indisponível, sem impedir o harness;
+nenhum runner Linux local está disponível. Revisão final independente ainda pendente.
 
 Telas mínimas:
 

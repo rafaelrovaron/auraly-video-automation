@@ -60,7 +60,7 @@ D2C HeyGen Real Canary                         PROVIDER_VERIFIED (vínculo manua
 D3A EditProfile, EditManifest & Override Resolution LOCAL_VERIFIED
 D3B Headline A/B Planning & Caption Inputs LOCAL_VERIFIED
 D4A.1 Local Query API & Campaign Status LOCAL_VERIFIED
-D4A.2 Operational Actions & Worker Integration NEXT DESIGN
+D4A.2 Operational Actions & Worker Integration LOCAL_VERIFIED
 D4B React Operations UI & Approximate Preview
 D5A Deterministic Renderer
 D5B Render QC, Review & Delivery
@@ -351,21 +351,34 @@ Criar output variants baratos sem refazer assets upstream.
 
 ## D4A — FastAPI Operational API
 
-**Status:** parcialmente implementado; não concluído.
+**Status:** D4A.1 e D4A.2 implementados; verificação final D4A.2 registrada abaixo.
 
 ### Slices aprovados
 
 - D4A.1: consultas/status, readonly SQLite, DTOs públicos, profiles/plans verificados,
   OpenAPI e CLI loopback `IMPLEMENTED`, `LOCAL_VERIFIED`.
-- D4A.2: ações operacionais e integração de workers `PLANNED`; próximo design/plano.
+- D4A.2: ações operacionais e integração de workers `IMPLEMENTED`, `LOCAL_VERIFIED`.
 
-D4A.1 não inclui mutações, media serving, render ou execução de providers. O critério de
-saída de D4A inteiro abaixo só poderá ser atendido após D4A.2.
+D4A.1 preserva consultas readonly. D4A.2 adiciona 19 POSTs tipados, Jobs de operação e
+runner explícito scoped por campanha/tipo, sem migrations ou auto-dispatch no startup.
+O fluxo fake HTTP D1–D3 cobre import manual, voz/review, HeyGen/download e A/B editorial.
+Media serving, React/preview e renderer continuam fora de D4A, em D4B/D5.
 
 Gate local Windows de 2026-10-03: 15/15 etapas, 1.627 testes aprovados / 23 skips,
 código `678d661`. Revisão independente concluída; os três achados relevantes foram
 reproduzidos e corrigidos, com gate completo pós-fix. Sem chamada paga ou novo
-`PROVIDER_VERIFIED`; GitHub Actions ainda não executado para esta branch.
+`PROVIDER_VERIFIED`; essa é a evidência histórica D4A.1.
+
+Actions D4A.2 run 37125176378, SHA `0693674`: Linux 1.677 passed/6 skipped, harness
+15/15; Windows focado 951 passed/12 skipped, 3/3. Confirma Task 1 no Linux, mas não
+Tasks 5–8 ainda locais. PR #2 draft, sem merge. Uso operacional enqueue/start/poll/stop
+documentado no README; dry-run cria Job sem efeitos de import/plano. Profiles salvam
+metadados imutáveis; o Job valida assets. D4B é o próximo slice, D5 permanece posterior.
+
+Gate final local D4A.2 de 2026-10-03 no código `21b9d5d`: Windows 15/15 etapas,
+1.697 passed/24 skipped em 393,13 s; Ruff, mypy source/tests, quatro schemas e audit
+production aprovados. Docker indisponível no diagnóstico opcional do doctor; não há
+runner Linux local. Revisão independente da branch pendente antes do handoff final.
 
 ### Objetivo
 

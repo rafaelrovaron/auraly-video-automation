@@ -43,12 +43,16 @@ entrega.
 - D4A.1 implementado: API FastAPI de consultas locais, status factual por campanha,
   profiles/plans verificados e OpenAPI (`IMPLEMENTED`, `LOCAL_VERIFIED`);
   gate Windows 15/15, 1.627 testes aprovados e 23 skips; sem novo canário de provider.
+- D4A.2 implementado: 19 ações POST, fila tipada e worker local explícito. Gate Windows
+  15/15 no código `21b9d5d`, 1.697 testes aprovados / 24 skips; E2E fake até MP4/plano A/B.
+  Revisão final independente é registrada na memória; CI do código posterior a `0693674`
+  aguarda publicação. Sem novo canário pago.
 
 ### Não entregue ainda
 
 - render final com headline, captions, música e framing configuráveis;
 - renderização das variações A/B já planejadas, reutilizando voz, imagem e HeyGen;
-- ações operacionais da API (D4A.2) e interface React local (D4B);
+- interface React local (D4B);
 - preview aproximado e fluxo end-to-end operável pela interface.
 
 ### Google Flow: preservado, mas pausado
@@ -165,10 +169,11 @@ Revisão/aprovação usam o work root configurado por `AURALY_PROJECT_ROOT`; se 
 intake, mantenha a mesma configuração para aprovar e preparar assets. Não usar o worker genérico
 em uma fila real que também contenha jobs pagos.
 
-## API local de consultas (D4A.1)
+## API local operacional (D4A.1 + D4A.2)
 
-Requer um banco existente e atualizado pelo fluxo CLI habitual. A API abre SQLite em modo
-somente leitura: não cria banco, não aplica migrations e não executa workers/providers.
+Requer um banco existente e atualizado pelo fluxo CLI habitual. As consultas usam SQLite
+somente leitura; ações usam um engine separado sobre o mesmo banco existente. Startup não
+cria banco, não aplica migrations e não inicia workers/providers automaticamente.
 
 ```powershell
 uv run auraly api serve --port 8000
@@ -188,12 +193,44 @@ As consultas cobrem campanhas, imagens, vozes, renders HeyGen, jobs, profiles e 
 editoriais. Coleções retornam `{"items": [...]}`; erros usam `{error: {code, message, field}}`.
 Não aceita query parameters. Diretório editorial ausente significa lista vazia; artefato
 presente e corrompido retorna erro, sem esconder a falha. Status é informação para o operador,
-não autorização de geração paga. Não há media serving, ações POST ou render final nesta etapa.
+não autorização de geração paga. Não há media serving ou render final nesta etapa.
+
+As 19 ações POST tipadas cobrem campanhas/copy, import/review de imagens, voz, HeyGen,
+profiles/planos, cancel/resume e worker. Ações longas retornam `202` com `jobId`; enfileirar
+não executa. Até dry-run persiste seu Job de operação, mas não importa candidatos/persiste planos.
+POST exige JSON e Origin ausente ou exatamente igual à origem loopback da request.
+
+```powershell
+$base = 'http://127.0.0.1:8000/api/v1/campaigns/CAMPAIGN_ID'
+$operation = Invoke-RestMethod "$base/images/import/prepare" -Method Post -ContentType 'application/json' -Body '{"campaignId":"CAMPAIGN_ID","outputPath":"inbox/batch-01"}'
+Invoke-RestMethod "$base/worker/start" -Method Post -ContentType 'application/json' -Body '{"campaignId":"CAMPAIGN_ID","kind":"local_operations"}'
+Invoke-RestMethod "$base/operations/$($operation.jobId)"
+Invoke-RestMethod "$base/worker"
+Invoke-RestMethod "$base/worker/stop" -Method Post -ContentType 'application/json' -Body '{"campaignId":"CAMPAIGN_ID"}'
+```
+
+Após prepare concluir, coloque imagens em `images/` da pasta retornada e preencha cada
+`items[].path` no `image-import.json` (por exemplo `images/scene-01.png`). Não há watcher:
+envie `/images/import` com `manifestPath` e `mode: "dry_run"` ou `"execute"`, depois inicie
+`local_operations`. Caminhos relativos de entrada partem do project root; `outputPath` do
+prepare parte do work root. Não altere o manifest depois de enfileirar: seu hash fica fixado.
+No Windows, escolha um work root curto para não atingir limites legados de caminhos.
+
+Worker kinds: `local_operations`, `voice_generate`, `voice_import`, `heygen_assets` e
+`heygen_videos`. Há um runner ativo por processo, limitado à campanha e ao tipo escolhido;
+start concorrente retorna 409. Stop impede novas claims, deixando o trabalho ativo terminar
+e salvar checkpoints. Retries futuros exigem outro start quando estiverem disponíveis.
+Shutdown drena o worker antes de fechar engines; restart não executa nada automaticamente.
+
+Upload/reserva e geração HeyGen são fases explícitas separadas. Aprovações, cap de renders,
+budget e reconciliação continuam obrigatórios; OAuth permanece no CLI. `requestId` de voz/
+HeyGen deve ser mantido em retries e renovado para uma nova ação. Profiles são metadados
+imutáveis (`201`), sem probe/hash de mídia na request; o worker de plano valida fontes,
+música e source antes de produzir o plano. Consulte `/docs` para os bodies de cada ação.
 
 ## Próximo slice de desenvolvimento
 
-O próximo slice é **D4A.2 — ações operacionais e integração de workers**, com design separado.
-D4A só estará completo após as duas partes; D4B adicionará React/preview e D5 o renderer.
+O próximo slice é **D4B — React/preview aproximado**; D5 adicionará o renderer.
 Revisão visual final do vídeo do canário continua humana; configurar um manifest não aprova o vídeo.
 
 A execução de 2026-09-30 aprovou o WAV existente com motivo auditável, completou upload de

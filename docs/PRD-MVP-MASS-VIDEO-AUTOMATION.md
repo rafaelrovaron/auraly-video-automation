@@ -36,7 +36,13 @@ genérico e não terá timeline estilo CapCut ou preview frame-perfect.
   timing opcional validado e CLI; sem renderização ou alinhamento automático;
 - D4A.1: API local de consultas/status, profiles/plans verificados e OpenAPI implementados;
   `IMPLEMENTED`, `LOCAL_VERIFIED` no Windows (15/15 etapas, 1.627 testes / 23 skips);
-  sem mutações, workers, providers ou media serving. D4A.2 continua planejado;
+  sem mutações, workers, providers ou media serving nesse slice histórico;
+- D4A.2: 19 ações POST tipadas para campanhas/copy, imagens, voz, HeyGen, profiles,
+  planos e jobs; operações longas em Jobs e runner explícito start/status/stop, limitado
+  a campanha/tipo. Banco existente RW separado de GET readonly, sem startup migrations
+  ou auto-dispatch; JSON/Origin loopback, aprovações e budget preservados. Fluxo HTTP
+  fake com mídia real até MP4 e plano A/B sem nova geração; evidência local no roadmap.
+  Profiles publicam metadados sem validar mídia na request; resolver valida no Job;
 - CLI e harness de verificação.
 
 ### 2.2 Capacidade alvo deste PRD
@@ -46,7 +52,7 @@ genérico e não terá timeline estilo CapCut ou preview frame-perfect.
 - integração dos profiles/manifests/overrides D3A com a UI e renderer;
 - headline/captions/music/framing configuráveis;
 - A/B de headline downstream;
-- ações operacionais FastAPI (D4A.2) e UI React local (D4B);
+- UI React local (D4B) consumindo a API operacional D4A.2;
 - preview aproximado;
 - render, QC, review e entrega local.
 
