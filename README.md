@@ -41,7 +41,8 @@ entrega.
 - D3B: planejamento A/B em lote, captions ligadas à copy/voz aprovadas, sidecar de timing
   validado quando fornecido e CLI `edit plan|plan-get`, sem gerar mídia.
 - D4A.1 implementado: API FastAPI de consultas locais, status factual por campanha,
-  profiles/plans verificados e OpenAPI; verificação integral pendente nesta entrega.
+  profiles/plans verificados e OpenAPI (`IMPLEMENTED`, `LOCAL_VERIFIED`);
+  gate Windows 15/15, 1.627 testes aprovados e 23 skips; sem novo canário de provider.
 
 ### Não entregue ainda
 

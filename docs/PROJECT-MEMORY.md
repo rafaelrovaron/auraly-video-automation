@@ -427,7 +427,7 @@ exibir o número de outputs antes de renderizar para evitar explosão combinató
 
 Stack: React/TypeScript + FastAPI, servidos em loopback.
 
-D4A foi dividido em duas entregas. D4A.1 está implementado, com verificação integral pendente:
+D4A foi dividido em duas entregas. D4A.1 está `IMPLEMENTED` e `LOCAL_VERIFIED`:
 API de consultas/status, `auraly api serve --port 8000`, OpenAPI e DTOs allowlisted sobre
 serviços existentes. SQLite abre somente leitura, exige revision/tabelas/colunas atuais e não
 migra/cria storage. Consultas preservam renders e planos históricos por ID/hash; Flow pausado
@@ -438,6 +438,14 @@ de execução. React/preview (D4B), renderer (D5) e o D4A completo não estão e
 O comando aceita roots/DB locais confiáveis, bind fixo 127.0.0.1, um processo e sem access logs.
 Banco fora do project root é permitido; work root fora não. Nenhum canário pago é necessário
 para D4A.1, e a evidência histórica PROVIDER_VERIFIED não foi ampliada.
+
+Evidência local de 2026-10-03: `uv run python scripts/verify.py full`, 15/15 etapas;
+1.627 testes aprovados / 23 skips em 356,29 s no Windows, código em
+`678d661e4386114abd0c8e56ba20199d20b2348a`. Revisão independente da branch encontrou três
+problemas relevantes; testes RED→GREEN e o gate final confirmaram as correções de IDs
+existentes de campanha, status de jobs `voice.import` e traceback de startup do Uvicorn.
+Logs rotineiros ficam suprimidos; falhas de startup usam mensagem CLI estática.
+Não há nova evidência Linux/Actions ou execução real de provider nesta entrega.
 
 Telas mínimas:
 

@@ -35,7 +35,8 @@ genérico e não terá timeline estilo CapCut ou preview frame-perfect.
 - D3B: planejamento A/B em lote, inputs de captions da copy/voz aprovadas,
   timing opcional validado e CLI; sem renderização ou alinhamento automático;
 - D4A.1: API local de consultas/status, profiles/plans verificados e OpenAPI implementados;
-  verificação integral pendente. Sem mutações, workers, providers ou media serving;
+  `IMPLEMENTED`, `LOCAL_VERIFIED` no Windows (15/15 etapas, 1.627 testes / 23 skips);
+  sem mutações, workers, providers ou media serving. D4A.2 continua planejado;
 - CLI e harness de verificação.
 
 ### 2.2 Capacidade alvo deste PRD
