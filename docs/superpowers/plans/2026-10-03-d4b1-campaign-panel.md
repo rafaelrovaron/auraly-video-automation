@@ -10,7 +10,7 @@
 
 **Spec:** `docs/superpowers/specs/2026-10-03-d4b1-campaign-panel-design.md` (aprovado em 2026-10-03).
 
-Status: plano para revisão do usuário; execução não iniciada. Base: `9f305f2` (design), sobre D4A.2 em `9cd8731`.
+Status: plano aprovado pelo usuário em 2026-10-03; execução Nativa iniciada em branch isolado. Base: `ec9496b`, sobre D4A.2 em `9cd8731`.
 
 ## Global Constraints
 
@@ -66,7 +66,7 @@ Referências primárias: [Vite](https://www.npmjs.com/package/vite/v/7.3.6), [pl
 - [ ] Ler spec e plano aprovados; inspecionar status/diff e usar `superpowers:using-git-worktrees` para isolamento no início da execução. Não criar worktree durante a revisão deste plano.
 - [ ] Executar baseline existente `rtk proxy uv run python scripts/verify.py fast --pytest tests/test_api_http.py tests/test_api_worker.py tests/test_verify_harness.py`; interromper diante de falha preexistente antes de alterações.
 
-### T1: Lista navegável sobre a API e bootstrap local
+### Task 1: Lista navegável sobre a API e bootstrap local
 
 **Files:** Criar configuração/entrada/CSS, `api.ts`, `api.test.ts`, `App.tsx`, `App.test.tsx`, `CampaignPanel.tsx`, `testSetup.ts`; modificar scripts da raiz e `.gitignore`.
 
@@ -92,7 +92,7 @@ expect(postRequests).toHaveLength(0); // carregar lista/reload não executa aç�
 - [ ] Executar os testes focados e `rtk proxy npm run ui:build`; exigir zero falhas e build gerado somente em diretório ignorado.
 - [ ] Revisar lock/diff por escopo e executar `rtk proxy git diff --check`; commit `feat(ui): add local campaign list and API client`, incluindo apenas os arquivos desta tarefa.
 
-### T2: Detalhe consultável com polling e erro parcial
+### Task 2: Detalhe consultável com polling e erro parcial
 
 **Files:** Criar `usePolling.ts`, `usePolling.test.tsx`, `CampaignPanel.test.tsx`; modificar `api.ts`, `App.tsx`, `CampaignPanel.tsx`, `styles.css`.
 
@@ -110,7 +110,7 @@ expect(postRequests).toHaveLength(0); // carregar lista/reload não executa aç�
 - [ ] Fixar testes adicionais: null duration/source/remoteVideoId vira “Não disponível”; `renderer_not_implemented` continua pendência; 503 não vira coleção vazia; Job de tipo desconhecido mostra metadados sem consulta operation; texto OAuth orienta CLI, sem link/token de provider.
 - [ ] Executar `rtk proxy npm run ui:test`, `rtk proxy npm run ui:build` e diff check; commit `feat(ui): add campaign detail and live status polling`.
 
-### T3: Start/stop explícito, sem duplicação de comando
+### Task 3: Start/stop explícito, sem duplicação de comando
 
 **Files:** Criar `WorkerControls.tsx`, `WorkerControls.test.tsx`; modificar `CampaignPanel.tsx`, `api.ts`, `styles.css`.
 
@@ -132,7 +132,7 @@ expect(stopButton.disabled).toBe(true); // worker scope unassociated
 - [ ] Implementar stop com aviso de draining: não cancela trabalho em andamento nem devolve créditos. Em falha de conexão desabilitar escrita até leitura pertinente bem-sucedida; 409 não produz fallback automático para outro tipo/campanha. Ao navegar, descartar respostas de comando para tela antiga, mas nunca abortar como promessa de cancelamento do trabalho remoto.
 - [ ] Executar todos os testes web/build/diff check; commit `feat(ui): add explicit local worker controls`.
 
-### T4: Integração real, gates Linux/Windows e documentação operacional
+### Task 4: Integração real, gates Linux/Windows e documentação operacional
 
 **Files:** Criar `tests/web_panel_support.py`, `tests/test_web_panel_e2e.py`; modificar harness/testes CI e os três documentos listados no mapa.
 

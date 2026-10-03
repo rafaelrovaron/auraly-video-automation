@@ -38,3 +38,5 @@ __pycache__/
 .coverage
 htmlcov/
 .worktrees/
+web/dist/
+web/*.tsbuildinfo

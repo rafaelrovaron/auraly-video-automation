@@ -7,7 +7,10 @@
     "hf:doctor": "hyperframes doctor",
     "hf:lint": "hyperframes lint",
     "hf:check": "hyperframes check",
-    "hf:render": "hyperframes render"
+    "hf:render": "hyperframes render",
+    "ui:dev": "npm --prefix web run dev",
+    "ui:test": "npm --prefix web run test",
+    "ui:build": "npm --prefix web run build"
   },
   "dependencies": {
     "hyperframes": "0.7.104"
