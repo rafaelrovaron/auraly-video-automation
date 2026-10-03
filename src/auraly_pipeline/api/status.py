@@ -41,7 +41,7 @@ def job_pending(job: Job) -> PendingItem | None:
         item = pending("attention_required", job.job_id)
     elif job.status in {"queued", "running", "retry_scheduled"}:
         item = pending("wait_for_job", job.job_id)
-    if item and job.job_type == "voice.generate":
+    if item and job.job_type in {"voice.generate", "voice.import"}:
         return item.model_copy(update={"stage": "voice"})
     return item
 
@@ -84,7 +84,7 @@ def compute_campaign_status(
         if not ready:
             relevant_jobs = [j for j in jobs if j.campaign_id == campaign.campaign_id and (
                 latest and j.job_id == latest.job_id
-                or not current_voice and unapproved and j.job_type == "voice.generate"
+                or not current_voice and unapproved and j.job_type in {"voice.generate", "voice.import"}
                 and j.input.get("voiceMasterId") == unapproved.voice_master_id
             )]
             uploads: list[Job] = []

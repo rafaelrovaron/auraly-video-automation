@@ -72,6 +72,23 @@ def test_voice_job_reports_voice_stage(observed: Any) -> None:
     assert compute(campaign, **facts).next_pending.stage == "voice"
 
 
+@pytest.mark.parametrize("job_status, expected, code", [
+    (JobStatus.QUEUED, "in_progress", "wait_for_job"),
+    (JobStatus.RUNNING, "in_progress", "wait_for_job"),
+    (JobStatus.FAILED, "needs_attention", "attention_required"),
+])
+def test_current_imported_voice_job_is_visible(observed: Any, job_status: JobStatus, expected: str, code: str) -> None:
+    campaign, facts, _, _ = observed
+    facts["renders"] = []
+    facts["voices"] = [facts["voices"][0].model_copy(update={"status": VoiceMasterStatus.GENERATING})]
+    job = next(j for j in facts["jobs"] if j.job_type == "voice.generate")
+    facts["jobs"] = [job.model_copy(update={"job_type": "voice.import", "status": job_status})]
+    status = compute(campaign, **facts)
+    assert status.operational_status == expected
+    assert status.next_pending.code == code
+    assert status.next_pending.stage == "voice"
+
+
 def test_ready_render_retains_pinned_history(observed: Any) -> None:
     campaign, facts, _, _ = observed
     draft = campaign.copy_masters[0].model_copy(update={"version": 2, "approval_state": "draft"})
