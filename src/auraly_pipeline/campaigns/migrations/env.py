@@ -6,7 +6,7 @@ from logging.config import fileConfig
 from pathlib import Path
 
 from alembic import context
-from sqlalchemy import engine_from_config, pool
+from sqlalchemy import URL, engine_from_config, pool
 from sqlalchemy.engine import make_url
 
 from auraly_pipeline.campaigns.db_models import Base
@@ -14,7 +14,7 @@ import auraly_pipeline.images.db_models  # noqa: F401
 import auraly_pipeline.heygen.db_models  # noqa: F401
 import auraly_pipeline.jobs.db_models  # noqa: F401
 import auraly_pipeline.voices.db_models  # noqa: F401
-from auraly_pipeline.campaigns.persistence import default_database_path, sqlite_url
+from auraly_pipeline.campaigns.persistence import default_database_path
 
 config = context.config
 if config.config_file_name is not None:
@@ -22,19 +22,21 @@ if config.config_file_name is not None:
 
 configured_url = config.get_main_option("sqlalchemy.url", "").strip()
 if not configured_url or configured_url == "sqlite:///":
-    configured_url = sqlite_url(default_database_path())
-database_url = make_url(configured_url)
+    database_url = URL.create(
+        "sqlite", database=default_database_path().resolve().as_posix(),
+    )
+else:
+    database_url = config.attributes.get("database_url") or make_url(configured_url)
 if database_url.get_backend_name() != "sqlite":
     raise RuntimeError("Campaign persistence requires SQLite.")
 if database_url.database and database_url.database != ":memory:":
     Path(database_url.database).expanduser().resolve().parent.mkdir(parents=True, exist_ok=True)
-config.set_main_option("sqlalchemy.url", configured_url)
 target_metadata = Base.metadata
 
 
 def run_migrations_offline() -> None:
     context.configure(
-        url=config.get_main_option("sqlalchemy.url"),
+        url=database_url,
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
@@ -46,8 +48,10 @@ def run_migrations_offline() -> None:
 
 
 def run_migrations_online() -> None:
+    configuration: dict[str, object] = dict(config.get_section(config.config_ini_section, {}))
+    configuration["sqlalchemy.url"] = database_url
     connectable = engine_from_config(
-        config.get_section(config.config_ini_section, {}),
+        configuration,
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
     )

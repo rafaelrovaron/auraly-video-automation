@@ -38,7 +38,7 @@ def sqlite_url(database_path: Path) -> str:
 def create_sqlite_engine(database_path: Path) -> Engine:
     database_path = _local_path(database_path).resolve()
     database_path.parent.mkdir(parents=True, exist_ok=True)
-    engine = create_engine(sqlite_url(database_path))
+    engine = create_engine(URL.create("sqlite", database=database_path.as_posix()))
 
     @event.listens_for(engine, "connect")
     def configure_sqlite(dbapi_connection: object, _connection_record: object) -> None:
@@ -159,7 +159,10 @@ def migrate_database(database_path: Path) -> None:
         package_root = Path(__file__).resolve().parent
         config = Config()
         config.set_main_option("script_location", str(package_root / "migrations"))
-        config.set_main_option("sqlalchemy.url", sqlite_url(database_path))
+        config.set_main_option("sqlalchemy.url", sqlite_url(database_path).replace("%", "%%"))
+        config.attributes["database_url"] = URL.create(
+            "sqlite", database=database_path.as_posix(),
+        )
         command.upgrade(config, "head")
         engine = create_sqlite_engine(database_path)
         try:

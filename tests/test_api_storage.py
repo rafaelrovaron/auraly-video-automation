@@ -79,7 +79,30 @@ def test_database_outside_project_with_special_characters(tmp_path: Path) -> Non
 def test_database_question_mark_uri(tmp_path: Path) -> None:
     db = tmp_path / "a?.db"
     persistence.migrate_database(db)
+    assert db.is_file()
     engine = readonly(db)
+    try:
+        persistence.validate_api_database(engine)
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.parametrize("filename", ["a?.db", "a#.db", "a%.db", "a space.db"])
+def test_writer_preserves_exact_database_filename(tmp_path: Path, filename: str) -> None:
+    database = tmp_path / filename
+    engine = persistence.create_sqlite_engine(database)
+    try:
+        # Construction does not connect, so '?' is testable even on Windows.
+        assert engine.url.database == database.resolve().as_posix()
+    finally:
+        engine.dispose()
+
+
+def test_migration_preserves_percent_filename(tmp_path: Path) -> None:
+    database = tmp_path / "a%25 # space.db"
+    persistence.migrate_database(database)
+    assert database.is_file()
+    engine = readonly(database)
     try:
         persistence.validate_api_database(engine)
     finally:
