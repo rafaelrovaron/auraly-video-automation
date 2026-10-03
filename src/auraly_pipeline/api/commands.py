@@ -15,15 +15,24 @@ from auraly_pipeline.api.action_contracts import (
     ImageImportOperationResult, ImagePrepareOperation, ImagePrepareResult,
     LocalOperationRequest, OperationResult, OperationSubmission, OperationView,
     VoiceImportOperation, VoiceImportResult, VoiceReviewOperation, VoiceReviewResult,
+    HeyGenAssetsOperation, HeyGenAssetsResult, HeyGenVideoPlanOperation, HeyGenVideoPlanResult,
+    HeyGenVideoSubmitOperation, HeyGenVideoSubmitResult, HeyGenReconcileOperation, HeyGenReconcileResult,
 )
-from auraly_pipeline.api.contracts import ApiSettings, ERROR_MESSAGES, ErrorCode, QueryError
+from auraly_pipeline.api.contracts import ApiSettings, ERROR_MESSAGES, ErrorCode, QueryError, RenderSummary
 from auraly_pipeline.api.operations import ApiOperationHandler, LOCAL_OPERATION_JOB
 from auraly_pipeline.campaigns.service import CampaignNotFoundError, CampaignService
 from auraly_pipeline.editing.batch_planner import verify_batch_plan
 from auraly_pipeline.editing.batch_service import EditBatchService
 from auraly_pipeline.editing.domain import EditingError, relative_path
 from auraly_pipeline.editing.service import validate_editing_path
-from auraly_pipeline.heygen.provider import HeyGenProvider
+from auraly_pipeline.heygen.provider import HeyGenMcpAdapter
+from auraly_pipeline.heygen.fake_provider import FakeHeyGenProvider
+from auraly_pipeline.heygen.handler import HeyGenAssetUploadHandler
+from auraly_pipeline.heygen.service import HeyGenService, HeyGenServiceError
+from auraly_pipeline.heygen.video_domain import HeyGenRender
+from auraly_pipeline.heygen.video_handler import HeyGenVideoHandler
+from auraly_pipeline.heygen.video_repository import HeyGenVideoRepository
+from auraly_pipeline.heygen.video_service import HeyGenVideoService
 from auraly_pipeline.images.import_batch import ImageImportBatch, ImageImportError, ImageImportService
 from auraly_pipeline.jobs.db_models import JobRow
 from auraly_pipeline.jobs.domain import JobSubmit, RetrySafety
@@ -40,12 +49,16 @@ class ApiCommands:
         self, settings: ApiSettings, engine: Engine, *,
         speech_provider: SpeechProvider | None = None,
         transcriber: TranscriptProvider | None = None,
-        heygen_provider: HeyGenProvider | None = None,
+        heygen_provider: HeyGenMcpAdapter | FakeHeyGenProvider | None = None,
     ) -> None:
         self.settings = settings
         self._speech_provider = speech_provider
         self._transcriber = transcriber
         self._heygen_provider = heygen_provider
+        self._engine = engine
+        self._heygen_jobs: JobService | None = None
+        self._heygen_assets: HeyGenService | None = None
+        self._heygen_videos: HeyGenVideoService | None = None
         self._sessions = sessionmaker(engine, expire_on_commit=False, class_=Session)
         self.campaigns = CampaignService(engine)
         self.images = ImageImportService.from_engine(engine, work_root=settings.work_root)
@@ -71,6 +84,94 @@ class ApiCommands:
         self.voice_import = VoiceImportService(
             self._sessions, self.jobs, settings.project_root, settings.work_root,
         )
+
+    @property
+    def heygen_jobs(self) -> JobService:
+        if self._heygen_jobs is None:
+            provider = self._heygen_provider or HeyGenMcpAdapter()
+            self._heygen_jobs = JobService(
+                self._engine, JobRepository(self._sessions), handlers={
+                    "heygen.asset.upload": HeyGenAssetUploadHandler(
+                        self._sessions, provider, self.settings.work_root,
+                    ),
+                    "heygen.video.generate": HeyGenVideoHandler(
+                        self._sessions, provider, self.settings.work_root,
+                    ),
+                },
+            )
+            self._heygen_assets = HeyGenService(
+                self._sessions, provider, self._heygen_jobs, self.settings.work_root,
+            )
+            self._heygen_videos = HeyGenVideoService(
+                self._sessions, provider, self._heygen_jobs, self.settings.work_root,
+            )
+        return self._heygen_jobs
+
+    @property
+    def heygen_assets(self) -> HeyGenService:
+        self.heygen_jobs
+        assert self._heygen_assets is not None
+        return self._heygen_assets
+
+    @property
+    def heygen_videos(self) -> HeyGenVideoService:
+        self.heygen_jobs
+        assert self._heygen_videos is not None
+        return self._heygen_videos
+
+    def require_render(self, campaign_id: str, render_id: str) -> HeyGenRender:
+        try:
+            render = HeyGenVideoRepository(self._sessions).get(render_id)
+        except ValueError:
+            raise QueryError("not_found") from None
+        if render.item.campaign_id != campaign_id:
+            raise QueryError("not_found")
+        return render
+
+    @staticmethod
+    def render_summary(render: HeyGenRender) -> RenderSummary:
+        return RenderSummary(
+            render_id=render.render_id, campaign_id=render.item.campaign_id,
+            scene_variant_id=render.item.scene_variant_id,
+            image_candidate_id=render.item.image_candidate_id,
+            voice_master_id=render.item.voice_master_id, job_id=render.job_id,
+            status=render.status, remote_video_id=render.remote_video_id,
+            manual_binding=render.manual_binding, image_sha256=render.item.image_sha256,
+            audio_sha256=render.item.audio_sha256, source=render.source, error_code=render.error_code,
+            created_at=render.created_at, updated_at=render.updated_at,
+        )
+
+    def _checkpoint_operation(
+        self, session: Session, job_id: str, request: LocalOperationRequest, result: OperationResult,
+    ) -> None:
+        row = session.get(JobRow, job_id)
+        if (row is None or row.status != "running" or row.attempt_count != 1
+                or row.campaign_id != request.campaign_id or row.job_type != LOCAL_OPERATION_JOB
+                or row.input_json != request.model_dump(mode="json", by_alias=True)
+                or row.lease_expires_at is None
+                or row.lease_expires_at.replace(tzinfo=UTC) <= datetime.now(UTC)):
+            raise QueryError("operation_not_allowed")
+        row.output_json = result.model_dump(mode="json", by_alias=True)
+
+    def _validate_heygen_result(self, campaign_id: str, result: OperationResult) -> None:
+        if isinstance(result, HeyGenAssetsResult) and result.job_id is not None:
+            child = self.jobs.get_job(result.job_id)
+            if child.campaign_id != campaign_id or child.job_type != "heygen.asset.upload":
+                raise QueryError("artifact_invalid")
+        renders = (result.renders if isinstance(result, HeyGenVideoSubmitResult)
+                   else [result.render] if isinstance(result, HeyGenReconcileResult) else [])
+        for summary in renders:
+            render = self.require_render(campaign_id, summary.render_id)
+            child = self.jobs.get_job(summary.job_id)
+            if (summary.campaign_id != campaign_id or child.campaign_id != campaign_id
+                    or child.job_type != "heygen.video.generate"
+                    or child.input != {"logical_key": render.logical_key}
+                    or summary.scene_variant_id != render.item.scene_variant_id
+                    or summary.image_candidate_id != render.item.image_candidate_id
+                    or summary.voice_master_id != render.item.voice_master_id
+                    or summary.image_sha256 != render.item.image_sha256
+                    or summary.audio_sha256 != render.item.audio_sha256):
+                raise QueryError("artifact_invalid")
 
     def submit_voice(self, request: VoiceGenerateRequest) -> OperationSubmission:
         self.require_campaign(request.campaign_id)
@@ -147,6 +248,8 @@ class ApiCommands:
             })
         elif isinstance(request, VoiceReviewOperation):
             self.require_voice(request.campaign_id, request.voice_id)
+        elif isinstance(request, HeyGenReconcileOperation):
+            self.require_render(request.campaign_id, request.render_id)
         payload = cast(dict[str, JsonValue], request.model_dump(mode="json", by_alias=True))
         identity = hashlib.sha256(json.dumps(
             payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
@@ -177,6 +280,7 @@ class ApiCommands:
                 result = TypeAdapter(OperationResult).validate_python(job.output)
                 if result.operation != request.operation:
                     raise ValueError("invalid operation result")
+                self._validate_heygen_result(campaign_id, result)
                 if isinstance(result, EditPlanResult):
                     verify_batch_plan(result.plan)
                     if (not isinstance(request, EditPlanOperation)
@@ -205,6 +309,71 @@ class ApiCommands:
     ) -> OperationResult:
         self.require_campaign(request.campaign_id)
         try:
+            if isinstance(request, (HeyGenAssetsOperation, HeyGenVideoPlanOperation,
+                                    HeyGenVideoSubmitOperation, HeyGenReconcileOperation)):
+                if job_id is None:
+                    raise QueryError("invalid_request")
+                wrapper = self.jobs.get_job(job_id)
+                if (wrapper.campaign_id != request.campaign_id or wrapper.job_type != LOCAL_OPERATION_JOB
+                        or wrapper.input != request.model_dump(mode="json", by_alias=True)):
+                    raise QueryError("invalid_request")
+                if wrapper.output:
+                    saved: OperationResult = TypeAdapter(OperationResult).validate_python(wrapper.output)
+                    if saved.operation != request.operation:
+                        raise QueryError("artifact_invalid")
+                    self._validate_heygen_result(request.campaign_id, saved)
+                    return saved
+                if isinstance(request, HeyGenAssetsOperation):
+                    assets = self.heygen_assets
+                    asset_plan = assets.plan_assets(request.campaign_id)
+                    asset_result = HeyGenAssetsResult(
+                        upload_count=len(asset_plan.upload_sources), reused_count=len(asset_plan.reused_assets), job_id=None,
+                    )
+
+                    def asset_checkpoint(session: Session, child: JobRow) -> None:
+                        self._checkpoint_operation(
+                            session, job_id, request, asset_result.model_copy(update={"job_id": child.id}),
+                        )
+
+                    asset_submission = assets.submit_assets(asset_plan, before_commit=asset_checkpoint)
+                    return HeyGenAssetsResult(
+                        upload_count=asset_submission.upload_count,
+                        reused_count=len(asset_submission.plan.reused_assets),
+                        job_id=None if asset_submission.job is None else asset_submission.job.job_id,
+                    )
+                if isinstance(request, HeyGenVideoSubmitOperation):
+                    def video_checkpoint(session: Session, renders: list[HeyGenRender]) -> None:
+                        self._checkpoint_operation(session, job_id, request, HeyGenVideoSubmitResult(
+                            renders=[self.render_summary(render) for render in renders],
+                        ))
+
+                    renders = self.heygen_videos.submit_videos(
+                        request.campaign_id, request.config, max_paid_renders=request.max_paid_renders,
+                        approved_by=request.approved_by, before_commit=video_checkpoint,
+                    )
+                    return HeyGenVideoSubmitResult(renders=[self.render_summary(r) for r in renders])
+                if isinstance(request, HeyGenVideoPlanOperation):
+                    plan_videos = self.heygen_videos.plan_videos(
+                        request.campaign_id, request.config, max_paid_renders=request.max_paid_renders,
+                    )
+                    return HeyGenVideoPlanResult(
+                        new_count=plan_videos.new_count, reused_count=plan_videos.reused_count,
+                        reserved_count=plan_videos.reserved_count, max_paid_renders=plan_videos.max_paid_renders,
+                        total_audio_seconds=plan_videos.total_audio_seconds,
+                        scene_variant_ids=[item.scene_variant_id for item in plan_videos.items],
+                    )
+                self.require_render(request.campaign_id, request.render_id)
+                def reconcile_checkpoint(session: Session, reconciled: HeyGenRender) -> None:
+                    self._checkpoint_operation(session, job_id, request, HeyGenReconcileResult(
+                        render=self.render_summary(reconciled),
+                    ))
+
+                render = self.heygen_videos.reconcile_video(
+                    request.render_id, video_id=request.video_id,
+                    confirm_manual_binding=request.confirm_manual_binding,
+                    before_commit=reconcile_checkpoint,
+                )
+                return HeyGenReconcileResult(render=self.render_summary(render))
             if isinstance(request, VoiceImportOperation):
                 if job_id is None:
                     raise QueryError("invalid_request")
@@ -304,4 +473,11 @@ class ApiCommands:
             raise QueryError("artifact_invalid") from None
         except (VoiceImportError, VoiceMasterError):
             raise QueryError("operation_not_allowed") from None
+        except HeyGenServiceError:
+            raise QueryError("operation_not_allowed") from None
+        except ValueError:
+            if isinstance(request, (HeyGenAssetsOperation, HeyGenVideoPlanOperation,
+                                    HeyGenVideoSubmitOperation, HeyGenReconcileOperation)):
+                raise QueryError("operation_not_allowed") from None
+            raise
         raise QueryError("invalid_request")

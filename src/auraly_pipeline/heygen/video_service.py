@@ -148,6 +148,7 @@ class HeyGenVideoService:
         *,
         max_paid_renders: int,
         approved_by: str,
+        before_commit: Callable[[Session, list[HeyGenRender]], None] | None = None,
     ) -> list[HeyGenRender]:
         validate_safe_identifier(approved_by, "approved_by", max_length=200)
         plan = self.plan_videos(campaign_id, config, max_paid_renders=max_paid_renders)
@@ -181,6 +182,11 @@ class HeyGenVideoService:
             for item in plan.items:
                 validate_video_item(self._factory, self._root, item, session=session)
             self._repo.check_budget_in_session(session, campaign_id, max_paid_renders)
+            if before_commit is not None:
+                renders = [self._repo.find(key, session=session) for key in by_key]
+                if any(render is None for render in renders):
+                    raise ValueError("video reservation checkpoint missing")
+                before_commit(session, [render for render in renders if render is not None])
 
         return [
             s.linked
@@ -233,7 +239,8 @@ class HeyGenVideoService:
         )
 
     def reconcile_video(
-        self, render_id: str, *, video_id: str | None = None, confirm_manual_binding: bool = False
+        self, render_id: str, *, video_id: str | None = None, confirm_manual_binding: bool = False,
+        before_commit: Callable[[Session, HeyGenRender], None] | None = None,
     ) -> HeyGenRender:
         render = self._repo.get(render_id)
         job = self._jobs.get_job(render.job_id)
@@ -261,6 +268,8 @@ class HeyGenVideoService:
                     session, row, reason="no_dispatch_proven"
                 )
                 render = self._repo.reset_no_dispatch(render_id, session=session)
+                if before_commit is not None:
+                    before_commit(session, render)
                 session.commit()
             return render
         state = self._provider.get_video(resolved)
@@ -286,12 +295,15 @@ class HeyGenVideoService:
                     manual_binding=known_id is None,
                     session=session,
                 )
-                return self._repo.rebind_recovery_job_in_session(
+                recovered = self._repo.rebind_recovery_job_in_session(
                     session,
                     render_id,
                     job.job_id,
                     recovery_job,
                 )
+                if before_commit is not None:
+                    before_commit(session, recovered)
+                return recovered
 
             return self._jobs.submit_linked_job(
                 JobSubmit(
@@ -321,5 +333,7 @@ class HeyGenVideoService:
                 manual_binding=known_id is None,
                 session=session,
             )
+            if before_commit is not None:
+                before_commit(session, render)
             session.commit()
         return render

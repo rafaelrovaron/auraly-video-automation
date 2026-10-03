@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from contextlib import nullcontext
 from datetime import UTC, datetime
 from uuid import uuid4
 
@@ -63,9 +64,9 @@ class HeyGenVideoRepository:
                 )
             ]
 
-    def find(self, logical_key: str) -> HeyGenRender | None:
-        with self._session_factory() as session:
-            row = session.scalar(
+    def find(self, logical_key: str, *, session: Session | None = None) -> HeyGenRender | None:
+        with nullcontext(session) if session is not None else self._session_factory() as active:
+            row = active.scalar(
                 select(HeyGenRenderRow).where(HeyGenRenderRow.logical_key == logical_key)
             )
             return None if row is None else _domain(row)

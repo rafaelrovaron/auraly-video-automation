@@ -6,6 +6,7 @@ from pydantic import JsonValue, TypeAdapter
 
 from auraly_pipeline.api.action_contracts import LocalOperationRequest
 from auraly_pipeline.api.contracts import ERROR_MESSAGES, QueryError
+from auraly_pipeline.heygen.provider import HeyGenProviderFailure
 from auraly_pipeline.jobs.domain import JobExecutionOutcome, JobExecutionResult, RetrySafety
 from auraly_pipeline.jobs.handlers import JobExecutionContext
 
@@ -30,6 +31,11 @@ class ApiOperationHandler:
             return JobExecutionResult(
                 outcome=JobExecutionOutcome.SUCCESS,
                 result=cast(dict[str, JsonValue], result.model_dump(mode="json", by_alias=True)),
+            )
+        except HeyGenProviderFailure:
+            return JobExecutionResult(
+                outcome=JobExecutionOutcome.BLOCKED,
+                error_code="operation_not_allowed", error_message=ERROR_MESSAGES["operation_not_allowed"],
             )
         except QueryError as error:
             return JobExecutionResult(

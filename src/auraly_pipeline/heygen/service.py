@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 import hashlib
 from pathlib import Path
 
@@ -27,6 +28,7 @@ from auraly_pipeline.heygen.repository import (
 )
 from auraly_pipeline.images.repository import ImageRepository
 from auraly_pipeline.jobs.domain import JobSubmit, RetrySafety
+from auraly_pipeline.jobs.db_models import JobRow
 from auraly_pipeline.jobs.service import JobService
 from auraly_pipeline.jobs.state_machine import JobStatus
 from auraly_pipeline.voices.repository import VoiceMasterRepository
@@ -170,7 +172,10 @@ class HeyGenService:
             upload_sources=uploads,
         )
 
-    def submit_assets(self, plan: AssetPreparationPlan) -> AssetPreparationSubmission:
+    def submit_assets(
+        self, plan: AssetPreparationPlan, *,
+        before_commit: Callable[[Session, JobRow], None] | None = None,
+    ) -> AssetPreparationSubmission:
         current = self.plan_assets(plan.campaign_id)
         if current.account_ref != plan.account_ref or current.sources != plan.sources:
             raise HeyGenServiceError("Asset plan changed before submission")
@@ -182,15 +187,26 @@ class HeyGenService:
             idempotency_key=key,
             sources=current.upload_sources,
         )
-        job = self._jobs.submit_job(
-            JobSubmit(
-                job_type="heygen.asset.upload",
-                campaign_id=current.campaign_id,
-                idempotency_key=key,
-                input=job_input.model_dump(mode="json", by_alias=True),
-                retry_safety=RetrySafety.RECONCILE_BEFORE_RETRY,
-            )
+        request = JobSubmit(
+            job_type="heygen.asset.upload",
+            campaign_id=current.campaign_id,
+            idempotency_key=key,
+            input=job_input.model_dump(mode="json", by_alias=True),
+            retry_safety=RetrySafety.RECONCILE_BEFORE_RETRY,
         )
+        if before_commit is None:
+            job = self._jobs.submit_job(request)
+        else:
+            def check(session: Session) -> None:
+                row = session.scalar(select(JobRow).where(JobRow.idempotency_key == key))
+                if row is None:
+                    raise HeyGenServiceError("Asset job checkpoint missing")
+                before_commit(session, row)
+
+            job = self._jobs.submit_linked_batch(
+                [request], lambda session, row: row.id, lambda job: job.job_id,
+                before_commit=check,
+            )[0].job
         return AssetPreparationSubmission(
             plan=current, job=job, upload_count=len(current.upload_sources)
         )

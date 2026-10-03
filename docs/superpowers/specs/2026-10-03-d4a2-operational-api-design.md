@@ -54,6 +54,13 @@ change before claiming D4A.2 LOCAL_VERIFIED. Windows/local success is not Linux 
   The API callback stores safe child IDs on the local operation Job before committing,
   closing the crash window between creating a child and recording its identity.
   The CLI default is None, preserving its behavior and engine ownership.
+- HeyGen submit_assets accepts an optional before_commit(Session, JobRow) callback;
+  submit_videos accepts before_commit(Session, list[HeyGenRender]), and reconcile_video
+  accepts before_commit(Session, HeyGenRender). These public callbacks checkpoint the
+  local operation in the same native submission/resumption transaction, including
+  reused submissions. Defaults preserve existing CLI behavior. HeyGen wrappers carry
+  a caller-stable requestId: retry reuses the checkpoint; a fresh operator action after
+  changed prerequisites uses a new requestId without weakening native idempotency.
 - Short mutations delegate to services in the request. Media hashing/probes/ASR/media copies,
   external calls and polling run in queued work, not route handlers.
 - API-only long operations use narrow handlers on the existing Job framework, not a
