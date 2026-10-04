@@ -40,7 +40,9 @@ jobs:
         with:
           node-version: "22"
           cache: npm
-          cache-dependency-path: package-lock.json
+          cache-dependency-path: |
+            package-lock.json
+            web/package-lock.json
 
       - name: Refresh apt metadata
         run: sudo apt-get update
@@ -75,13 +77,29 @@ jobs:
       - name: Synchronize locked dependencies
         run: uv sync --locked --all-groups
 
+      - name: Set up Node 22
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            web/package-lock.json
+
+      - name: Install FFmpeg for local media fixtures
+        run: choco install ffmpeg --yes --no-progress
+
       - name: Install Playwright-managed Chromium
         run: uv run playwright install chromium
+
+      - name: Verify local UI
+        run: uv run python scripts/verify.py ui
 
       - name: Run focused cross-platform verification
         run: >-
           uv run python scripts/verify.py fast --pytest
           tests/test_verify_harness.py
+          tests/test_web_panel_e2e.py
           tests/test_config_paths.py
           tests/test_models.py
           tests/test_image_generation.py

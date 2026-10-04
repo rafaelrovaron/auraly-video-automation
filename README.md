@@ -45,14 +45,19 @@ entrega.
   gate Windows 15/15, 1.627 testes aprovados e 23 skips; sem novo canário de provider.
 - D4A.2 implementado: 19 ações POST, fila tipada e worker local explícito. Gate Windows
   15/15 no código `73ca358`, 1.701 testes aprovados / 24 skips; E2E fake até MP4/plano A/B.
-  Revisão final independente é registrada na memória; CI do código posterior a `0693674`
-  aguarda publicação. Sem novo canário pago.
+  Integrado em `main` no código `9cd8731`, com Actions Linux/Windows aprovados.
+  Revisão final independente é registrada na memória. Sem novo canário pago.
+- D4B.1 implementado: painel React local de campanhas, assets e Jobs, polling e controle
+  explícito start/stop do worker; integração com API/proxy reais e providers fake.
+  Gate Windows 19/19, 41 testes frontend e 1.710 Python aprovados / 24 skips;
+  `LOCAL_VERIFIED`, sem nova execução de provider. Actions desta branch ainda não executados.
 
 ### Não entregue ainda
 
 - render final com headline, captions, música e framing configuráveis;
 - renderização das variações A/B já planejadas, reutilizando voz, imagem e HeyGen;
-- interface React local (D4B);
+- formulários de campanha/import/review/voz/HeyGen pela interface (D4B.2);
+- configuração editorial, profiles e variants pela interface (D4B.3);
 - preview aproximado e fluxo end-to-end operável pela interface.
 
 ### Google Flow: preservado, mas pausado
@@ -232,9 +237,41 @@ HeyGen deve ser mantido em retries e renovado para uma nova ação. Profiles sã
 imutáveis (`201`), sem probe/hash de mídia na request; o worker de plano valida fontes,
 música e source antes de produzir o plano. Consulte `/docs` para os bodies de cada ação.
 
+## Painel local (D4B.1)
+
+Use Node 22 (>=22.12) e instale o frontend com `npm --prefix web ci`.
+Com o banco da campanha já preparado pelos comandos CLI existentes, abra dois terminais:
+
+```powershell
+uv run python -m auraly_pipeline.cli api serve --port 8000
+```
+
+```powershell
+npm run ui:dev
+```
+
+Abra `http://127.0.0.1:5173`. Configure `--database`, `--project-root` e `--work-root`
+no comando da API quando necessário; o painel consulta o mesmo storage da CLI.
+As portas 8000/5173 são fixas nesta etapa. O proxy preserva Host/Origin loopback;
+não é necessário habilitar CORS nem expor a API na rede.
+
+O painel mostra metadados, status, pendências, erros e Jobs; não serve arquivos de mídia,
+thumbnails ou players. Leituras não executam providers. Start exige confirmação e pode
+consumir créditos se houver Jobs pagos já aprovados na fila. Stop impede novas claims e
+deixa o Job ativo terminar; não cancela a geração nem devolve créditos. Um worker de
+outra campanha aparece como desconhecido, não como idle. POSTs não são repetidos
+automaticamente; falhas de resposta exigem reconciliação pelas leituras de status.
+OAuth continua pela CLI. Criação/import/reviews e configuração editorial ainda usam a CLI/API.
+
+Verificação do frontend: `uv run python scripts/verify.py ui`.
+O gate `full` instala/testa/builda/audita o frontend antes dos testes Python.
+Pare os servidores de desenvolvimento antes do gate: os testes de integração usam essas
+portas e falham se estiverem ocupadas, sem encerrar processos de terceiros.
+
 ## Próximo slice de desenvolvimento
 
-O próximo slice é **D4B — React/preview aproximado**; D5 adicionará o renderer.
+O próximo slice é **D4B.2 — formulários operacionais e import manual**; D4B.3 adicionará
+profiles, variantes A/B e preview aproximado. D5 adicionará o renderer.
 Revisão visual final do vídeo do canário continua humana; configurar um manifest não aprova o vídeo.
 
 A execução de 2026-09-30 aprovou o WAV existente com motivo auditável, completou upload de
@@ -332,9 +369,10 @@ Não há ASR/alinhamento automático. Por output: `disabled`, `timing_missing` o
 
 Evidência: [D3B verification](docs/superpowers/2026-10-02-d3b-verification.md).
 
-## Interface local planejada
+## Interface local — alvo completo
 
-React + FastAPI em `127.0.0.1`, com telas simples para:
+D4B.1 entrega o painel descrito acima. O alvo completo React + FastAPI em `127.0.0.1`
+inclui telas simples para:
 
 - campanhas e assets;
 - importação de imagens;
@@ -353,7 +391,7 @@ Requisitos do repositório existente:
 
 - Python 3.11;
 - `uv`;
-- Node/npm para o ambiente de renderer existente;
+- Node 22 (>=22.12)/npm para o painel e o ambiente de renderer existente;
 - FFmpeg/ffprobe;
 - SQLite local.
 

@@ -441,8 +441,9 @@ start/status/stop e shutdown que drena a execução antes de fechar engines. Nen
 faz dispatch. Até dry-run persiste um Job, não seus efeitos de domínio. Profiles publicam
 metadados imutáveis sem mídia na request; o resolver no Job verifica os assets antes do plano.
 Bodies JSON/Origin loopback, aprovações, budget, idempotência e checkpoints são preservados.
-Uso enqueue/start/poll/stop e import manual está no README. React/preview (D4B) e renderer
-(D5) continuam planejados; sem timeline ou preview frame-perfect.
+Uso enqueue/start/poll/stop e import manual está no README. O painel React D4B.1 está
+implementado; formulários/preview (D4B.2/D4B.3) e renderer (D5) continuam planejados;
+sem timeline ou preview frame-perfect.
 O comando aceita roots/DB locais confiáveis, bind fixo 127.0.0.1, um processo e sem access logs.
 Banco fora do project root é permitido; work root fora não. Nenhum canário pago é necessário
 para D4A.1, e a evidência histórica PROVIDER_VERIFIED não foi ampliada.
@@ -458,7 +459,7 @@ Essa evidência histórica D4A.1 não incluiu nova execução Linux/Actions ou r
 Em D4A.2, Actions 37125176378 confirmou a correção de filenames SQLite no Linux no SHA
 `0693674c9e6caf9783201a721a04e92eb2c85052`: 1.677 passed/6 skipped, harness 15/15.
 Windows focado nesse SHA: 951 passed/12 skipped, 3/3. Isso cobre Tasks 1–4, não o código
-posterior ainda local. PR #2 permanece draft, sem merge. O teste HTTP ponta a ponta usa
+posterior ainda local naquele checkpoint. PR #2 estava draft, sem merge. O teste HTTP ponta a ponta usa
 mídia local real e provider/transcriber fake: import manual, WAV/review, uploads, três MP4s
 e dois manifests A/B com source/voz/copy fixados, sem chamadas adicionais ao provider.
 Não houve nova chamada paga nem ampliação de `PROVIDER_VERIFIED`.
@@ -480,9 +481,43 @@ Gate pós-fix no código `73ca3587ebfd94aa8d3f42a6b9b0744b61b07168`: Windows 15/
 1.701 passed/24 skipped em 396,42 s; quatro regressões finais passaram, inclusive a
 negação de resume sem checkpoint. Sem re-review: testes e gate verificam as correções.
 D4A completo `IMPLEMENTED`, `LOCAL_VERIFIED`; D4B React/preview é o próximo passo.
-Sem push/merge dessa atualização ou execução Linux/Actions posterior a `0693674`.
+Naquele checkpoint não havia push/merge dessa atualização ou execução Linux/Actions posterior a `0693674`.
 
-Telas mínimas:
+D4A.2 integrado em `main` no SHA `9cd8731`, com Actions 37146845609 (push) e
+37146846960 (PR) aprovados em Linux/Windows. Essa evidência não amplia `PROVIDER_VERIFIED`.
+
+### D4B.1 — painel local de campanhas
+
+React/TypeScript/Vite em `web/`, sem router ou nova biblioteca de estado. Hash navigation,
+lista/detalhe de campanhas, metadados de copy/cenas/imagens/voz/renders, Jobs e operações.
+API é a única fonte de verdade; não há acesso direto ao banco/filesystem/provider nem
+serving de mídia. Proxy loopback 5173→8000 preserva Host/Origin, sem novo CORS.
+Lista consulta a cada 5 s e status/Jobs/worker a cada 2 s, sem overlap; pausa com a aba
+oculta e descarta respostas de navegação anterior. Falhas preservam dados anteriores
+com timestamp e aviso stale, sem inventar progresso.
+
+Únicos POSTs do painel: worker start/stop, com confirmação de início, bloqueio contra clique duplicado,
+sem retry automático e reconciliação por GET após resposta incerta. 404 scoped do worker
+significa desconhecido, não idle; 409 preserva a autoridade do backend. Stop drena o Job
+ativo e não cancela provider/reembolsa créditos. OAuth segue na CLI.
+
+Frontend tem 41 testes, incluindo regressão A→B→A com POST atrasado. Integração tem seis
+testes com navegador/proxy/API reais, provider fake e mídia sintética: leitura sem mutação,
+start/stop/draining, Origin estrangeiro, JSON malformado, responsividade e porta ocupada.
+Harness inclui modo `ui` e quatro etapas UI no `full`; Actions provisiona Node 22/cache
+dos dois lockfiles e FFmpeg no Windows. CI dessa nova branch depende de publicação.
+Compatibilidade das referências Windows nos fixtures foi verificada com mypy Linux.
+Gate local Windows de 2026-10-03: `uv run python scripts/verify.py full`, 19/19 etapas;
+41 testes frontend e 1.710 Python aprovados / 24 skips. Ruff, mypy source/tests, schemas,
+build/typecheck e audits production aprovados. D4B.1 `IMPLEMENTED`, `LOCAL_VERIFIED`;
+sem nova evidência de provider ou execução runtime Linux da nova branch.
+
+Spec e plano: `docs/superpowers/specs/2026-10-03-d4b1-campaign-panel-design.md` e
+`docs/superpowers/plans/2026-10-03-d4b1-campaign-panel.md`. D4B.2 adicionará formulários
+operacionais/import; D4B.3 adicionará profiles, variants e preview aproximado.
+Runtime por dois terminais neste slice; launcher/distribuição ficam para depois.
+
+Telas mínimas do alvo completo (não todas entregues em D4B.1):
 
 1. Campaigns — lista, progresso e próximo bloqueio;
 2. Campaign Detail — copy, Voice Master, variantes e assets;

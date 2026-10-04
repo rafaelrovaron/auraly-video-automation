@@ -53,10 +53,21 @@ def npm_executable(os_name: str = os.name) -> str:
     return "npm.cmd" if os_name == "nt" else "npm"
 
 
+def build_ui_steps(os_name: str = os.name) -> tuple[VerificationStep, ...]:
+    npm = npm_executable(os_name)
+    return (
+        VerificationStep('UI locked install', (npm, '--prefix', 'web', 'ci')),
+        VerificationStep('UI behavior tests', (npm, 'run', 'ui:test')),
+        VerificationStep('UI typecheck and build', (npm, 'run', 'ui:build')),
+        VerificationStep('UI production audit', (npm, '--prefix', 'web', 'audit', '--omit=dev', '--audit-level=high')),
+    )
+
+
 def build_full_steps(os_name: str = os.name) -> tuple[VerificationStep, ...]:
     npm = npm_executable(os_name)
     return (
         VerificationStep("uv locked sync", ("uv", "sync", "--locked", "--all-groups")),
+        *build_ui_steps(os_name),
         VerificationStep("full pytest", ("uv", "run", "python", "-m", "pytest")),
         VerificationStep(
             "Ruff source and tests", ("uv", "run", "python", "-m", "ruff", "check", "src", "tests")
@@ -190,6 +201,7 @@ def _argument_parser() -> argparse.ArgumentParser:
         help="Run exactly these focused pytest targets after Ruff and mypy.",
     )
     subparsers.add_parser("full", help="Run the complete deterministic local gate.")
+    subparsers.add_parser("ui", help="Install, test, build, and audit the local UI.")
     return parser
 
 
@@ -197,6 +209,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     arguments = _argument_parser().parse_args(argv)
     if arguments.mode == "fast":
         return run_steps(build_fast_steps(arguments.pytest_targets))
+    if arguments.mode == "ui":
+        return run_steps(build_ui_steps())
     return run_steps(build_full_steps())
 
 

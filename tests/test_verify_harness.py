@@ -81,6 +81,58 @@ def test_editing_schemas_are_audited_by_full_gate() -> None:
     )
 
 
+def test_ui_install_tests_and_build_precede_full_pytest() -> None:
+    verify = load_verify_module()
+    actual = [step.argv for step in verify.build_full_steps(os_name='posix')]
+    expected = [
+        ('npm', '--prefix', 'web', 'ci'),
+        ('npm', 'run', 'ui:test'),
+        ('npm', 'run', 'ui:build'),
+        ('npm', '--prefix', 'web', 'audit', '--omit=dev', '--audit-level=high'),
+    ]
+    assert actual[1:5] == expected
+    assert actual[5] == ('uv', 'run', 'python', '-m', 'pytest')
+    windows = verify.build_ui_steps(os_name='nt')
+    assert all(step.argv[0] == 'npm.cmd' for step in windows)
+
+
+def test_ui_mode_uses_same_registry_and_stops_on_first_failure(tmp_path: Path) -> None:
+    verify = load_verify_module()
+    selected: list[Any] = []
+
+    def record(steps: Any) -> int:
+        selected.extend(steps)
+        return 0
+
+    setattr(verify, 'run_steps', record)
+    assert verify.main(['ui']) == 0
+    assert selected == list(verify.build_ui_steps())
+    verify = load_verify_module()
+    calls: list[list[str]] = []
+
+    def failing(argv: list[str], **_: Any) -> subprocess.CompletedProcess[str]:
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 7)
+
+    assert verify.run_steps(verify.build_ui_steps(), repository_root=tmp_path, run_command=failing, output=lambda _: None) == 7
+    assert len(calls) == 1
+
+
+def test_frontend_ci_sets_node_and_locks_and_runs_windows_browser_checks() -> None:
+    workflow = load_verify_workflow()
+    for name in ('linux-full', 'windows-focused'):
+        job = workflow['jobs'][name]
+        node = next(step for step in job['steps'] if step.get('uses') == 'actions/setup-node@v6')
+        assert node['with']['node-version'] == '22'
+        assert node['with']['cache-dependency-path'].split() == ['package-lock.json', 'web/package-lock.json']
+    commands = workflow_commands(workflow['jobs']['windows-focused'])
+    ui = 'uv run python scripts/verify.py ui'
+    focused = next(command for command in commands if 'scripts/verify.py fast' in command)
+    assert commands.index(ui) < commands.index(focused)
+    assert focused.split().count('tests/test_web_panel_e2e.py') == 1
+    assert any('ffmpeg' in command.lower() for command in commands)
+
+
 def workflow_commands(job: dict[Any, Any]) -> list[str]:
     return [step["run"] for step in job["steps"] if "run" in step]
 
@@ -229,6 +281,10 @@ def test_full_contains_agents_deterministic_baseline_in_order() -> None:
     verify = load_verify_module()
     expected = [
         ("uv", "sync", "--locked", "--all-groups"),
+        ('npm', '--prefix', 'web', 'ci'),
+        ('npm', 'run', 'ui:test'),
+        ('npm', 'run', 'ui:build'),
+        ('npm', '--prefix', 'web', 'audit', '--omit=dev', '--audit-level=high'),
         ("uv", "run", "python", "-m", "pytest"),
         ("uv", "run", "python", "-m", "ruff", "check", "src", "tests"),
         ("uv", "run", "python", "-m", "ruff", "check", "scripts"),

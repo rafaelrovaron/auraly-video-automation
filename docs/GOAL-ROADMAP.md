@@ -1,6 +1,6 @@
 # Auraly Delivery-First Goal Roadmap
 
-**Roadmap vigente:** 2026-09-29
+**Roadmap vigente:** 2026-10-03
 
 Este documento é a ordem operacional dos próximos Goals. O PRD define o produto; este roadmap
 define como chegar a ele sem transformar cada Goal em um projeto grande demais.
@@ -61,7 +61,9 @@ D3A EditProfile, EditManifest & Override Resolution LOCAL_VERIFIED
 D3B Headline A/B Planning & Caption Inputs LOCAL_VERIFIED
 D4A.1 Local Query API & Campaign Status LOCAL_VERIFIED
 D4A.2 Operational Actions & Worker Integration LOCAL_VERIFIED
-D4B React Operations UI & Approximate Preview
+D4B.1 Local Campaign Panel                    LOCAL_VERIFIED
+D4B.2 Operational Forms & Manual Import       PLANNED
+D4B.3 Editing UI & Approximate Preview        PLANNED
 D5A Deterministic Renderer
 D5B Render QC, Review & Delivery
 D6  End-to-End Personal Pilot
@@ -371,7 +373,7 @@ reproduzidos e corrigidos, com gate completo pós-fix. Sem chamada paga ou novo
 
 Actions D4A.2 run 37125176378, SHA `0693674`: Linux 1.677 passed/6 skipped, harness
 15/15; Windows focado 951 passed/12 skipped, 3/3. Confirma Task 1 no Linux, mas não
-Tasks 5–8 ainda locais. PR #2 draft, sem merge. Uso operacional enqueue/start/poll/stop
+Tasks 5–8 ainda locais naquele checkpoint. PR #2 estava draft, sem merge. Uso operacional enqueue/start/poll/stop
 documentado no README; dry-run cria Job sem efeitos de import/plano. Profiles salvam
 metadados imutáveis; o Job valida assets. D4B é o próximo slice, D5 permanece posterior.
 
@@ -385,7 +387,10 @@ correção RED→GREEN resolveu recuperação pública de checkpoint sem novo di
 no plano editorial e race do manifest entre verificação/leitura. Gate pós-fix no código
 `73ca3587ebfd94aa8d3f42a6b9b0744b61b07168`: Windows 15/15, 1.701 passed/24 skipped
 em 396,42 s. Sem minors pendentes. Não houve re-review; regressões e gate pós-fix são
-a evidência das correções. CI desse código ainda depende de publicação autorizada.
+a evidência das correções. Naquele checkpoint, CI ainda dependia de publicação autorizada.
+
+D4A.2 foi integrado em `main` no SHA `9cd8731`: Actions 37146845609 (push) e
+37146846960 (PR) concluídos com sucesso, incluindo Linux e Windows. Sem novo canário pago.
 
 ### Objetivo
 
@@ -417,7 +422,23 @@ negócio.
 
 ## D4B — React Operations UI & Approximate Preview
 
-**Status:** `PLANNED`.
+**Status:** D4B.1 `IMPLEMENTED`, `LOCAL_VERIFIED`; D4B.2 e D4B.3 `PLANNED`.
+
+### Slices e capacidade atual
+
+- D4B.1: painel React/TypeScript/Vite, lista/detalhe, metadados de assets/voz/HeyGen,
+  Jobs/operações, polling com dados anteriores marcados quando stale e start confirmado/stop explícito.
+  API é a única fonte de verdade. Sem criação/import/review, mídia ou preview nesta etapa.
+- D4B.2: formulários de campanhas, import manual batch, review, Voice Master e HeyGen.
+- D4B.3: profiles, overrides, variantes A/B e preview aproximado.
+
+D4B.1 usa dois processos locais (API 8000 e Vite 5173); distribuição estática/launcher
+fica para depois. Worker 404 fora do escopo significa desconhecido; start/stop não
+ganham retry automático. Stop drena o Job ativo, sem cancelar provider ou reembolsar créditos.
+Testes de integração usam navegador/proxy/API reais e mídia sintética, sem créditos.
+Gate Windows de 2026-10-03: `verify.py full`, 19/19 etapas; 41 testes frontend e
+1.710 Python aprovados / 24 skips. Tipos dos três arquivos novos de testes verificados
+também para Linux. Isso não substitui execução Linux/Actions da nova branch, ainda não publicada.
 
 ### Objetivo
 
