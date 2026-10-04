@@ -6,6 +6,31 @@
 Este documento guarda decisões duráveis e fatos verificados. O estado entregue aparece separado
 do produto planejado para impedir que roadmap seja confundido com capacidade existente.
 
+## Entrega atual: D4B.2b.1 — Voice Master UI (2026-10-04)
+
+Implementação na branch `codex/d4b2b1`; integração/Actions ainda pendentes. Reusa React,
+FastAPI, SQLite e workers existentes. Gate completo Windows: 19/19 etapas, 121 testes
+frontend e 1.789 Python aprovados / 25 skips. Browser/proxy/API/SQLite/workers reais
+validaram geração fake sem auto-start, import em duas fases/review e budget gravado
+com resposta 503 sem repost; 13 testes de navegador aprovados. Revisão final pendente.
+Sem nova execução real de provider ou autorização paga usada nos testes.
+
+- orçamento inicial de campanha por GET/POST focado, projeção missing/configured/invalid,
+  confirmação própria, transação serializada, metadata preservada e replay idêntico no-op;
+  não permite editar/reparar budget estabelecido, não é saldo/custo nem autorização de gasto;
+- geração fixa copy aprovada e defaults atuais, responsável/teto/checkbox pagos explícitos,
+  Job `voice.generate` direto e start manual `voice_generate`, sem force-regenerate;
+- import relativo ao project root (Explorer, MP3/WAV até 100 MiB): operação local →
+  Job `voice.import`, starts separados e original preservado; não exige budget;
+- review pela UI após ouvir WAV fora dela: ator e confirmação, motivo na rejeição e
+  na exceção exata de transcript importado; gates/backend intactos;
+- paths/hash/duração/QC e fatos históricos de review persistidos, snapshot stale mantido,
+  guards de DTO/campanha/lifecycle, submit único e aviso de draft; unknown faz GET, não repost;
+  adoção explícita de Job só inspeciona fatos, não prova identidade/autoria de request perdida.
+
+HeyGen UI tem design/plano próprios ainda não iniciados; D4B.3 (profiles/variants/preview)
+e D5 (renderer) continuam roadmap, não capacidade entregue. Histórico abaixo preservado.
+
 ## 1. Resultado desejado
 
 Produzir várias peças verticais a partir de uma única campanha:

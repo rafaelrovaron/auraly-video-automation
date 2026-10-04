@@ -22,6 +22,7 @@ from auraly_pipeline.api.commands import ApiCommands
 from auraly_pipeline.api.contracts import ApiSettings
 from auraly_pipeline.campaigns.domain import CampaignCreate
 from auraly_pipeline.heygen.fake_provider import FakeHeyGenProvider
+from auraly_pipeline.voices.handler import SpeechProvider, TranscriptProvider
 from tests.api_helpers import create_ready_api_fixture
 from tests.test_campaign_domain import valid_campaign_data
 
@@ -55,7 +56,10 @@ def reserve_port(port: int) -> socket.socket:
 
 
 @pytest.fixture(name='panel_servers')
-def panel_servers(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mp4: bytes) -> Iterator[PanelServers]:
+def panel_servers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mp4: bytes,
+    panel_speech_provider: SpeechProvider | None, panel_transcriber: TranscriptProvider | None,
+) -> Iterator[PanelServers]:
     import auraly_pipeline.api.app as module
 
     node = shutil.which('node')
@@ -86,7 +90,8 @@ def panel_servers(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mp4: bytes) -
             return original(self, request, job_id=job_id)
 
         monkeypatch.setattr(ApiCommands, 'execute_operation', holding)
-        monkeypatch.setattr(module, 'ApiCommands', partial(ApiCommands, heygen_provider=provider))
+        monkeypatch.setattr(module, 'ApiCommands', partial(ApiCommands, heygen_provider=provider,
+            speech_provider=panel_speech_provider, transcriber=panel_transcriber))
         app = create_app(settings)
         server = uvicorn.Server(uvicorn.Config(app, host='127.0.0.1', port=8000, log_config=None, access_log=False, ws='none'))
         thread = Thread(target=server.run, kwargs={'sockets': [api_socket]}, daemon=True)
@@ -137,3 +142,13 @@ def panel_servers(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mp4: bytes) -
             thread.join(timeout=15)
             assert not thread.is_alive(), 'Local API fixture did not drain.'
         api_socket.close()
+
+
+@pytest.fixture
+def panel_speech_provider() -> None:
+    return None
+
+
+@pytest.fixture
+def panel_transcriber() -> None:
+    return None

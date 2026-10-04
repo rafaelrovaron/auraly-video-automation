@@ -53,8 +53,14 @@ genérico e não terá timeline estilo CapCut ou preview frame-perfect.
   hashes dos sources; review explícito de imagens. Sem CLI/JSON manual nesse fluxo,
   watch folder, upload, auto-start ou provider. `IMPLEMENTED`, `LOCAL_VERIFIED`:
   gate final Windows 19/19, 96 testes frontend e 1.757 Python / 25 skips; CI deste slice pendente,
-  evidência atual no PROJECT-MEMORY. Voice Master/HeyGen pela UI são D4B.2b planejado;
+  evidência atual no PROJECT-MEMORY. HeyGen pela UI continua planejado;
   edição/preview D4B.3 e renderer D5 continuam não entregues.
+- D4B.2b.1: Voice Master pela UI local, com seleção explícita de copy, budget inicial
+  transacional sem overwrite, autorização de geração separada, import MP3/WAV relativo
+  ao projeto e review após escuta externa. Jobs diretos e wrappers/filhos são acompanhados
+  separadamente; cada worker exige start explícito. Estado de voz vem de GET, não de
+  aceite/worker idle. Exceção de transcript importado permanece restrita e exige motivo.
+  Sem player, upload, force-regenerate, provider novo ou migration; evidência no PROJECT-MEMORY.
 
 ### 2.2 Capacidade alvo deste PRD
 

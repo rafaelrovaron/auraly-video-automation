@@ -63,7 +63,8 @@ D4A.1 Local Query API & Campaign Status LOCAL_VERIFIED
 D4A.2 Operational Actions & Worker Integration LOCAL_VERIFIED
 D4B.1 Local Campaign Panel                    LOCAL_VERIFIED
 D4B.2a Campaign/Copy & Manual Image Import    LOCAL_VERIFIED
-D4B.2b Voice Master & HeyGen Forms            PLANNED
+D4B.2b.1 Voice Master Forms                  IMPLEMENTED (gate/review no PROJECT-MEMORY)
+D4B.2b HeyGen Forms                          PLANNED
 D4B.3 Editing UI & Approximate Preview        PLANNED
 D5A Deterministic Renderer
 D5B Render QC, Review & Delivery
@@ -424,7 +425,8 @@ negócio.
 ## D4B — React Operations UI & Approximate Preview
 
 **Status:** D4B.1 e D4B.2a `IMPLEMENTED`, `LOCAL_VERIFIED`;
-D4B.2b e D4B.3 `PLANNED`.
+D4B.2b.1 implementa Voice Master; evidência de verificação no PROJECT-MEMORY.
+Formulários HeyGen (design/plano próprios) e D4B.3 permanecem `PLANNED`.
 
 Gate final D4B.2a Windows de 2026-10-04: 19/19 etapas; 96 testes frontend e 1.757 Python
 aprovados / 25 skips (472,17 s). Browser/proxy/API/worker reais cobrem import, review e
@@ -440,7 +442,11 @@ CI Linux/Windows pendente de publicação. Nenhuma chamada paga.
 - D4B.2a: campanhas/copy aprovada e versões, pasta preparada/Explorer, associação explícita,
   publicação imutável pelo worker, dry-run diagnóstico, snapshot dos sources e review manual.
   Sem auto-start/watch/upload, provider ou migration. Fluxo operador sem CLI/JSON manual.
-- D4B.2b: formulários de Voice Master e HeyGen; próximo slice para design/plano aprovado.
+- D4B.2b.1: orçamento inicial GET/POST sem Jobs; gerar ElevenLabs ou importar MP3/WAV,
+  starts explícitos `voice_generate` ou `local_operations` → `voice_import`, review auditável
+  após escuta externa. Backend/QC preservados, sem player/upload/novas dependências/migrations.
+  Unknown não dispara repost; wrapper concluído não equivale a filho concluído ou voz aprovada.
+- D4B.2b HeyGen: próximo slice para design/plano aprovados; não entregue nesta etapa.
 - D4B.3: profiles, overrides, variantes A/B e preview aproximado.
 
 D4B.1 usa dois processos locais (API 8000 e Vite 5173); distribuição estática/launcher

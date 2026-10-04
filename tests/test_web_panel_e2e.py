@@ -11,6 +11,7 @@ import pytest
 from tests.api_helpers import database_dump
 from tests.web_panel_support import PanelServers, reserve_port
 from tests.web_panel_support import panel_servers as provide_panel_servers  # noqa: F401
+from tests.web_panel_support import panel_speech_provider, panel_transcriber  # noqa: F401
 
 pytest_plugins = ['tests.test_heygen_video_media']
 
@@ -111,7 +112,9 @@ def test_panel_accessible_at_narrow_width(panel_servers: PanelServers, panel_pag
     panel_page.get_by_role('button', name='Cancelar', exact=True).focus()
     panel_page.keyboard.press('Enter')
     expect(panel_page.get_by_role('group', name='Confirmação de início')).to_have_count(0)
-    assert panel_page.evaluate('document.documentElement.scrollWidth <= window.innerWidth')
+    assert panel_page.evaluate('document.documentElement.scrollWidth <= window.innerWidth'), panel_page.evaluate(
+        'Array.from(document.querySelectorAll("select,input,button,textarea")).filter(el => el.getBoundingClientRect().right > innerWidth).map(el => ({tag:el.tagName,label:el.closest("label")?.textContent}))'
+    )
     assert panel_servers.provider.events == []
 
 

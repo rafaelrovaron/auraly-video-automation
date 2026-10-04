@@ -38,7 +38,7 @@ def test_all_spec_get_routes_and_openapi(tmp_path: Path, mp4: bytes) -> None:
         campaigns = client.get("/api/v1/campaigns").json()["items"]
         assert campaigns[0]["campaignId"] == "campaign-one"
         jobs = client.get("/api/v1/campaigns/campaign-one/jobs").json()["items"]
-        for suffix in ["", "/status", "/images", "/voices", "/heygen/renders", "/jobs",
+        for suffix in ["", "/status", "/budget", "/images", "/voices", "/heygen/renders", "/jobs",
                        "/jobs/" + jobs[0]["jobId"], "/editing/plans",
                        f"/editing/plans/{request.video_id}/{plan.plan_hash}"]:
             response = client.get("/api/v1/campaigns/campaign-one" + suffix)
@@ -47,7 +47,7 @@ def test_all_spec_get_routes_and_openapi(tmp_path: Path, mp4: bytes) -> None:
         assert client.get("/api/v1/editing/profiles/plain/1").status_code == 200
         assert client.get("/docs").status_code == 200
         schema = client.get("/openapi.json").json()
-        assert sum("get" in path for path in schema["paths"].values()) == 15
+        assert sum("get" in path for path in schema["paths"].values()) == 16
         for path in schema["paths"].values():
             if "get" not in path:
                 continue

@@ -55,12 +55,15 @@ entrega.
   associações manuais imutáveis, dry-run diagnóstico, importação ligada ao snapshot das
   fontes e review de imagens pela UI. Evidência atual no PROJECT-MEMORY;
   sem novas chamadas pagas. Actions deste slice pendentes de publicação.
+- D4B.2b.1: formulários de orçamento inicial, geração/importação e review de Voice Master;
+  workers explícitos e acompanhamento separado de operação local/Job filho. Verificação
+  deste slice registrada no PROJECT-MEMORY; sem nova chamada paga.
 
 ### Não entregue ainda
 
 - render final com headline, captions, música e framing configuráveis;
 - renderização das variações A/B já planejadas, reutilizando voz, imagem e HeyGen;
-- formulários de voz/HeyGen pela interface (D4B.2b);
+- formulários de HeyGen pela interface (próximo slice D4B.2b);
 - configuração editorial, profiles e variants pela interface (D4B.3);
 - preview aproximado e fluxo end-to-end operável pela interface.
 
@@ -304,7 +307,33 @@ portas e falham se estiverem ocupadas, sem encerrar processos de terceiros.
 
 ## Próximo slice de desenvolvimento
 
-O próximo slice é **D4B.2b — formulários de Voice Master e HeyGen**; D4B.3 adicionará
+### Voice Master na interface (D4B.2b.1)
+
+Dentro da campanha, em **Voice Masters**:
+
+1. Selecione explicitamente uma versão aprovada da copy. A headline é visual;
+   somente hook/body/CTA compõem a narração.
+2. Para gerar: configure o orçamento inicial (moeda de três letras maiúsculas e
+   limite em centavos), informe Voice ID/Model ID do ElevenLabs, responsável e teto
+   da geração. Confirme o gasto e enfileire. Inicie `voice_generate` no controle de worker.
+3. Para importar: copie o MP3/WAV (até 100 MiB) para dentro do project root pelo Explorer
+   e informe o caminho relativo, por exemplo `imports/voice.wav`. Não exige budget.
+   Enfileire, inicie `local_operations`, observe o Job filho e inicie `voice_import`.
+4. Consulte os fatos persistidos. Ouça o WAV processado fora do painel, usando o
+   caminho relativo e o work root configurado no servidor; não há player/upload.
+5. Selecione a voz, responsável e confirmação de escuta/revisão. Enfileire aprovação
+   ou rejeição (motivo obrigatório) e inicie `local_operations`. Aprovação só é fato
+   após execução e nova consulta. A exceção de transcrição importada exige motivo e
+   não permite ignorar headline falada, mismatch ou outros findings de QC.
+
+Budget é configuração inicial, não saldo/estimativa ou autorização automática; limite/moeda
+já definidos não são editáveis aqui. Cada start processa todos os Jobs elegíveis daquele
+tipo na campanha. Nada inicia ao abrir/recarregar. A mesma identidade pode reutilizar
+voz/Job: não há regeneração forçada. Resultado perdido/inválido fica desconhecido e
+não é reenviado; consulte Jobs e operações conhecidos explicitamente. Coincidência de
+copy/provider não identifica uma request perdida e consulta não prova autoria.
+
+O próximo slice é **D4B.2b — formulários HeyGen**, com design/plano próprios; D4B.3 adicionará
 profiles, variantes A/B e preview aproximado. D5 adicionará o renderer.
 Revisão visual final do vídeo do canário continua humana; configurar um manifest não aprova o vídeo.
 
