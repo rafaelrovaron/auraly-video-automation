@@ -1,8 +1,8 @@
 # D4B.2b.1 — Voice Master na UI local
 
 Data: 2026-10-04.
-Status: design conversacional aprovado, incluindo orçamento de campanha;
-esta especificação escrita aguarda revisão do usuário.
+Status: design conversacional e especificação escrita aprovados pelo usuário,
+incluindo orçamento de campanha, em 2026-10-04.
 Capacidade proposta: PLANNED, não implementada.
 
 ## Objetivo e baseline
