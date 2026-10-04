@@ -17,7 +17,7 @@ from auraly_pipeline.api.action_contracts import (
     VoiceImportOperation, VoiceImportResult, VoiceReviewOperation, VoiceReviewResult,
     HeyGenAssetsOperation, HeyGenAssetsResult, HeyGenVideoPlanOperation, HeyGenVideoPlanResult,
     HeyGenVideoSubmitOperation, HeyGenVideoSubmitResult, HeyGenReconcileOperation, HeyGenReconcileResult,
-    ImageReviewAction,
+    ImageReviewAction, ImageImportDiagnostic,
 )
 from auraly_pipeline.api.contracts import (
     ApiSettings, ERROR_MESSAGES, ErrorCode, QueryError, RenderSummary,
@@ -40,7 +40,7 @@ from auraly_pipeline.heygen.video_domain import HeyGenRender
 from auraly_pipeline.heygen.video_handler import HeyGenVideoHandler
 from auraly_pipeline.heygen.video_repository import HeyGenVideoRepository
 from auraly_pipeline.heygen.video_service import HeyGenVideoService
-from auraly_pipeline.images.import_batch import ImageImportBatch, ImageImportError, ImageImportService
+from auraly_pipeline.images.import_batch import ImageImportBatch, ImageImportError, ImageImportService, ImageImportValidationError
 from auraly_pipeline.images.service import ImageService, ImageError, ImageCandidateNotFoundError
 from auraly_pipeline.jobs.db_models import JobRow
 from auraly_pipeline.jobs.domain import JobSubmit, RetrySafety
@@ -343,6 +343,11 @@ class ApiCommands:
         elif isinstance(request, HeyGenReconcileOperation):
             self.require_render(request.campaign_id, request.render_id)
         payload = cast(dict[str, JsonValue], request.model_dump(mode="json", by_alias=True))
+        if isinstance(request, ImageImportOperation):
+            # Preserve identities of legacy persisted requests, before these fields existed.
+            for key, default in (("includeDiagnostics", False), ("validationId", None), ("expectedSources", None)):
+                if payload[key] == default:
+                    payload.pop(key)
         identity = hashlib.sha256(json.dumps(
             payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
         ).encode()).hexdigest()
@@ -544,17 +549,35 @@ class ApiCommands:
                 path, digest = self._manifest(request.manifest_path, request.campaign_id)
                 if digest != request.manifest_sha256:
                     raise QueryError("artifact_invalid")
-                plan = self.images.plan(path, expected_sha256=request.manifest_sha256)
+                try:
+                    plan = self.images.plan(path, expected_sha256=request.manifest_sha256)
+                except ImageImportValidationError as error:
+                    if request.mode != "dry_run" or not request.include_diagnostics:
+                        raise
+                    return ImageImportOperationResult(
+                        mode="dry_run", total=len(self.campaigns.get_campaign(request.campaign_id).scene_variants),
+                        created=0, reused=0, approved=0, items=[], valid=False,
+                        manifest_sha256=digest, validation_id=request.validation_id,
+                        issues=[ImageImportDiagnostic(code=issue.code, variant_id=issue.variant_id)
+                                for issue in error.issues],
+                    )
                 if plan.batch.campaign_id != request.campaign_id:
                     raise QueryError("artifact_invalid")
                 if request.mode == "dry_run":
                     return ImageImportOperationResult(
                         mode=request.mode, total=len(plan.items), created=0, reused=0, approved=0,
+                        valid=True if request.include_diagnostics else None,
+                        manifest_sha256=digest, validation_id=request.validation_id,
                         items=[ImageImportItemResult(
                             variant_id=item.variant_id, scene_variant_id=item.scene_variant_id,
-                            action=item.action,
+                            action=item.action, sha256=item.sha256, width=item.width,
+                            height=item.height, size_bytes=item.size_bytes, format=item.format,
                         ) for item in plan.items],
                     )
+                if request.expected_sources is not None:
+                    expected = {item.variant_id: item.sha256 for item in request.expected_sources}
+                    if expected != {item.variant_id: item.sha256 for item in plan.items}:
+                        raise QueryError("artifact_invalid")
                 imported = self.images.execute(plan)
                 return ImageImportOperationResult(
                     mode=request.mode, total=imported.total, created=imported.created,

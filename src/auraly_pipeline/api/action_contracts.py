@@ -29,11 +29,34 @@ class ImagePrepareOperation(OperationRequest):
     output_path: str = Field(min_length=1)
 
 
+class ImageSourceSnapshot(ContractModel):
+    variant_id: str = Field(pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+    sha256: Sha
+
+
 class ImageImportOperation(OperationRequest):
     operation: Literal["image_import"] = "image_import"
     manifest_path: str = Field(min_length=1)
     mode: Literal["dry_run", "execute"]
     manifest_sha256: Sha | None = None
+    include_diagnostics: bool = False
+    validation_id: str | None = Field(default=None, min_length=1, max_length=120)
+    expected_sources: list[ImageSourceSnapshot] | None = Field(default=None, min_length=1)
+    _validation_id = field_validator("validation_id")(
+        lambda value: None if value is None else validate_safe_identifier(value, "validation_id", max_length=120)
+    )
+
+    @model_validator(mode="after")
+    def compatible_fields(self) -> Self:
+        if self.mode != "dry_run" and (self.include_diagnostics or self.validation_id is not None):
+            raise ValueError("diagnostics and validationId require dry_run")
+        if self.expected_sources is not None:
+            if self.mode != "execute":
+                raise ValueError("source snapshot requires execute")
+            ids = [source.variant_id for source in self.expected_sources]
+            if len(ids) != len(set(ids)):
+                raise ValueError("source snapshot variant IDs must be unique")
+        return self
 
 
 class ImageManifestOperation(OperationRequest):
@@ -132,6 +155,11 @@ class ImageImportItemResult(ContractModel):
     scene_variant_id: str
     image_candidate_id: str | None = None
     action: Literal["create", "reuse"]
+    sha256: Sha | None = None
+    width: int | None = Field(default=None, gt=0)
+    height: int | None = Field(default=None, gt=0)
+    size_bytes: int | None = Field(default=None, gt=0)
+    format: str | None = Field(default=None, min_length=1)
 
 
 class ImageManifestResult(ContractModel):
@@ -143,6 +171,24 @@ class ImageManifestResult(ContractModel):
     _paths = field_validator("manifest_path", "images_path")(relative_path)
 
 
+IMAGE_DIAGNOSTIC_CODES = frozenset({
+    "image_import_manifest_invalid", "image_import_campaign_not_found",
+    "image_import_variant_coverage_invalid", "image_import_source_path_invalid",
+    "image_import_media_invalid", "image_import_orientation_invalid",
+    "image_import_approved_candidate_conflict", "image_validation_failed",
+})
+
+
+class ImageImportDiagnostic(ContractModel):
+    code: str
+    variant_id: str | None = Field(default=None, pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+
+    @field_validator("code")
+    @classmethod
+    def safe_code(cls, value: str) -> str:
+        return value if value in IMAGE_DIAGNOSTIC_CODES else "image_validation_failed"
+
+
 class ImageImportOperationResult(ContractModel):
     operation: Literal["image_import"] = "image_import"
     mode: Literal["dry_run", "execute"]
@@ -151,6 +197,10 @@ class ImageImportOperationResult(ContractModel):
     reused: int
     approved: int
     items: list[ImageImportItemResult]
+    valid: bool | None = None
+    manifest_sha256: Sha | None = None
+    validation_id: str | None = None
+    issues: list[ImageImportDiagnostic] = Field(default_factory=list)
 
 
 class EditPlanResult(ContractModel):
