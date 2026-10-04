@@ -1,7 +1,7 @@
 # D4B.2a — Campanhas, copy e importação manual na UI local
 
 Data: 2026-10-04.
-Status: design conversacional aprovado; spec escrita aguardando revisão do usuário.
+Status: design conversacional e spec escrita aprovados pelo usuário em 2026-10-04.
 Capacidade descrita abaixo: PLANNED, não implementada.
 
 ## Objetivo e baseline entregue
