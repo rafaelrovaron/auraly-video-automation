@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ApiError, campaignPath, jobSummary, object, post, read } from './api';
 import type { CampaignDetail, Items, JobSummary, VoiceSummary } from './api';
-import { campaignBudgetView, voiceSubmission, voiceOperationView } from './voiceApi';
+import { campaignBudgetView, voiceSubmission, voiceOperationView, permitsTranscriptReview } from './voiceApi';
 import type { CampaignBudgetView, VoiceOperationView } from './voiceApi';
 import { usePolling } from './usePolling';
 import type { RemoteState } from './usePolling';
@@ -34,7 +34,14 @@ function VoiceForms({campaignId, detail, voices, jobs}: Props) {
   const [sourcePath, setSourcePath] = useState('');
   const [importConfirmed, setImportConfirmed] = useState(false);
   const [requestId, setRequestId] = useState('');
-  const [wrapper, setWrapper] = useState<{jobId: string; kind: 'voice_import' | 'voice_review' | null} | null>(null);
+  const [wrapper, setWrapper] = useState<{jobId: string; kind: 'voice_import' | 'voice_review' | null; voiceId?: string} | null>(null);
+  const [selectedVoice, setSelectedVoice] = useState('');
+  const [reviewActor, setReviewActor] = useState('');
+  const [reason, setReason] = useState('');
+  const [listened, setListened] = useState(false);
+  const [rejectionConfirmed, setRejectionConfirmed] = useState(false);
+  const [reviewObservation, setReviewObservation] = useState<{voiceId: string; status: string; minimumRead: number} | null>(null);
+  const [reviewNotice, setReviewNotice] = useState('');
   const clearDirty = useUnsavedChanges(dirty || unknown || busy);
   const alive = useRef(true), lock = useRef(false);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
@@ -48,6 +55,25 @@ function VoiceForms({campaignId, detail, voices, jobs}: Props) {
   const canGenerate = !blocked && budgetFresh && budget.data?.state === 'configured' && copy
     && /^[A-Za-z0-9_-]{1,120}$/.test(voiceId) && /^[A-Za-z0-9_-]{1,120}$/.test(modelId)
     && actorValid(actor) && positive(ceiling) && Number(ceiling) <= budget.data.limitCents && paid;
+  const reviewVoice = voices.data?.items.find(item => item.voiceMasterId === selectedVoice && item.campaignId === campaignId);
+  const exception = reviewVoice ? permitsTranscriptReview(reviewVoice) : false;
+  const reviewable = !blocked && reviewVoice?.status === 'review_required' && actorValid(reviewActor);
+  const canApprove = reviewable && reviewVoice?.processedAudioPath && reviewVoice.processedSha256 && reviewVoice.headlineSpoken === false
+    && (exception ? reason.trim().length > 0 : reviewVoice.transcriptMatchStatus === 'matched' && reviewVoice.qcFindings.length === 0) && listened;
+  const canReject = reviewable && reason.trim().length > 0 && rejectionConfirmed;
+  const editReview = (action: () => void) => {action(); setListened(false); setRejectionConfirmed(false); setDirty(true);};
+  const completedReview = useCallback(() => {
+    const minimumRead = voices.refresh();
+    setReviewObservation(previous => previous ? {...previous, minimumRead} : null);
+  }, [voices.refresh]);
+  useEffect(() => {
+    if (!reviewObservation || voices.error || (voices.lastSuccessReadId ?? 0) < reviewObservation.minimumRead) return;
+    const current = voices.data?.items.find(item => item.voiceMasterId === reviewObservation.voiceId && item.campaignId === campaignId);
+    if (current && current.status !== reviewObservation.status) {
+      setReviewNotice(`Estado observado: ${current.voiceMasterId} · ${current.status}; não confirma autoria do comando.`);
+      setReviewObservation(null);
+    }
+  }, [reviewObservation, voices.data, voices.error, voices.lastSuccessReadId, campaignId]);
 
   useEffect(() => {
     if (!budgetIntent || budget.error || (budget.lastSuccessReadId ?? 0) < budgetIntent.minimumRead) return;
@@ -121,6 +147,31 @@ function VoiceForms({campaignId, detail, voices, jobs}: Props) {
     }
   };
 
+  const review = async (action: 'approve' | 'reject') => {
+    if (lock.current || !reviewVoice || !(action === 'approve' ? canApprove : canReject)) return;
+    const intent = {voiceId: reviewVoice.voiceMasterId, status: reviewVoice.status, minimumRead: 0};
+    lock.current = true; setBusy(true); setListened(false); setRejectionConfirmed(false); setNotice(''); setReviewNotice('');
+    let observe = false;
+    try {
+      const result = await post<unknown>(campaignPath(campaignId, `/voices/${encodeURIComponent(intent.voiceId)}/review`), {
+        operation: 'voice_review', campaignId, voiceId: intent.voiceId, action, actor: reviewActor, reason: action === 'reject' || exception ? reason.trim() : null});
+      if (!alive.current) return;
+      if (!voiceSubmission(result) || result.operation !== 'voice_review' || result.campaignId !== campaignId) throw new ApiError('command_unknown');
+      observe = true; setWrapper({jobId: result.jobId, kind: 'voice_review', voiceId: intent.voiceId});
+      setNotice('Review enfileirado, não é aprovação. Inicie local_operations e consulte a voz persistida.');
+      setDirty(false); clearDirty();
+    } catch (error) {
+      if (!alive.current) return;
+      const failure = error instanceof ApiError ? error : new ApiError('command_unknown');
+      observe = failure.code === 'command_unknown'; setUnknown(observe); setNotice(`${failure.code}: ${failure.message}`);
+    } finally {
+      if (alive.current) {
+        intent.minimumRead = voices.refresh(); if (observe) setReviewObservation(intent);
+        jobs.refresh(); setBusy(false); lock.current = false;
+      }
+    }
+  };
+
   return <section aria-label="Operação de voz"><h3>Operar Voice Master</h3>
     {!connected && <p role="alert">Leituras de voz desatualizadas ou indisponíveis. Atualize a campanha.</p>}
     <section aria-label="Orçamento da campanha"><h4>Orçamento da campanha</h4>
@@ -172,14 +223,37 @@ function VoiceForms({campaignId, detail, voices, jobs}: Props) {
       {jobs.data?.items.filter(item => item.campaignId === campaignId && item.jobType === 'api.local.operation').map(item => <option key={item.jobId} value={item.jobId}>{item.jobId}</option>)}
     </select></label>
     <p>Inspecionar um Job conhecido não o associa a uma intenção cuja resposta foi perdida.</p>
-    {wrapper && <VoiceOperationMonitor key={wrapper.jobId} campaignId={campaignId} jobId={wrapper.jobId} kind={wrapper.kind} onChange={voices.refresh} />}
+    {wrapper && <VoiceOperationMonitor key={wrapper.jobId} campaignId={campaignId} jobId={wrapper.jobId} kind={wrapper.kind} voiceId={wrapper.voiceId}
+      onChange={voices.refresh} onComplete={completedReview} />}
+    <label>Voice Master para revisar <select value={selectedVoice} disabled={!connected || busy} onChange={event => {
+      setSelectedVoice(event.target.value); setReviewActor(''); setReason(''); setListened(false); setRejectionConfirmed(false); setReviewNotice(''); setDirty(true);
+    }}><option value="">Selecione uma voz persistida</option>{voices.data?.items.filter(item => item.campaignId === campaignId).map(item =>
+      <option key={item.voiceMasterId} value={item.voiceMasterId}>{item.voiceMasterId} · v{item.copyMasterVersion} · {item.status}</option>)}
+    </select></label>
+    {reviewVoice && <div><p>Revisando {reviewVoice.voiceMasterId} · copy v{reviewVoice.copyMasterVersion} · {reviewVoice.provider} · {reviewVoice.status}</p>
+      <p>WAV: {reviewVoice.processedAudioPath ?? 'Não disponível'} · SHA256: {reviewVoice.processedSha256 ?? 'Não disponível'} · duração: {reviewVoice.durationSeconds ?? 'Não disponível'} s</p>
+      <p>Transcrição: {reviewVoice.transcriptMatchStatus ?? 'Não disponível'} · headline falada: {String(reviewVoice.headlineSpoken)} · QC: {reviewVoice.qcFindings.join('; ') || 'Sem findings'}</p>
+      <p>Ouça o WAV fora do painel: combine o caminho relativo acima com o work root configurado no servidor. A existência do arquivo não significa aprovação.</p>
+      {exception && <p>Exceção restrita: transcrição importada requer revisão humana. Motivo obrigatório; o backend mantém os gates de aprovação.</p>}
+      <div><label>Responsável pela revisão de voz <input value={reviewActor} disabled={blocked} onChange={event => editReview(() => setReviewActor(event.target.value))} /></label>
+        <label>Motivo da revisão de voz <textarea value={reason} disabled={blocked} onChange={event => editReview(() => setReason(event.target.value))} /></label>
+        <label><input type="checkbox" checked={listened} disabled={blocked} onChange={event => setListened(event.target.checked)} />Ouvi o WAV processado e revisei os resultados</label>
+        <label><input type="checkbox" checked={rejectionConfirmed} disabled={blocked} onChange={event => setRejectionConfirmed(event.target.checked)} />Revisei os resultados para rejeitar</label>
+        <button disabled={!canApprove} onClick={() => {void review('approve');}}>Enfileirar aprovação de voz</button>
+        <button disabled={!canReject} onClick={() => {void review('reject');}}>Enfileirar rejeição de voz</button>
+      </div></div>}
+    {reviewNotice && <p role="status">{reviewNotice}</p>}
   </section>;
 }
 
-function VoiceOperationMonitor({campaignId, jobId, kind, onChange}: {campaignId: string; jobId: string; kind: 'voice_import' | 'voice_review' | null; onChange: () => void}) {
+function VoiceOperationMonitor({campaignId, jobId, kind, voiceId, onChange, onComplete}: {campaignId: string; jobId: string; kind: 'voice_import' | 'voice_review' | null;
+  voiceId?: string; onChange: () => void; onComplete: () => void}) {
   const operation = usePolling(`${campaignId}:voice-operation:${jobId}`, signal => read<VoiceOperationView>(campaignPath(campaignId, `/operations/${encodeURIComponent(jobId)}`), signal,
-    value => voiceOperationView(value) && value.campaignId === campaignId && value.jobId === jobId && (kind === null || value.operation === kind)), 2000);
+    value => voiceOperationView(value) && value.campaignId === campaignId && value.jobId === jobId && (kind === null || value.operation === kind)
+      && (!voiceId || !value.result || value.result.voiceMasterId === voiceId)), 2000);
   useEffect(() => { if (operation.data && !operation.error) onChange(); }, [operation.data?.status, operation.error, onChange]);
+  useEffect(() => { if (operation.data?.status === 'completed' && operation.data.operation === 'voice_review' && !operation.error) onComplete(); },
+    [operation.data?.status, operation.data?.operation, operation.error, onComplete]);
   const result = !operation.error && operation.data?.status === 'completed' ? operation.data.result : null;
   return <div>
     {operation.error && <p role="alert">{operation.error.message} ({operation.error.code}). Dados desatualizados.</p>}

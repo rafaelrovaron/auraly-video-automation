@@ -1,5 +1,14 @@
 import { expect, it } from 'vitest';
-import { campaignBudgetView, voiceSubmission, voiceOperationView } from './voiceApi';
+import { campaignBudgetView, voiceSubmission, voiceOperationView, permitsTranscriptReview } from './voiceApi';
+import type { VoiceSummary } from './api';
+
+it('test_transcript_exception_guard_is_exact', () => {
+  const voice = {provider: 'imported', transcriptMatchStatus: 'review_required', headlineSpoken: false,
+    qcFindings: ['The narration transcript requires human review.']} as VoiceSummary;
+  expect(permitsTranscriptReview(voice)).toBe(true);
+  for (const delta of [{provider: 'elevenlabs'}, {headlineSpoken: null}, {headlineSpoken: true}, {transcriptMatchStatus: 'mismatched'}, {qcFindings: [...voice.qcFindings, 'Other']}])
+    expect(permitsTranscriptReview({...voice, ...delta})).toBe(false);
+});
 
 it('test_voice_operation_result_requires_exact_kind_and_complete_ids', () => {
   const op = {jobId: 'wrapper', campaignId: 'campaign', operation: 'voice_import', status: 'completed', errorCode: null,

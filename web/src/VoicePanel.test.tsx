@@ -190,3 +190,63 @@ it('test_pending_navigation_warns_and_late_import_is_ignored', async () => {
   await act(async () => finish(Response.json({operation: 'voice_import', campaignId: 'campaign-one', jobId: 'wrapper-one'})));
   expect(screen.queryByText('Fase 2: processar voz importada')).toBeNull();
 });
+
+const voice: VoiceSummary = {voiceMasterId: 'voice-one', campaignId: 'campaign-one', copyMasterId: 'copy-one', copyMasterVersion: 1,
+  generation: 1, provider: 'elevenlabs', status: 'review_required', processedAudioPath: 'voices/one.wav', processedSha256: 'b'.repeat(64),
+  durationSeconds: 1.2, transcriptMatchStatus: 'matched', headlineSpoken: false, qcFindings: [], approvedAt: null, approvedBy: null,
+  approvalReviewReason: null, rejectedAt: null, rejectedBy: null, rejectionReason: null};
+const reviewProps = (v = voice) => ({...props(), voices: state({items: [v, {...v, voiceMasterId: 'voice-two'}]})});
+async function fillReview() {
+  fireEvent.change(screen.getByLabelText('Voice Master para revisar'), {target: {value: 'voice-one'}});
+  fireEvent.change(screen.getByLabelText('Responsável pela revisão de voz'), {target: {value: 'reviewer'}});
+}
+const approveVoice = () => screen.getByRole('button', {name: 'Enfileirar aprovação de voz'});
+const listen = () => screen.getByLabelText('Ouvi o WAV processado e revisei os resultados');
+it('test_review_requires_actor_and_listening_confirmation', async () => {
+  const calls = fakeApi(undefined, async () => Response.json({operation: 'voice_review', campaignId: 'campaign-one', jobId: 'wrapper-one'}));
+  wrapReads({...wrapper, operation: 'voice_review', status: 'queued', result: null}); render(<VoicePanel {...reviewProps()} />);
+  fireEvent.change(screen.getByLabelText('Voice Master para revisar'), {target: {value: 'voice-one'}}); fireEvent.click(listen());
+  expect((approveVoice() as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.change(screen.getByLabelText('Responsável pela revisão de voz'), {target: {value: 'reviewer'}});
+  expect((listen() as HTMLInputElement).checked).toBe(false); fireEvent.click(listen()); fireEvent.click(approveVoice());
+  await screen.findByText(/Review enfileirado/);
+  expect(calls[0]).toEqual({path: '/api/v1/campaigns/campaign-one/voices/voice-one/review', body: {operation: 'voice_review', campaignId: 'campaign-one', voiceId: 'voice-one', action: 'approve', actor: 'reviewer', reason: null}});
+});
+it('test_transcript_exception_is_narrow_and_requires_reason', async () => {
+  fakeApi(); render(<VoicePanel {...reviewProps({...voice, provider: 'imported', transcriptMatchStatus: 'review_required', qcFindings: ['The narration transcript requires human review.']})} />);
+  await fillReview(); fireEvent.click(listen()); expect((approveVoice() as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.change(screen.getByLabelText('Motivo da revisão de voz'), {target: {value: 'Checked narration'}}); fireEvent.click(listen());
+  expect((approveVoice() as HTMLButtonElement).disabled).toBe(false);
+});
+it('test_mismatched_headline_or_extra_findings_cannot_be_approved', async () => {
+  fakeApi(); const view = render(<VoicePanel {...reviewProps({...voice, transcriptMatchStatus: 'mismatched'})} />);
+  await fillReview(); fireEvent.click(listen()); expect((approveVoice() as HTMLButtonElement).disabled).toBe(true);
+  for (const delta of [{headlineSpoken: true}, {headlineSpoken: null}, {qcFindings: ['Other']}, {status: 'failed'}, {status: 'unknown'}]) {
+    view.rerender(<VoicePanel {...reviewProps({...voice, ...delta})} />); expect((approveVoice() as HTMLButtonElement).disabled).toBe(true);
+  }
+  view.rerender(<VoicePanel {...reviewProps({...voice, processedAudioPath: null, processedSha256: null})} />);
+  fireEvent.change(screen.getByLabelText('Motivo da revisão de voz'), {target: {value: 'No usable audio'}});
+  fireEvent.click(screen.getByLabelText('Revisei os resultados para rejeitar'));
+  expect((screen.getByRole('button', {name: 'Enfileirar rejeição de voz'}) as HTMLButtonElement).disabled).toBe(false);
+});
+it('test_review_accepted_is_not_approval_until_worker_and_fresh_get', async () => {
+  fakeApi(undefined, async () => Response.json({operation: 'voice_review', campaignId: 'campaign-one', jobId: 'wrapper-one'}));
+  wrapReads({...wrapper, operation: 'voice_review', status: 'queued', result: null}); render(<VoicePanel {...reviewProps()} />);
+  await fillReview(); fireEvent.click(listen()); fireEvent.click(approveVoice());
+  await screen.findByText(/voice_review · queued/); expect(screen.queryByText(/Estado observado.*approved/)).toBeNull();
+});
+it('test_lost_review_response_observes_state_without_claiming_authorship', async () => {
+  const calls = fakeApi(undefined, async () => Response.json({error: {code: 'internal_error'}}, {status: 503}));
+  const view = render(<VoicePanel {...reviewProps()} />); await fillReview(); fireEvent.click(listen()); fireEvent.click(approveVoice());
+  await screen.findByText(/command_unknown/);
+  view.rerender(<VoicePanel {...reviewProps()} voices={state({items: [{...voice, status: 'approved', approvedBy: 'someone-else', approvedAt: 'later'}]}, 2)} />);
+  await screen.findByText(/Estado observado.*approved.*não confirma autoria/); fireEvent.click(approveVoice()); expect(calls).toHaveLength(1);
+});
+it('test_changing_selected_voice_clears_actor_reason_and_confirmations', async () => {
+  fakeApi(); render(<VoicePanel {...reviewProps()} />); await fillReview();
+  fireEvent.change(screen.getByLabelText('Motivo da revisão de voz'), {target: {value: 'Reason'}}); fireEvent.click(listen());
+  fireEvent.change(screen.getByLabelText('Voice Master para revisar'), {target: {value: 'voice-two'}});
+  expect((screen.getByLabelText('Responsável pela revisão de voz') as HTMLInputElement).value).toBe('');
+  expect((screen.getByLabelText('Motivo da revisão de voz') as HTMLInputElement).value).toBe('');
+  expect((listen() as HTMLInputElement).checked).toBe(false);
+});

@@ -108,6 +108,8 @@ export function CampaignDetailPanel({ campaignId }: { campaignId: string }) {
         ['Copy', `${voice.copyMasterId} · v${voice.copyMasterVersion}`], ['Provider', voice.provider], ['Status', statusLabel(voice.status)], ['WAV processado', voice.processedAudioPath],
         ['Duração (s)', voice.durationSeconds], ['Transcrição', voice.transcriptMatchStatus], ['Headline falada', voice.headlineSpoken === null ? null : voice.headlineSpoken ? 'Sim' : 'Não'],
         ['QC', voice.qcFindings.join(', ') || 'Sem findings'], ['Review', voice.approvalReviewReason ?? voice.rejectionReason],
+        ['Geração', voice.generation], ['SHA256 processado', voice.processedSha256], ['Aprovada em', voice.approvedAt], ['Aprovada por', voice.approvedBy],
+        ['Motivo da aprovação', voice.approvalReviewReason], ['Rejeitada em', voice.rejectedAt], ['Rejeitada por', voice.rejectedBy], ['Motivo da rejeição', voice.rejectionReason],
       ]} /></article>)}
       {voices.data?.items.length === 0 && <p>Nenhum Voice Master.</p>}
     </Section>

@@ -1,4 +1,5 @@
 import { object } from './api';
+import type { VoiceSummary } from './api';
 
 export type CampaignBudgetView = {state: 'configured'; currency: string; limitCents: number}
   | {state: 'missing' | 'invalid'; currency: null; limitCents: null};
@@ -27,4 +28,9 @@ export function voiceOperationView(value: unknown): value is VoiceOperationView 
   if (value.result === null) return value.status !== 'completed';
   return object(value.result) && value.result.operation === value.operation && nonempty(value.result.voiceMasterId)
     && (value.operation === 'voice_import' ? nonempty(value.result.jobId) : nonempty(value.result.status));
+}
+
+export function permitsTranscriptReview(voice: VoiceSummary): boolean {
+  return voice.provider === 'imported' && voice.transcriptMatchStatus === 'review_required' && voice.headlineSpoken === false
+    && voice.qcFindings.length === 1 && voice.qcFindings[0] === 'The narration transcript requires human review.';
 }
