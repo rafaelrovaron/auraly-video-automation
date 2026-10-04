@@ -6,17 +6,20 @@ from typing import Literal, cast
 from uuid import uuid4
 
 from pydantic import JsonValue
-from sqlalchemy import Engine
+from sqlalchemy import Engine, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
 from auraly_pipeline.campaigns.db_models import CampaignRow, CopyMasterRow, SceneVariantRow
 from auraly_pipeline.campaigns.domain import (
     Campaign,
+    CampaignBudgetSetup,
+    CampaignBudgetView,
     CampaignCreate,
     CopyMaster,
     CopyMasterCreate,
     SceneVariant,
+    campaign_budget_view,
 )
 from auraly_pipeline.campaigns.persistence import create_sqlite_engine, migrate_database
 from auraly_pipeline.campaigns.repository import CampaignRepository
@@ -34,6 +37,10 @@ class CampaignAlreadyExistsError(CampaignError):
 
 class CampaignNotFoundError(CampaignError):
     public_message = "Campaign not found."
+
+
+class CampaignBudgetConflictError(CampaignError):
+    public_message = "Campaign budget is already configured or invalid."
 
 
 def _utc(value: datetime) -> datetime:
@@ -106,6 +113,23 @@ class CampaignService:
             if campaign is None:
                 raise CampaignNotFoundError
             return self._to_domain(campaign)
+
+    def configure_budget(self, campaign_id: str, request: CampaignBudgetSetup) -> CampaignBudgetView:
+        with self._sessions() as session:
+            session.execute(text("BEGIN IMMEDIATE"))
+            campaign = CampaignRepository(session).get(campaign_id)
+            if campaign is None:
+                raise CampaignNotFoundError
+            current = campaign_budget_view(cast("dict[str, JsonValue]", campaign.budget_json))
+            desired = CampaignBudgetView(state="configured", currency=request.currency, limit_cents=request.limit_cents)
+            if current.state == "configured" and current == desired:
+                return current
+            if current.state != "missing":
+                raise CampaignBudgetConflictError
+            campaign.budget_json = {**campaign.budget_json, "currency": request.currency, "limitCents": request.limit_cents}
+            campaign.updated_at = datetime.now(UTC)
+            session.commit()
+            return desired
 
     def list_campaigns(self) -> list[Campaign]:
         with self._sessions() as session:

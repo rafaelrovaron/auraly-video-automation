@@ -8,7 +8,7 @@ from auraly_pipeline.api.contracts import (
     OutputSummary, PlanSummary, ProfileView,
     QueryError, RenderSummary, SceneImages, VoiceSummary,
 )
-from auraly_pipeline.campaigns.domain import Campaign
+from auraly_pipeline.campaigns.domain import Campaign, CampaignBudgetView, campaign_budget_view
 from auraly_pipeline.campaigns.service import CampaignNotFoundError, CampaignService
 from auraly_pipeline.editing.batch_domain import EditBatchPlan
 from auraly_pipeline.editing.batch_service import EditBatchService
@@ -52,6 +52,9 @@ class ApiQueries:
             scene_variants=campaign.scene_variants,
             operational_status=status.operational_status, next_pending=status.next_pending,
         )
+
+    def get_budget(self, campaign_id: str) -> CampaignBudgetView:
+        return campaign_budget_view(self.campaign(campaign_id).budget)
 
     def list_campaigns(self) -> list[CampaignSummary]:
         return [CampaignSummary.model_validate(self.get_campaign(campaign.campaign_id).model_dump(

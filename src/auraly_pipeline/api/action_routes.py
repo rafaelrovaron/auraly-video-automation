@@ -17,7 +17,7 @@ from auraly_pipeline.api.app import CampaignId, EditId, JobId, Version
 from auraly_pipeline.api.commands import ApiCommands
 from auraly_pipeline.api.contracts import CampaignDetail, ImageSummary, JobSummary, ProfileView, QueryError
 from auraly_pipeline.api.worker import LocalApiWorker
-from auraly_pipeline.campaigns.domain import CampaignCreate, CopyMasterCreate
+from auraly_pipeline.campaigns.domain import CampaignCreate, CopyMasterCreate, CampaignBudgetSetup, CampaignBudgetView
 from auraly_pipeline.campaigns.persistence import validate_api_database
 from auraly_pipeline.editing.domain import EditProfile
 from auraly_pipeline.voices.domain import VoiceGenerateRequest
@@ -54,6 +54,10 @@ def register_action_routes(app: FastAPI) -> None:
     @app.post(prefix + "/copies", status_code=201)
     def add_copy(campaignId: CampaignId, body: CopyMasterCreate, commands: Commands) -> CampaignDetail:
         return commands.add_copy(campaignId, body)
+
+    @app.post(prefix + "/budget")
+    def configure_budget(campaignId: CampaignId, body: CampaignBudgetSetup, commands: Commands) -> CampaignBudgetView:
+        return commands.configure_budget(campaignId, body)
 
     @app.post(prefix + "/images/import/prepare", status_code=202)
     def prepare_images(campaignId: CampaignId, body: ImagePrepareOperation, commands: Commands) -> OperationSubmission:

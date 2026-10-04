@@ -25,8 +25,8 @@ from auraly_pipeline.api.contracts import (
 )
 from auraly_pipeline.api.queries import ApiQueries
 from auraly_pipeline.api.operations import ApiOperationHandler, LOCAL_OPERATION_JOB
-from auraly_pipeline.campaigns.service import CampaignNotFoundError, CampaignService, CampaignError
-from auraly_pipeline.campaigns.domain import CampaignCreate, CopyMasterCreate
+from auraly_pipeline.campaigns.service import CampaignNotFoundError, CampaignService, CampaignError, CampaignBudgetConflictError
+from auraly_pipeline.campaigns.domain import CampaignCreate, CopyMasterCreate, CampaignBudgetSetup, CampaignBudgetView
 from auraly_pipeline.editing.batch_planner import verify_batch_plan
 from auraly_pipeline.editing.batch_service import EditBatchService
 from auraly_pipeline.editing.domain import EditingError, EditingArtifactNotFoundError, EditProfile, relative_path
@@ -107,6 +107,14 @@ class ApiCommands:
         self.require_campaign(campaign_id)
         self.campaigns.add_copy_master_version(campaign_id, request)
         return self.queries.get_campaign(campaign_id)
+
+    def configure_budget(self, campaign_id: str, request: CampaignBudgetSetup) -> CampaignBudgetView:
+        try:
+            return self.campaigns.configure_budget(campaign_id, request)
+        except CampaignNotFoundError:
+            raise QueryError("not_found", "campaignId") from None
+        except CampaignBudgetConflictError:
+            raise QueryError("operation_conflict") from None
 
     def review_image(self, campaign_id: str, candidate_id: str, request: ImageReviewAction) -> ImageSummary:
         self.require_campaign(campaign_id)

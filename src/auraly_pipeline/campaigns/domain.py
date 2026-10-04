@@ -5,7 +5,7 @@ import json
 from datetime import datetime
 from typing import Literal, Self
 
-from pydantic import ConfigDict, Field, JsonValue, computed_field, model_validator
+from pydantic import ConfigDict, Field, JsonValue, ValidationError, computed_field, field_validator, model_validator
 
 from auraly_pipeline.metadata_security import validate_goal_1_campaign_metadata
 from auraly_pipeline.models import ContractModel
@@ -13,6 +13,45 @@ from auraly_pipeline.models import ContractModel
 
 class CampaignContract(ContractModel):
     model_config = ConfigDict(str_strip_whitespace=True)
+
+
+class CampaignBudgetSetup(ContractModel):
+    currency: str = Field(pattern=r"^[A-Z]{3}$")
+    limit_cents: int = Field(gt=0, strict=True)
+    confirmed: bool = Field(strict=True)
+
+    @field_validator("confirmed")
+    @classmethod
+    def require_confirmation(cls, value: bool) -> bool:
+        if not value:
+            raise ValueError("budget setup requires explicit confirmation")
+        return value
+
+
+class CampaignBudgetView(ContractModel):
+    state: Literal["missing", "configured", "invalid"]
+    currency: str | None = Field(default=None, pattern=r"^[A-Z]{3}$")
+    limit_cents: int | None = Field(default=None, gt=0, strict=True)
+
+    @model_validator(mode="after")
+    def consistent_state(self) -> Self:
+        if self.state == "configured":
+            if self.currency is None or self.limit_cents is None:
+                raise ValueError("configured budget requires currency and limit")
+        elif self.currency is not None or self.limit_cents is not None:
+            raise ValueError("unconfigured budget has no financial projection")
+        return self
+
+
+def campaign_budget_view(budget: dict[str, JsonValue]) -> CampaignBudgetView:
+    if "currency" not in budget and "limitCents" not in budget:
+        return CampaignBudgetView(state="missing")
+    try:
+        return CampaignBudgetView.model_validate({
+            "state": "configured", "currency": budget.get("currency"), "limitCents": budget.get("limitCents"),
+        })
+    except ValidationError:
+        return CampaignBudgetView(state="invalid")
 
 
 class CopyMasterContent(CampaignContract):
