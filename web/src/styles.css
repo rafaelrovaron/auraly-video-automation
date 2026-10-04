@@ -29,6 +29,9 @@ details { margin-bottom: 1rem; }
 summary { cursor: pointer; padding: .6rem; color: #95dcd3; }
 fieldset { min-width: 0; border: 1px solid #62748b; border-radius: .4rem; margin: .8rem 0; padding: .8rem; }
 form label { display: block; margin: .7rem 0; }
+[aria-label="Importação manual de imagens"] label { display: block; margin: .7rem 0; }
+[aria-label="Importação manual de imagens"] input:not([type=checkbox]), [aria-label="Importação manual de imagens"] select { display: block; width: 100%; margin-top: .3rem; }
+.form-actions { display: flex; flex-wrap: wrap; gap: .6rem; margin: 1rem 0; }
 input, textarea { font: inherit; color: #e9eef5; background: #101722; border: 1px solid #62748b; border-radius: .3rem; padding: .5rem; max-width: 100%; }
 form input:not([type=checkbox]), form textarea, form select { display: block; width: 100%; margin-top: .3rem; }
 textarea { min-height: 5rem; resize: vertical; }

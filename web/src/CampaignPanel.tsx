@@ -6,6 +6,7 @@ import { usePolling } from './usePolling';
 import type { RemoteState } from './usePolling';
 import { WorkerControls } from './WorkerControls';
 import { CampaignCreateForm, CopyVersionForm } from './CampaignForms';
+import { ImageImportPanel } from './ImageImportPanel';
 
 function Updated({ state }: { state: RemoteState<unknown> }) {
   return <>
@@ -92,7 +93,7 @@ export function CampaignDetailPanel({ campaignId }: { campaignId: string }) {
       })}
     </Section>
     <Section title="Imagens" state={images}>
-      <p className="muted">Metadados apenas. Importação manual em batch continua no fluxo existente.</p>
+      <ImageImportPanel key={campaignId} campaignId={campaignId} detail={detail} images={images} jobs={jobs} />
       {images.data?.items.flatMap(scene => scene.items.map(image => <article key={image.imageCandidateId}>
         <h3>{image.imageCandidateId}</h3><Facts entries={[
           ['Cena', image.sceneVariantId], ['Review', statusLabel(image.reviewStatus)], ['Origem', image.sourceKind], ['Arquivo', image.sourcePath],
