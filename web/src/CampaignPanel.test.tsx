@@ -161,6 +161,20 @@ it('rejects invalid list entry fields rather than rendering an object', async ()
 });
 
 it.each([
+  ['Voice Masters', '/voices', {items: [{...voice, campaignId: 'campaign-two', voiceMasterId: 'foreign-voice'}]}, 'voice-one', 'foreign-voice'],
+  ['Jobs', '/jobs', {items: [{...job, campaignId: 'campaign-two', jobId: 'foreign-job'}]}, 'Ver Job job-one', 'Ver Job foreign-job'],
+  ['Jobs', '/jobs', {items: [{...job, campaignId: undefined, jobId: 'incomplete-job'}]}, 'Ver Job job-one', 'Ver Job incomplete-job'],
+])('test_%s_context_guard_keeps_valid_snapshot_after_invalid_campaign_collection', async (title, suffix, invalid, previous, foreign) => {
+  const overrides: Record<string, unknown> = {}; fakeApi(overrides);
+  render(<CampaignDetailPanel campaignId="campaign-one" />); await screen.findByText('Copy hook');
+  const section = screen.getByRole('region', {name: title}); expect(await within(section).findByText(previous)).not.toBeNull();
+  overrides[suffix] = invalid; fireEvent.click(screen.getByRole('button', {name: 'Atualizar'}));
+  expect(await within(section).findByText(/invalid_response.*Dados desatualizados/)).not.toBeNull();
+  expect(within(section).getByText(previous)).not.toBeNull(); expect(within(section).queryByText(foreign)).toBeNull();
+  expect((screen.getByRole('button', {name: 'Enfileirar geração de voz'}) as HTMLButtonElement).disabled).toBe(true);
+});
+
+it.each([
   ['/jobs/job-one', { ...job, status: {} }],
   ['/operations/job-one', { jobId: 'job-one', operation: {}, result: [], errorCode: {} }],
 ])('rejects malformed selected detail at %s without losing the campaign', async (path, invalid) => {

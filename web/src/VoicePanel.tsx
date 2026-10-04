@@ -8,6 +8,7 @@ import type { RemoteState } from './usePolling';
 import { useUnsavedChanges } from './useUnsavedChanges';
 
 type Props = {campaignId: string; detail: RemoteState<CampaignDetail>; voices: RemoteState<Items<VoiceSummary>>; jobs: RemoteState<Items<JobSummary>>};
+type FormSection = 'budget' | 'generation' | 'import' | 'review';
 const positive = (value: string) => /^\d+$/.test(value) && Number.isSafeInteger(Number(value)) && Number(value) > 0;
 const actorValid = (value: string) => /^[A-Za-z0-9][A-Za-z0-9._:@-]{0,119}$/.test(value);
 const sourceValid = (value: string) => !!value && !/^[\\/]|:/.test(value) && !value.split(/[\\/]/).some(part => ['..', '.', ''].includes(part)) && /\.(mp3|wav)$/i.test(value);
@@ -30,7 +31,7 @@ function VoiceForms({campaignId, detail, voices, jobs}: Props) {
   const [selectedJob, setSelectedJob] = useState('');
   const [acceptedVoice, setAcceptedVoice] = useState<string | null>(null);
   const [budgetIntent, setBudgetIntent] = useState<{currency: string; limitCents: number; minimumRead: number} | null>(null);
-  const [dirty, setDirty] = useState(false);
+  const [dirty, setDirty] = useState({budget: false, generation: false, import: false, review: false});
   const [sourcePath, setSourcePath] = useState('');
   const [importConfirmed, setImportConfirmed] = useState(false);
   const [requestId, setRequestId] = useState('');
@@ -42,16 +43,24 @@ function VoiceForms({campaignId, detail, voices, jobs}: Props) {
   const [rejectionConfirmed, setRejectionConfirmed] = useState(false);
   const [reviewObservation, setReviewObservation] = useState<{voiceId: string; status: string; minimumRead: number} | null>(null);
   const [reviewNotice, setReviewNotice] = useState('');
-  const clearDirty = useUnsavedChanges(dirty || unknown || busy);
+  useUnsavedChanges(Object.values(dirty).some(Boolean) || unknown || busy);
+  const markDirty = (form: FormSection) => setDirty(previous => ({...previous, [form]: true}));
+  const clearForm = useCallback((form: FormSection) => setDirty(previous => ({...previous, [form]: false})), []);
   const alive = useRef(true), lock = useRef(false);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
   const budget = usePolling(`${campaignId}:budget`, signal => read<CampaignBudgetView>(campaignPath(campaignId, '/budget'), signal, campaignBudgetView), null);
   const connected = Boolean(detail.data && voices.data && jobs.data && !detail.error && !voices.error && !jobs.error
-    && detail.data.campaignId === campaignId && voices.data.items.every(voice => voice.campaignId === campaignId));
+    && detail.data.campaignId === campaignId && voices.data.items.every(voice => voice.campaignId === campaignId)
+    && jobs.data.items.every(job => job.campaignId === campaignId));
   const budgetFresh = budget.data && !budget.error;
   const blocked = !connected || busy || unknown || budgetIntent !== null;
   const copy = detail.data?.copyMasters.find(item => item.version === Number(version) && item.approvalState === 'approved');
-  const edit = (action: () => void) => { action(); setBudgetConfirmed(false); setPaid(false); setImportConfirmed(false); setDirty(true); };
+  const edit = (action: () => void, form: FormSection | 'copy') => {
+    action(); setBudgetConfirmed(false); setPaid(false); setImportConfirmed(false);
+    if (form === 'copy') setDirty(previous => ({...previous,
+      generation: previous.generation || Boolean(voiceId || modelId || actor || ceiling), import: previous.import || Boolean(sourcePath)}));
+    else markDirty(form);
+  };
   const canGenerate = !blocked && budgetFresh && budget.data?.state === 'configured' && copy
     && /^[A-Za-z0-9_-]{1,120}$/.test(voiceId) && /^[A-Za-z0-9_-]{1,120}$/.test(modelId)
     && actorValid(actor) && positive(ceiling) && Number(ceiling) <= budget.data.limitCents && paid;
@@ -61,7 +70,7 @@ function VoiceForms({campaignId, detail, voices, jobs}: Props) {
   const canApprove = reviewable && reviewVoice?.processedAudioPath && reviewVoice.processedSha256 && reviewVoice.headlineSpoken === false
     && (exception ? reason.trim().length > 0 : reviewVoice.transcriptMatchStatus === 'matched' && reviewVoice.qcFindings.length === 0) && listened;
   const canReject = reviewable && reason.trim().length > 0 && rejectionConfirmed;
-  const editReview = (action: () => void) => {action(); setListened(false); setRejectionConfirmed(false); setDirty(true);};
+  const editReview = (action: () => void) => {action(); setListened(false); setRejectionConfirmed(false); markDirty('review');};
   const completedReview = useCallback(() => {
     const minimumRead = voices.refresh();
     setReviewObservation(previous => previous ? {...previous, minimumRead} : null);
@@ -80,9 +89,9 @@ function VoiceForms({campaignId, detail, voices, jobs}: Props) {
     if (budget.data?.state === 'configured') {
       setNotice(budget.data.currency === budgetIntent.currency && budget.data.limitCents === budgetIntent.limitCents
         ? 'Configuração solicitada observada. Isso não autoriza geração nem informa autoria.' : 'Outro orçamento foi observado. Não será sobrescrito.');
-      setBudgetIntent(null); setDirty(false); clearDirty();
+      setBudgetIntent(null); clearForm('budget');
     }
-  }, [budget.data, budget.error, budget.lastSuccessReadId, budgetIntent, clearDirty]);
+  }, [budget.data, budget.error, budget.lastSuccessReadId, budgetIntent, clearForm]);
 
   const saveBudget = async () => {
     if (lock.current || blocked || !budgetFresh || budget.data?.state !== 'missing' || !budgetConfirmed
@@ -116,7 +125,7 @@ function VoiceForms({campaignId, detail, voices, jobs}: Props) {
         paidRequestApproved: true, paidRequestApprovedBy: actor, approvedBudgetCents: Number(ceiling)});
       if (!alive.current) return;
       if (!voiceSubmission(result) || result.operation !== 'voice_generate' || result.campaignId !== campaignId) throw new ApiError('command_unknown');
-      setSelectedJob(result.jobId); setAcceptedVoice(result.voiceMasterId!); setDirty(false); clearDirty();
+      setSelectedJob(result.jobId); setAcceptedVoice(result.voiceMasterId!); clearForm('generation');
       setNotice('Job na fila. Inicie voice_generate explicitamente; isso não aprova o áudio.');
     } catch (error) {
       if (!alive.current) return;
@@ -136,7 +145,7 @@ function VoiceForms({campaignId, detail, voices, jobs}: Props) {
         requestId: id, request: {campaignId, copyMasterVersion: Number(version)}});
       if (!alive.current) return;
       if (!voiceSubmission(result) || result.operation !== 'voice_import' || result.campaignId !== campaignId) throw new ApiError('command_unknown');
-      setWrapper({jobId: result.jobId, kind: 'voice_import'}); setDirty(false); clearDirty();
+      setWrapper({jobId: result.jobId, kind: 'voice_import'}); clearForm('import');
       setNotice('Importação enfileirada. Inicie local_operations; depois, voice_import. Nenhum worker foi iniciado.');
     } catch (error) {
       if (!alive.current) return;
@@ -159,7 +168,7 @@ function VoiceForms({campaignId, detail, voices, jobs}: Props) {
       if (!voiceSubmission(result) || result.operation !== 'voice_review' || result.campaignId !== campaignId) throw new ApiError('command_unknown');
       observe = true; setWrapper({jobId: result.jobId, kind: 'voice_review', voiceId: intent.voiceId});
       setNotice('Review enfileirado, não é aprovação. Inicie local_operations e consulte a voz persistida.');
-      setDirty(false); clearDirty();
+      clearForm('review');
     } catch (error) {
       if (!alive.current) return;
       const failure = error instanceof ApiError ? error : new ApiError('command_unknown');
@@ -180,31 +189,31 @@ function VoiceForms({campaignId, detail, voices, jobs}: Props) {
       {budget.data?.state === 'invalid' && <p role="alert">Orçamento legado inválido. Geração bloqueada; este formulário não repara configurações existentes.</p>}
       {budget.data?.state === 'missing' && <form aria-label="Orçamento inicial" onSubmit={event => {event.preventDefault(); void saveBudget();}}>
         <fieldset disabled={blocked || !budgetFresh}>
-          <label>Moeda da campanha <input value={currency} maxLength={3} onChange={event => edit(() => setCurrency(event.target.value))} /></label>
-          <label>Limite da campanha (centavos) <input type="number" min="1" step="1" value={limit} onChange={event => edit(() => setLimit(event.target.value))} /></label>
-          <label><input type="checkbox" checked={budgetConfirmed} onChange={event => setBudgetConfirmed(event.target.checked)} />Confirmo este orçamento inicial</label>
+          <label>Moeda da campanha <input value={currency} maxLength={3} onChange={event => edit(() => setCurrency(event.target.value), 'budget')} /></label>
+          <label>Limite da campanha (centavos) <input type="number" min="1" step="1" value={limit} onChange={event => edit(() => setLimit(event.target.value), 'budget')} /></label>
+          <label><input type="checkbox" checked={budgetConfirmed} onChange={event => {setBudgetConfirmed(event.target.checked); markDirty('budget');}} />Confirmo este orçamento inicial</label>
           <button disabled={!budgetConfirmed || !/^[A-Z]{3}$/.test(currency) || !positive(limit)}>Configurar orçamento inicial</button>
         </fieldset>
       </form>}
       <p>Configuração inicial somente: moeda/limite definidos não são editáveis aqui. Não é saldo disponível nem estimativa de preço e não autoriza gasto.</p>
       <button type="button" onClick={budget.refresh}>Consultar orçamento</button>
     </section>
-    <label>Versão da copy para voz <select value={version} disabled={busy || unknown} onChange={event => edit(() => setVersion(event.target.value))}>
+    <label>Versão da copy para voz <select value={version} disabled={busy || unknown} onChange={event => edit(() => setVersion(event.target.value), 'copy')}>
       <option value="">Selecione a versão aprovada</option>{detail.data?.copyMasters.filter(item => item.approvalState === 'approved').map(item => <option key={item.copyMasterId} value={item.version}>v{item.version}</option>)}
     </select></label>
     {copy && <div><p>Headline visual (não narrada): {copy.headline}</p><p>Texto narrado: {copy.hook}{'\n\n'}{copy.body}{'\n\n'}{copy.cta}</p></div>}
     <form aria-label="Geração de voz" onSubmit={event => {event.preventDefault(); void generate();}}><fieldset disabled={blocked}>
-      <label>Voice ID <input value={voiceId} onChange={event => edit(() => setVoiceId(event.target.value))} /></label>
-      <label>Model ID <input value={modelId} onChange={event => edit(() => setModelId(event.target.value))} /></label>
-      <label>Responsável pela geração <input value={actor} onChange={event => edit(() => setActor(event.target.value))} /></label>
-      <label>Teto desta geração (centavos) <input type="number" min="1" step="1" value={ceiling} onChange={event => edit(() => setCeiling(event.target.value))} /></label>
-      <label><input type="checkbox" checked={paid} onChange={event => setPaid(event.target.checked)} />Autorizo o gasto desta geração</label>
+      <label>Voice ID <input value={voiceId} onChange={event => edit(() => setVoiceId(event.target.value), 'generation')} /></label>
+      <label>Model ID <input value={modelId} onChange={event => edit(() => setModelId(event.target.value), 'generation')} /></label>
+      <label>Responsável pela geração <input value={actor} onChange={event => edit(() => setActor(event.target.value), 'generation')} /></label>
+      <label>Teto desta geração (centavos) <input type="number" min="1" step="1" value={ceiling} onChange={event => edit(() => setCeiling(event.target.value), 'generation')} /></label>
+      <label><input type="checkbox" checked={paid} onChange={event => {setPaid(event.target.checked); markDirty('generation');}} />Autorizo o gasto desta geração</label>
       <button disabled={!canGenerate}>Enfileirar geração de voz</button>
     </fieldset></form>
     <p>IDs do ElevenLabs são informados manualmente. A mesma identidade pode reutilizar voz/Job; não há regeneração forçada.</p>
     <form aria-label="Importação de voz" onSubmit={event => {event.preventDefault(); void importVoice();}}><fieldset disabled={blocked}>
-      <label>Caminho relativo do áudio <input value={sourcePath} onChange={event => edit(() => setSourcePath(event.target.value))} /></label>
-      <label><input type="checkbox" checked={importConfirmed} onChange={event => setImportConfirmed(event.target.checked)} />Confirmo o arquivo e a versão da copy</label>
+      <label>Caminho relativo do áudio <input value={sourcePath} onChange={event => edit(() => setSourcePath(event.target.value), 'import')} /></label>
+      <label><input type="checkbox" checked={importConfirmed} onChange={event => {setImportConfirmed(event.target.checked); markDirty('import');}} />Confirmo o arquivo e a versão da copy</label>
       <button disabled={blocked || !copy || !sourceValid(sourcePath) || !importConfirmed}>Enfileirar importação de voz</button>
     </fieldset></form>
     <p>Copie o MP3/WAV pelo Explorer para dentro do project root, por exemplo imports/voice.wav (máximo 100 MiB). Informe o caminho relativo; não há upload. O original é preservado e o WAV processado é outro arquivo. Importar não exige orçamento ElevenLabs.</p>
@@ -226,7 +235,7 @@ function VoiceForms({campaignId, detail, voices, jobs}: Props) {
     {wrapper && <VoiceOperationMonitor key={wrapper.jobId} campaignId={campaignId} jobId={wrapper.jobId} kind={wrapper.kind} voiceId={wrapper.voiceId}
       onChange={voices.refresh} onComplete={completedReview} />}
     <label>Voice Master para revisar <select value={selectedVoice} disabled={!connected || busy} onChange={event => {
-      setSelectedVoice(event.target.value); setReviewActor(''); setReason(''); setListened(false); setRejectionConfirmed(false); setReviewNotice(''); setDirty(true);
+      setSelectedVoice(event.target.value); setReviewActor(''); setReason(''); setListened(false); setRejectionConfirmed(false); setReviewNotice(''); markDirty('review');
     }}><option value="">Selecione uma voz persistida</option>{voices.data?.items.filter(item => item.campaignId === campaignId).map(item =>
       <option key={item.voiceMasterId} value={item.voiceMasterId}>{item.voiceMasterId} · v{item.copyMasterVersion} · {item.status}</option>)}
     </select></label>
@@ -237,8 +246,8 @@ function VoiceForms({campaignId, detail, voices, jobs}: Props) {
       {exception && <p>Exceção restrita: transcrição importada requer revisão humana. Motivo obrigatório; o backend mantém os gates de aprovação.</p>}
       <div><label>Responsável pela revisão de voz <input value={reviewActor} disabled={blocked} onChange={event => editReview(() => setReviewActor(event.target.value))} /></label>
         <label>Motivo da revisão de voz <textarea value={reason} disabled={blocked} onChange={event => editReview(() => setReason(event.target.value))} /></label>
-        <label><input type="checkbox" checked={listened} disabled={blocked} onChange={event => setListened(event.target.checked)} />Ouvi o WAV processado e revisei os resultados</label>
-        <label><input type="checkbox" checked={rejectionConfirmed} disabled={blocked} onChange={event => setRejectionConfirmed(event.target.checked)} />Revisei os resultados para rejeitar</label>
+        <label><input type="checkbox" checked={listened} disabled={blocked} onChange={event => {setListened(event.target.checked); markDirty('review');}} />Ouvi o WAV processado e revisei os resultados</label>
+        <label><input type="checkbox" checked={rejectionConfirmed} disabled={blocked} onChange={event => {setRejectionConfirmed(event.target.checked); markDirty('review');}} />Revisei os resultados para rejeitar</label>
         <button disabled={!canApprove} onClick={() => {void review('approve');}}>Enfileirar aprovação de voz</button>
         <button disabled={!canReject} onClick={() => {void review('reject');}}>Enfileirar rejeição de voz</button>
       </div></div>}
@@ -254,12 +263,13 @@ function VoiceOperationMonitor({campaignId, jobId, kind, voiceId, onChange, onCo
   useEffect(() => { if (operation.data && !operation.error) onChange(); }, [operation.data?.status, operation.error, onChange]);
   useEffect(() => { if (operation.data?.status === 'completed' && operation.data.operation === 'voice_review' && !operation.error) onComplete(); },
     [operation.data?.status, operation.data?.operation, operation.error, onComplete]);
-  const result = !operation.error && operation.data?.status === 'completed' ? operation.data.result : null;
+  const result = operation.data?.status === 'completed' ? operation.data.result : null;
   return <div>
     {operation.error && <p role="alert">{operation.error.message} ({operation.error.code}). Dados desatualizados.</p>}
     {operation.data && <><p>Operação {jobId}: {operation.data.operation} · {operation.data.status}</p><p>Erro: {operation.data.errorCode ?? 'Não disponível'}</p></>}
-    {!result && <p>Fase 1: executar operação local (local_operations)</p>}
-    {result?.operation === 'voice_import' && <><p>Fase 2: processar voz importada</p><p>Voice Master importado: {result.voiceMasterId}. Inicie voice_import explicitamente.</p>
+    {!result && !operation.error && <p>Fase 1: executar operação local (local_operations)</p>}
+    {result?.operation === 'voice_import' && <><p>Fase 2: processar voz importada</p><p>Voice Master importado: {result.voiceMasterId}.
+      {operation.error ? ' Contexto da operação desatualizado; último resultado válido preservado.' : ' Inicie voice_import explicitamente.'}</p>
       <VoiceJobMonitor key={result.jobId} campaignId={campaignId} jobId={result.jobId} kind="voice.import" onChange={onChange} /></>}
     {result?.operation === 'voice_review' && <p>Review executado para {result.voiceMasterId}. Consulte a voz persistida; o resultado sozinho não confirma aprovação nem autoria.</p>}
     <button onClick={operation.refresh}>Consultar operação de voz</button>

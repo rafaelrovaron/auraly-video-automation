@@ -63,7 +63,7 @@ D4A.1 Local Query API & Campaign Status LOCAL_VERIFIED
 D4A.2 Operational Actions & Worker Integration LOCAL_VERIFIED
 D4B.1 Local Campaign Panel                    LOCAL_VERIFIED
 D4B.2a Campaign/Copy & Manual Image Import    LOCAL_VERIFIED
-D4B.2b.1 Voice Master Forms                  IMPLEMENTED (gate/review no PROJECT-MEMORY)
+D4B.2b.1 Voice Master Forms                  IMPLEMENTED, LOCAL_VERIFIED
 D4B.2b HeyGen Forms                          PLANNED
 D4B.3 Editing UI & Approximate Preview        PLANNED
 D5A Deterministic Renderer
@@ -425,7 +425,8 @@ negócio.
 ## D4B — React Operations UI & Approximate Preview
 
 **Status:** D4B.1 e D4B.2a `IMPLEMENTED`, `LOCAL_VERIFIED`;
-D4B.2b.1 implementa Voice Master; evidência de verificação no PROJECT-MEMORY.
+D4B.2b.1 Voice Master `IMPLEMENTED`, `LOCAL_VERIFIED`: gate pós-revisão Windows
+19/19, 130 frontend e 1.789 Python / 25 skips; evidência no PROJECT-MEMORY.
 Formulários HeyGen (design/plano próprios) e D4B.3 permanecem `PLANNED`.
 
 Gate final D4B.2a Windows de 2026-10-04: 19/19 etapas; 96 testes frontend e 1.757 Python

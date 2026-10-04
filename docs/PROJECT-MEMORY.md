@@ -9,10 +9,18 @@ do produto planejado para impedir que roadmap seja confundido com capacidade exi
 ## Entrega atual: D4B.2b.1 — Voice Master UI (2026-10-04)
 
 Implementação na branch `codex/d4b2b1`; integração/Actions ainda pendentes. Reusa React,
-FastAPI, SQLite e workers existentes. Gate completo Windows: 19/19 etapas, 121 testes
+FastAPI, SQLite e workers existentes. `IMPLEMENTED`, `LOCAL_VERIFIED`.
+Gate completo Windows pós-revisão: 19/19 etapas, 130 testes
 frontend e 1.789 Python aprovados / 25 skips. Browser/proxy/API/SQLite/workers reais
 validaram geração fake sem auto-start, import em duas fases/review e budget gravado
-com resposta 503 sem repost; 13 testes de navegador aprovados. Revisão final pendente.
+com resposta 503 sem repost; 13 testes de navegador aprovados.
+Revisão independente sobre `eda1d93` concluída: dois Important e o aviso de drafts
+(reclassificado de Minor por risco de perda sem aviso) corrigidos em uma rodada
+RED→GREEN, nove regressões frontend e gate completo; sem re-review. Agora wrapper
+stale preserva fase/filho, coleções de voz/Jobs validam campanha antes de substituir
+snapshot e submissões não descartam o aviso de outros rascunhos.
+Minor adiado: budget legado acima do inteiro seguro do browser aparece como erro
+genérico/stale, não como projeção invalid; frontend rejeita, sem autorizar gasto arredondado.
 Sem nova execução real de provider ou autorização paga usada nos testes.
 
 - orçamento inicial de campanha por GET/POST focado, projeção missing/configured/invalid,

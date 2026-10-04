@@ -250,3 +250,67 @@ it('test_changing_selected_voice_clears_actor_reason_and_confirmations', async (
   expect((screen.getByLabelText('Motivo da revisão de voz') as HTMLInputElement).value).toBe('');
   expect((listen() as HTMLInputElement).checked).toBe(false);
 });
+
+it('test_stale_completed_wrapper_preserves_child_snapshot_and_phase', async () => {
+  importApi(); wrapReads(wrapper, 'failed');
+  const base = globalThis.fetch; let stale = false;
+  vi.stubGlobal('fetch', async (path: string, options: RequestInit) => stale && path.endsWith('/operations/wrapper-one')
+    ? Response.json({error: {code: 'internal_error'}}, {status: 503}) : base(path, options));
+  render(<VoicePanel {...props()} />); await fillImport(); fireEvent.click(importButton());
+  await screen.findByText('voice.import · failed'); stale = true;
+  fireEvent.click(screen.getByRole('button', {name: 'Consultar operação de voz'})); await screen.findByText(/internal_error/);
+  expect(screen.getByText('voice.import · failed')).not.toBeNull();
+  expect(screen.getByText(/Job: child-one/)).not.toBeNull();
+  expect(screen.queryByText('Fase 1: executar operação local (local_operations)')).toBeNull();
+  expect(screen.queryByText(/Inicie voice_import explicitamente/)).toBeNull();
+});
+
+it('test_incomplete_or_foreign_jobs_block_voice_mutations', async () => {
+  fakeApi(); const p = props(); const view = render(<VoicePanel {...p} />); await fillGenerate();
+  fireEvent.click(screen.getByLabelText('Autorizo o gasto desta geração'));
+  expect((generate() as HTMLButtonElement).disabled).toBe(false);
+  for (const campaignId of [null, 'campaign-two']) {
+    view.rerender(<VoicePanel {...p} jobs={state({items: [{...job, campaignId}]})} />);
+    expect((generate() as HTMLButtonElement).disabled).toBe(true);
+  }
+});
+
+it.each(['generation', 'import', 'review', 'budget'])('test_%s_submission_preserves_other_unsaved_voice_drafts', async section => {
+  const initial = section === 'budget' ? {state: 'missing', currency: null, limitCents: null} : undefined;
+  fakeApi(initial, async path => {
+    if (path.endsWith('/budget')) return Response.json({state: 'configured', currency: 'USD', limitCents: 1000});
+    return Response.json({operation: path.endsWith('/generate') ? 'voice_generate' : path.endsWith('/import') ? 'voice_import' : 'voice_review',
+      campaignId: 'campaign-one', jobId: path.endsWith('/generate') ? 'job-one' : 'wrapper-one', voiceMasterId: 'voice-one'});
+  });
+  const base = globalThis.fetch;
+  let configured = false;
+  vi.stubGlobal('fetch', async (path: string, options: RequestInit) => {
+    const response = await base(path, options);
+    if (path.endsWith('/budget') && options.method === 'POST') configured = true;
+    if (path.endsWith('/budget') && options.method !== 'POST' && configured) return Response.json({state: 'configured', currency: 'USD', limitCents: 1000});
+    return response;
+  });
+  wrapReads({...wrapper, operation: section === 'review' ? 'voice_review' : 'voice_import', status: 'queued', result: null});
+  render(<VoicePanel {...reviewProps()} />);
+  if (section === 'generation') await fillGenerate();
+  if (section === 'import') await fillImport();
+  await fillReview();
+  if (section === 'review') {
+    fireEvent.change(screen.getByLabelText('Caminho relativo do áudio'), {target: {value: 'imports/unsubmitted.wav'}});
+    fireEvent.click(listen()); fireEvent.click(approveVoice()); await screen.findByText(/Review enfileirado/);
+  } else {
+    fireEvent.change(screen.getByLabelText('Motivo da revisão de voz'), {target: {value: 'Unsubmitted review draft'}});
+    if (section === 'generation') {
+      fireEvent.click(screen.getByLabelText('Autorizo o gasto desta geração')); fireEvent.click(generate()); await screen.findByText(/Job na fila/);
+    } else if (section === 'import') {
+      fireEvent.click(importButton()); await screen.findByText(/Importação enfileirada/);
+    } else {
+      await screen.findByLabelText('Moeda da campanha');
+      fireEvent.change(screen.getByLabelText('Moeda da campanha'), {target: {value: 'USD'}});
+      fireEvent.change(screen.getByLabelText('Limite da campanha (centavos)'), {target: {value: '1000'}});
+      fireEvent.click(screen.getByLabelText('Confirmo este orçamento inicial'));
+      fireEvent.click(screen.getByRole('button', {name: 'Configurar orçamento inicial'})); await screen.findByText(/Configuração solicitada observada/);
+    }
+  }
+  const event = new Event('beforeunload', {cancelable: true}); window.dispatchEvent(event); expect(event.defaultPrevented).toBe(true);
+});

@@ -55,7 +55,7 @@ entrega.
   associações manuais imutáveis, dry-run diagnóstico, importação ligada ao snapshot das
   fontes e review de imagens pela UI. Evidência atual no PROJECT-MEMORY;
   sem novas chamadas pagas. Actions deste slice pendentes de publicação.
-- D4B.2b.1: formulários de orçamento inicial, geração/importação e review de Voice Master;
+- D4B.2b.1 `IMPLEMENTED`, `LOCAL_VERIFIED`: formulários de orçamento inicial, geração/importação e review de Voice Master;
   workers explícitos e acompanhamento separado de operação local/Job filho. Verificação
   deste slice registrada no PROJECT-MEMORY; sem nova chamada paga.
 

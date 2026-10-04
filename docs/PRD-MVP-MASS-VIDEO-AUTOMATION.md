@@ -60,7 +60,9 @@ genérico e não terá timeline estilo CapCut ou preview frame-perfect.
   ao projeto e review após escuta externa. Jobs diretos e wrappers/filhos são acompanhados
   separadamente; cada worker exige start explícito. Estado de voz vem de GET, não de
   aceite/worker idle. Exceção de transcript importado permanece restrita e exige motivo.
-  Sem player, upload, force-regenerate, provider novo ou migration; evidência no PROJECT-MEMORY.
+  Sem player, upload, force-regenerate, provider novo ou migration.
+  `IMPLEMENTED`, `LOCAL_VERIFIED`: gate pós-revisão Windows 19/19, 130 frontend e
+  1.789 Python / 25 skips; evidência no PROJECT-MEMORY. Actions pendentes de publicação.
 
 ### 2.2 Capacidade alvo deste PRD
 

@@ -49,12 +49,13 @@ export function CampaignDetailPanel({ campaignId }: { campaignId: string }) {
     value => campaignDetail(value) && object(value) && value.campaignId === campaignId), null);
   const status = usePolling(campaignPath(campaignId, '/status'), signal => read<CampaignStatus>(campaignPath(campaignId, '/status'), signal,
     value => campaignStatus(value) && object(value) && value.campaignId === campaignId), 2000);
-  const jobs = usePolling(campaignPath(campaignId, '/jobs'), signal => read<Items<JobSummary>>(campaignPath(campaignId, '/jobs'), signal, value => collection(value, jobSummary)), 2000);
+  const jobs = usePolling(campaignPath(campaignId, '/jobs'), signal => read<Items<JobSummary>>(campaignPath(campaignId, '/jobs'), signal,
+    value => collection(value, item => jobSummary(item) && object(item) && item.campaignId === campaignId)), 2000);
   const worker = usePolling(campaignPath(campaignId, '/worker'), signal => readWorker(campaignId, signal), 2000);
   const images = usePolling(campaignPath(campaignId, '/images'), signal => read<Items<SceneImages>>(campaignPath(campaignId, '/images'), signal,
     value => collection(value, sceneImages)), null);
   const voices = usePolling(campaignPath(campaignId, '/voices'), signal => read<Items<VoiceSummary>>(campaignPath(campaignId, '/voices'), signal,
-    value => collection(value, voiceSummary)), null);
+    value => collection(value, item => voiceSummary(item) && object(item) && item.campaignId === campaignId)), null);
   const renders = usePolling(campaignPath(campaignId, '/heygen/renders'), signal => read<Items<RenderSummary>>(campaignPath(campaignId, '/heygen/renders'), signal, value => collection(value, renderSummary)), null);
   const [selectedJob, setSelectedJob] = useState<string | null>(null);
   const previousFingerprint = useRef<string | null>(null);
