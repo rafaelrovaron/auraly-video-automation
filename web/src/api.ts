@@ -4,6 +4,35 @@ export type CampaignSummary = {
   campaignId: string; character: string; storedStatus: string; sceneCount: number;
   createdAt: string; updatedAt: string; operationalStatus: string; nextPending: PendingItem | null;
 };
+export type CopyMaster = { copyMasterId: string; version: number; approvalState: string; hook: string; body: string; cta: string };
+export type SceneVariant = { sceneVariantId: string; variantId: string; location: string; action: string; prompt: string };
+export type CampaignDetail = CampaignSummary & { proofObject: string; voicePreset: string; editPreset: string; copyMasters: CopyMaster[]; sceneVariants: SceneVariant[] };
+export type SceneStatus = { sceneVariantId: string; variantId: string; currentCopyId: string | null; currentVoiceId: string | null; approvedImageId: string | null; readyRenderIds: string[]; planHashes: string[]; pending: PendingItem[] };
+export type CampaignStatus = { campaignId: string; storedStatus: string; operationalStatus: string; nextPending: PendingItem | null; sceneCount: number;
+  approvedCopyCount: number; approvedVoiceCount: number; approvedImageCount: number; readyRenderCount: number; planCount: number; scenes: SceneStatus[] };
+export type ImageSummary = { imageCandidateId: string; sceneVariantId: string; sourceKind: string; reviewStatus: string; sourcePath: string; sha256: string; width: number; height: number; sizeBytes: number; format: string; rejectionReason: string | null };
+export type SceneImages = Items<ImageSummary> & { sceneVariantId: string };
+export type VoiceSummary = { voiceMasterId: string; copyMasterId: string; copyMasterVersion: number; provider: string; status: string; processedAudioPath: string | null; durationSeconds: number | null;
+  transcriptMatchStatus: string | null; headlineSpoken: boolean | null; qcFindings: string[]; approvalReviewReason: string | null; rejectionReason: string | null };
+export type RenderSummary = { renderId: string; sceneVariantId: string; imageCandidateId: string; voiceMasterId: string; jobId: string; status: string; remoteVideoId: string | null; source: { path: string } | null; errorCode: string | null };
+export type JobSummary = { jobId: string; jobType: string; campaignId: string | null; sceneVariantId: string | null; status: string; attemptCount: number; maxAttempts: number;
+  retrySafety: string; queuedAt: string; startedAt: string | null; completedAt: string | null; nextRetryAt: string | null; lastErrorCode: string | null };
+export type OperationView = { jobId: string; campaignId: string; operation: string; status: string; result: Record<string, unknown> | null; errorCode: string | null };
+export type WorkerKind = 'local_operations' | 'voice_generate' | 'voice_import' | 'heygen_assets' | 'heygen_videos';
+export type WorkerState = { state: 'idle' | 'running' | 'stopping'; campaignId: string | null; kind: WorkerKind | null; errorCode: string | null };
+export type WorkerObservation = { scope: 'known'; value: WorkerState } | { scope: 'unassociated' };
+
+export async function readWorker(id: string, signal: AbortSignal): Promise<WorkerObservation> {
+  try {
+    const value = await read<WorkerState>(campaignPath(id, '/worker'), signal, body => object(body)
+      && ['idle', 'running', 'stopping'].includes(String(body.state))
+      && (body.campaignId === null || typeof body.campaignId === 'string'));
+    return { scope: 'known', value };
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 404 && error.code === 'not_found') return { scope: 'unassociated' };
+    throw error;
+  }
+}
 
 const messages: Record<string, string> = {
   invalid_request: 'Solicitação inválida.', not_found: 'Recurso não encontrado.',

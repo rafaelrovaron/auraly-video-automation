@@ -18,5 +18,6 @@ article, section { background: #182332; border: 1px solid #354359; border-radius
 [role=alert] { color: #ffb8a9; }
 small, .muted { color: #afbdd0; }
 dl { display: grid; grid-template-columns: minmax(100px, 180px) minmax(0, 1fr); gap: .4rem 1rem; }
+.fact { display: contents; }
 dd { margin: 0; }
 @media (max-width: 480px) { dl { grid-template-columns: 1fr; } dt { color: #afbdd0; } }
