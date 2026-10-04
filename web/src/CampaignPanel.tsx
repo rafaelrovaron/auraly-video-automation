@@ -5,6 +5,7 @@ import type { CampaignDetail, CampaignStatus, CampaignSummary, Items, JobSummary
 import { usePolling } from './usePolling';
 import type { RemoteState } from './usePolling';
 import { WorkerControls } from './WorkerControls';
+import { CampaignCreateForm, CopyVersionForm } from './CampaignForms';
 
 function Updated({ state }: { state: RemoteState<unknown> }) {
   return <>
@@ -31,7 +32,8 @@ export function CampaignList() {
   return <>
     <div className="section-heading"><h1>Campanhas</h1><button onClick={state.refresh}>Atualizar</button></div>
     <p>Consulte o andamento da produção. Nenhuma ação paga é iniciada ao abrir o painel.</p><Updated state={state} />
-    {state.data?.items.length === 0 && <p>Nenhuma campanha. Crie uma pelo fluxo existente da CLI.</p>}
+    {state.data?.items.length === 0 && <p>Nenhuma campanha. Use Criar campanha abaixo.</p>}
+    <details><summary>Criar campanha</summary><CampaignCreateForm onCreated={campaignId => { window.location.hash = `#/campaigns/${encodeURIComponent(campaignId)}`; }} /></details>
     <div className="campaign-list">{state.data?.items.map(item => <article key={item.campaignId}>
       <h2><a href={`#/campaigns/${encodeURIComponent(item.campaignId)}`}>{item.campaignId}</a></h2>
       <p>{item.character}</p><p>{item.sceneCount} cenas · {statusLabel(item.operationalStatus)}</p>
@@ -78,7 +80,8 @@ export function CampaignDetailPanel({ campaignId }: { campaignId: string }) {
     </Section>
     <Section title="Copy e cenas" state={detail}>
       {detail.data?.copyMasters.map(copy => <article key={copy.copyMasterId}><h3>{copy.copyMasterId} · v{copy.version}</h3>
-        <p>{statusLabel(copy.approvalState)}</p><p>{copy.hook}</p><p>{copy.body}</p><p>{copy.cta}</p></article>)}
+        <p>{statusLabel(copy.approvalState)}</p><p>{copy.headline}</p><p>{copy.hook}</p><p>{copy.body}</p><p>{copy.cta}</p></article>)}
+      <details><summary>Nova versão de copy</summary><CopyVersionForm key={campaignId} campaignId={campaignId} detail={detail} /></details>
       {detail.data?.sceneVariants.map(scene => {
         const live = status.data?.scenes.find(item => item.sceneVariantId === scene.sceneVariantId);
         return <article key={scene.sceneVariantId}><h3>{scene.variantId} · {scene.location}</h3><p>{scene.action}</p>

@@ -8,7 +8,7 @@ const summary = { campaignId: 'campaign-one', character: 'susan-smith', storedSt
   operationalStatus: 'needs_input', nextPending: { code: 'renderer_not_implemented', stage: 'editing', entityId: 'render-one', message: 'Renderer not implemented.' } };
 const detail = { ...summary, proofObject: 'cards', voicePreset: 'voice', editPreset: 'default', copyMasters: [{
   copyMasterId: 'copy-one', campaignId: 'campaign-one', version: 1, approvalState: 'approved', approvedBy: 'tester', approvedAt: time,
-  createdAt: time, updatedAt: time, hook: 'Copy hook', body: 'Copy body', cta: 'Copy CTA',
+  createdAt: time, updatedAt: time, sourceText: 'Original source', sha256: 'a'.repeat(64), headline: 'Copy headline', hook: 'Copy hook', body: 'Copy body', cta: 'Copy CTA',
 }], sceneVariants: [{ sceneVariantId: 'scene-one', campaignId: 'campaign-one', variantId: 'v1', location: 'Room', timeAtmosphere: null, action: 'Talk', prompt: 'Portrait', proofObject: null, status: 'not_started', createdAt: time, updatedAt: time }] };
 const status = { ...summary, approvedCopyCount: 1, approvedVoiceCount: 0, approvedImageCount: 0, readyRenderCount: 0, planCount: 0,
   scenes: [{ sceneVariantId: 'scene-one', variantId: 'v1', currentCopyId: 'copy-one', currentVoiceId: null, approvedImageId: null, readyRenderIds: [], planHashes: [], pending: [summary.nextPending] }] };

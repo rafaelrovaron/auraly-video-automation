@@ -29,7 +29,7 @@ it('shows empty state and creation guidance without POST', async () => {
   vi.stubGlobal('fetch', async () => Response.json({ items: [] }));
   render(<App />);
   expect(await screen.findByText(/Nenhuma campanha/)).toBeTruthy();
-  expect(screen.getByText(/fluxo existente/)).toBeTruthy();
+  expect(screen.getByText('Criar campanha', { selector: 'summary' })).toBeTruthy();
 });
 
 it.each(['#/campaigns/%ZZ', '#/campaigns/A', '#/unknown', '#/campaigns/a/b'])('rejects invalid navigation %s locally', hash => {

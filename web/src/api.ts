@@ -4,7 +4,7 @@ export type CampaignSummary = {
   campaignId: string; character: string; storedStatus: string; sceneCount: number;
   createdAt: string; updatedAt: string; operationalStatus: string; nextPending: PendingItem | null;
 };
-export type CopyMaster = { copyMasterId: string; version: number; approvalState: string; hook: string; body: string; cta: string };
+export type CopyMaster = { copyMasterId: string; version: number; approvalState: string; approvedBy: string | null; sourceText: string; sha256: string; headline: string; hook: string; body: string; cta: string };
 export type SceneVariant = { sceneVariantId: string; variantId: string; location: string; action: string; prompt: string };
 export type CampaignDetail = CampaignSummary & { proofObject: string; voicePreset: string; editPreset: string; copyMasters: CopyMaster[]; sceneVariants: SceneVariant[] };
 export type SceneStatus = { sceneVariantId: string; variantId: string; currentCopyId: string | null; currentVoiceId: string | null; approvedImageId: string | null; readyRenderIds: string[]; planHashes: string[]; pending: PendingItem[] };
@@ -81,8 +81,10 @@ export function campaignSummary(value: unknown): boolean {
 
 export function campaignDetail(value: unknown): boolean {
   return campaignSummary(value) && object(value)
-    && arrayOf(value.copyMasters, copy => hasFields(copy, ['copyMasterId', 'approvalState', 'hook', 'body', 'cta'], ['version']))
-    && arrayOf(value.sceneVariants, scene => hasFields(scene, ['sceneVariantId', 'variantId', 'location', 'action']));
+    && hasFields(value, ['proofObject', 'voicePreset', 'editPreset'])
+    && arrayOf(value.copyMasters, copy => hasFields(copy, ['copyMasterId', 'approvalState', 'sourceText', 'sha256', 'headline', 'hook', 'body', 'cta'], ['version'], ['approvedBy'])
+      && /^[a-f0-9]{64}$/.test(String(copy.sha256)))
+    && arrayOf(value.sceneVariants, scene => hasFields(scene, ['sceneVariantId', 'variantId', 'location', 'action', 'prompt']));
 }
 
 export function campaignStatus(value: unknown): boolean {
