@@ -19,5 +19,10 @@ article, section { background: #182332; border: 1px solid #354359; border-radius
 small, .muted { color: #afbdd0; }
 dl { display: grid; grid-template-columns: minmax(100px, 180px) minmax(0, 1fr); gap: .4rem 1rem; }
 .fact { display: contents; }
+.worker-controls { padding: 1rem; border: 1px solid #62748b; border-radius: .6rem; margin-bottom: 1rem; }
+.worker-controls select { display: block; margin-top: .5rem; max-width: 100%; }
+.actions { display: flex; gap: .6rem; flex-wrap: wrap; margin-top: 1rem; }
+.confirmation { border-left: 3px solid #d5b967; padding: 0 1rem; }
+.confirmation button { margin: 0 .5rem .5rem 0; }
 dd { margin: 0; }
 @media (max-width: 480px) { dl { grid-template-columns: 1fr; } dt { color: #afbdd0; } }

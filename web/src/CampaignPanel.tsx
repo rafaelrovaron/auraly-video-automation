@@ -4,6 +4,7 @@ import { campaignPath, collection, object, pendingLabel, read, readWorker, statu
 import type { CampaignDetail, CampaignStatus, CampaignSummary, Items, JobSummary, OperationView, RenderSummary, SceneImages, VoiceSummary } from './api';
 import { usePolling } from './usePolling';
 import type { RemoteState } from './usePolling';
+import { WorkerControls } from './WorkerControls';
 
 function Updated({ state }: { state: RemoteState<unknown> }) {
   return <>
@@ -125,6 +126,9 @@ export function CampaignDetailPanel({ campaignId }: { campaignId: string }) {
       ]} />}
       <p className="muted">Parado não significa que todos os Jobs terminaram. Nenhum worker inicia ao abrir esta página.</p>
     </Section>
+    <WorkerControls campaignId={campaignId} worker={worker}
+      connected={Boolean(status.data && jobs.data && worker.data && !status.error && !jobs.error && !worker.error)}
+      onRefresh={() => { status.refresh(); jobs.refresh(); worker.refresh(); }} />
   </>;
 }
 
