@@ -22,11 +22,11 @@ pytest_plugins = ["tests.test_heygen_video_media"]
 PREFIX = "/api/v1/campaigns/campaign-one"
 
 
-def test_action_openapi_has_all_19_posts_and_typed_results(tmp_path: Path) -> None:
+def test_action_openapi_has_all_20_posts_and_typed_results(tmp_path: Path) -> None:
     with client_for(create_api_fixture(tmp_path)) as client:
         paths = client.get("/openapi.json").json()["paths"]
         posts = {path: data["post"] for path, data in paths.items() if "post" in data}
-        assert len(posts) == 19
+        assert len(posts) == 20
         for path, endpoint in posts.items():
             status = "201" if path.endswith(("/campaigns", "/copies", "/profiles", "/versions")) else (
                 "200" if path.endswith(("/review", "/cancel", "/resume", "/stop"))

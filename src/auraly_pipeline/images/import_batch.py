@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from auraly_pipeline.campaigns.persistence import create_sqlite_engine, migrate_database
 from auraly_pipeline.campaigns.service import CampaignNotFoundError, CampaignService
+from auraly_pipeline.editing.service import validate_editing_path
 from auraly_pipeline.flow.artifacts import (
     FlowArtifactConflictError,
     FlowArtifactInvalidError,
@@ -130,6 +131,14 @@ class ImageImportPrepared(ContractModel):
     variant_count: int
 
 
+class ImageImportPublished(ContractModel):
+    campaign_id: str
+    manifest_path: Path
+    images_path: Path
+    manifest_sha256: str
+    items: list[ImageImportItem]
+
+
 class ImageImportResultItem(ContractModel):
     image_candidate_id: str
     variant_id: str
@@ -218,6 +227,58 @@ class ImageImportService:
             images_path=output / "images",
             variant_count=len(campaign.scene_variants),
         )
+
+    def publish_manifest(
+        self, campaign_id: str, directory: Path, items: list[ImageImportItem],
+    ) -> ImageImportPublished:
+        """Publish metadata only; images remain uninspected until explicit validation."""
+        temporary: Path | None = None
+        try:
+            directory = validate_editing_path(self._work_root, directory)
+            campaign = self._campaigns.get_campaign(campaign_id)
+            variants = sorted(scene.variant_id for scene in campaign.scene_variants)
+            template = validate_editing_path(directory, directory / "image-import.json")
+            expected = {
+                "schemaVersion": "1.0", "campaignId": campaign_id,
+                "approveImported": False, "approvedBy": None,
+                "items": [{"variantId": variant, "path": ""} for variant in variants],
+            }
+            images = validate_editing_path(directory, directory / "images")
+            if json.loads(template.read_bytes()) != expected or not images.is_dir():
+                raise ImageImportError("Prepared campaign directory required.")
+            batch = ImageImportBatch(
+                schema_version="1.0", campaign_id=campaign_id,
+                items=sorted(items, key=lambda item: item.variant_id),
+            )
+            if sorted(item.variant_id for item in batch.items) != variants:
+                raise ImageImportError("Exact campaign variant coverage required.")
+            for item in batch.items:
+                validate_editing_path(directory, directory / item.path)
+            data = json.dumps(batch.model_dump(mode="json", by_alias=True),
+                              ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+            digest = hashlib.sha256(data).hexdigest()
+            destination = validate_editing_path(directory, directory / f"image-import-{digest}.json")
+            temporary = directory / f".image-import-{uuid4().hex}.tmp"
+            with temporary.open("xb") as stream:
+                stream.write(data)
+                stream.flush()
+                os.fsync(stream.fileno())
+            validate_editing_path(self._work_root, directory)
+            validate_editing_path(directory, destination)
+            try:
+                os.link(temporary, destination)
+            except FileExistsError:
+                if destination.read_bytes() != data:
+                    raise ImageImportArtifactConflictError from None
+            return ImageImportPublished(
+                campaign_id=campaign_id, manifest_path=destination, images_path=images,
+                manifest_sha256=digest, items=batch.items,
+            )
+        except (OSError, ValueError, CampaignNotFoundError) as exc:
+            raise ImageImportError("Associations could not be published safely.") from exc
+        finally:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
 
     def plan(self, manifest_path: Path, *, expected_sha256: str | None = None) -> ImageImportPlan:
         try:

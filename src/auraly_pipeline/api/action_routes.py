@@ -9,7 +9,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from auraly_pipeline.api.action_contracts import (
     EditPlanOperation, HeyGenAssetsOperation, HeyGenReconcileOperation,
     HeyGenVideoPlanOperation, HeyGenVideoSubmitOperation, ImageImportOperation,
-    ImagePrepareOperation, ImageReviewAction, LocalOperationRequest,
+    ImagePrepareOperation, ImageManifestOperation, ImageReviewAction, LocalOperationRequest,
     OperationRequest, OperationSubmission, OperationView,
     VoiceImportOperation, VoiceReviewOperation, WorkerStartAction, WorkerState,
 )
@@ -61,6 +61,10 @@ def register_action_routes(app: FastAPI) -> None:
 
     @app.post(prefix + "/images/import", status_code=202)
     def import_images(campaignId: CampaignId, body: ImageImportOperation, commands: Commands) -> OperationSubmission:
+        return enqueue(campaignId, body, commands)
+
+    @app.post(prefix + "/images/import/manifests", status_code=202)
+    def publish_image_manifest(campaignId: CampaignId, body: ImageManifestOperation, commands: Commands) -> OperationSubmission:
         return enqueue(campaignId, body, commands)
 
     @app.post(prefix + "/images/{candidateId}/review")

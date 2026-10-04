@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from auraly_pipeline.api.action_contracts import (
     EditPlanOperation, EditPlanResult, ImageImportItemResult, ImageImportOperation,
-    ImageImportOperationResult, ImagePrepareOperation, ImagePrepareResult,
+    ImageImportOperationResult, ImagePrepareOperation, ImagePrepareResult, ImageManifestOperation, ImageManifestResult,
     LocalOperationRequest, OperationResult, OperationSubmission, OperationView,
     VoiceImportOperation, VoiceImportResult, VoiceReviewOperation, VoiceReviewResult,
     HeyGenAssetsOperation, HeyGenAssetsResult, HeyGenVideoPlanOperation, HeyGenVideoPlanResult,
@@ -313,6 +313,16 @@ class ApiCommands:
             request = request.model_copy(update={
                 "output_path": output.relative_to(self.settings.work_root).as_posix(),
             })
+        elif isinstance(request, ImageManifestOperation):
+            directory = self._path(request.directory_path)
+            try:
+                directory.relative_to(self.settings.work_root)
+            except ValueError:
+                raise QueryError("invalid_request") from None
+            request = request.model_copy(update={
+                "directory_path": directory.relative_to(self.settings.project_root).as_posix(),
+                "items": sorted(request.items, key=lambda item: item.variant_id),
+            })
         elif isinstance(request, ImageImportOperation):
             path, digest = self._manifest(request.manifest_path, request.campaign_id)
             if request.manifest_sha256 is not None and request.manifest_sha256 != digest:
@@ -520,6 +530,15 @@ class ApiCommands:
                     manifest_path=prepared.manifest_path.relative_to(self.settings.project_root).as_posix(),
                     images_path=prepared.images_path.relative_to(self.settings.project_root).as_posix(),
                     variant_count=prepared.variant_count,
+                )
+            if isinstance(request, ImageManifestOperation):
+                published = self.images.publish_manifest(
+                    request.campaign_id, self._path(request.directory_path), request.items,
+                )
+                return ImageManifestResult(
+                    manifest_path=published.manifest_path.relative_to(self.settings.project_root).as_posix(),
+                    images_path=published.images_path.relative_to(self.settings.project_root).as_posix(),
+                    manifest_sha256=published.manifest_sha256, items=published.items,
                 )
             if isinstance(request, ImageImportOperation):
                 path, digest = self._manifest(request.manifest_path, request.campaign_id)

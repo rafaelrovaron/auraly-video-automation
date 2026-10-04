@@ -10,11 +10,12 @@ from auraly_pipeline.editing.domain import Sha, relative_path
 from auraly_pipeline.jobs.state_machine import JobStatus
 from auraly_pipeline.heygen.video_domain import HeyGenVideoConfig
 from auraly_pipeline.models import ContractModel
+from auraly_pipeline.images.import_batch import ImageImportItem
 from auraly_pipeline.metadata_security import validate_safe_identifier, validate_safe_error_message
 from auraly_pipeline.voices.domain import VoiceImportRequest, VoiceMasterStatus
 
 OperationKind = Literal[
-    "image_prepare", "image_import", "edit_plan", "voice_generate", "voice_import", "voice_review",
+    "image_prepare", "image_manifest", "image_import", "edit_plan", "voice_generate", "voice_import", "voice_review",
     "heygen_assets", "heygen_video_plan", "heygen_video_submit", "heygen_reconcile",
 ]
 
@@ -33,6 +34,13 @@ class ImageImportOperation(OperationRequest):
     manifest_path: str = Field(min_length=1)
     mode: Literal["dry_run", "execute"]
     manifest_sha256: Sha | None = None
+
+
+class ImageManifestOperation(OperationRequest):
+    operation: Literal["image_manifest"] = "image_manifest"
+    directory_path: str = Field(min_length=1)
+    items: list[ImageImportItem] = Field(min_length=1)
+    _directory = field_validator("directory_path")(relative_path)
 
 
 class EditPlanOperation(OperationRequest):
@@ -104,7 +112,7 @@ class HeyGenReconcileOperation(OperationRequest):
 
 
 LocalOperationRequest: TypeAlias = Annotated[
-    ImagePrepareOperation | ImageImportOperation | EditPlanOperation |
+    ImagePrepareOperation | ImageManifestOperation | ImageImportOperation | EditPlanOperation |
     VoiceImportOperation | VoiceReviewOperation | HeyGenAssetsOperation |
     HeyGenVideoPlanOperation | HeyGenVideoSubmitOperation | HeyGenReconcileOperation,
     Field(discriminator="operation"),
@@ -124,6 +132,15 @@ class ImageImportItemResult(ContractModel):
     scene_variant_id: str
     image_candidate_id: str | None = None
     action: Literal["create", "reuse"]
+
+
+class ImageManifestResult(ContractModel):
+    operation: Literal["image_manifest"] = "image_manifest"
+    manifest_path: str
+    images_path: str
+    manifest_sha256: Sha
+    items: list[ImageImportItem]
+    _paths = field_validator("manifest_path", "images_path")(relative_path)
 
 
 class ImageImportOperationResult(ContractModel):
@@ -182,7 +199,7 @@ class HeyGenReconcileResult(ContractModel):
 
 
 OperationResult: TypeAlias = Annotated[
-    ImagePrepareResult | ImageImportOperationResult | EditPlanResult |
+    ImagePrepareResult | ImageManifestResult | ImageImportOperationResult | EditPlanResult |
     VoiceImportResult | VoiceReviewResult | HeyGenAssetsResult |
     HeyGenVideoPlanResult | HeyGenVideoSubmitResult | HeyGenReconcileResult,
     Field(discriminator="operation"),
