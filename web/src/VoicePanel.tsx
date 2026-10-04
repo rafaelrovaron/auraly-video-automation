@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { ApiError, campaignPath, jobSummary, object, post, read } from './api';
 import type { CampaignDetail, Items, JobSummary, VoiceSummary } from './api';
-import { campaignBudgetView, voiceSubmission } from './voiceApi';
-import type { CampaignBudgetView } from './voiceApi';
+import { campaignBudgetView, voiceSubmission, voiceOperationView } from './voiceApi';
+import type { CampaignBudgetView, VoiceOperationView } from './voiceApi';
 import { usePolling } from './usePolling';
 import type { RemoteState } from './usePolling';
 import { useUnsavedChanges } from './useUnsavedChanges';
@@ -10,6 +10,7 @@ import { useUnsavedChanges } from './useUnsavedChanges';
 type Props = {campaignId: string; detail: RemoteState<CampaignDetail>; voices: RemoteState<Items<VoiceSummary>>; jobs: RemoteState<Items<JobSummary>>};
 const positive = (value: string) => /^\d+$/.test(value) && Number.isSafeInteger(Number(value)) && Number(value) > 0;
 const actorValid = (value: string) => /^[A-Za-z0-9][A-Za-z0-9._:@-]{0,119}$/.test(value);
+const sourceValid = (value: string) => !!value && !/^[\\/]|:/.test(value) && !value.split(/[\\/]/).some(part => ['..', '.', ''].includes(part)) && /\.(mp3|wav)$/i.test(value);
 
 export function VoicePanel(props: Props) { return <VoiceForms key={props.campaignId} {...props} />; }
 
@@ -30,6 +31,10 @@ function VoiceForms({campaignId, detail, voices, jobs}: Props) {
   const [acceptedVoice, setAcceptedVoice] = useState<string | null>(null);
   const [budgetIntent, setBudgetIntent] = useState<{currency: string; limitCents: number; minimumRead: number} | null>(null);
   const [dirty, setDirty] = useState(false);
+  const [sourcePath, setSourcePath] = useState('');
+  const [importConfirmed, setImportConfirmed] = useState(false);
+  const [requestId, setRequestId] = useState('');
+  const [wrapper, setWrapper] = useState<{jobId: string; kind: 'voice_import' | 'voice_review' | null} | null>(null);
   const clearDirty = useUnsavedChanges(dirty || unknown || busy);
   const alive = useRef(true), lock = useRef(false);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
@@ -39,7 +44,7 @@ function VoiceForms({campaignId, detail, voices, jobs}: Props) {
   const budgetFresh = budget.data && !budget.error;
   const blocked = !connected || busy || unknown || budgetIntent !== null;
   const copy = detail.data?.copyMasters.find(item => item.version === Number(version) && item.approvalState === 'approved');
-  const edit = (action: () => void) => { action(); setBudgetConfirmed(false); setPaid(false); setDirty(true); };
+  const edit = (action: () => void) => { action(); setBudgetConfirmed(false); setPaid(false); setImportConfirmed(false); setDirty(true); };
   const canGenerate = !blocked && budgetFresh && budget.data?.state === 'configured' && copy
     && /^[A-Za-z0-9_-]{1,120}$/.test(voiceId) && /^[A-Za-z0-9_-]{1,120}$/.test(modelId)
     && actorValid(actor) && positive(ceiling) && Number(ceiling) <= budget.data.limitCents && paid;
@@ -96,6 +101,26 @@ function VoiceForms({campaignId, detail, voices, jobs}: Props) {
     }
   };
 
+  const importVoice = async () => {
+    if (lock.current || blocked || !copy || !sourceValid(sourcePath) || !importConfirmed) return;
+    lock.current = true; setBusy(true); setImportConfirmed(false); setNotice('');
+    const id = crypto.randomUUID(); setRequestId(id);
+    try {
+      const result = await post<unknown>(campaignPath(campaignId, '/voices/import'), {operation: 'voice_import', campaignId, sourcePath,
+        requestId: id, request: {campaignId, copyMasterVersion: Number(version)}});
+      if (!alive.current) return;
+      if (!voiceSubmission(result) || result.operation !== 'voice_import' || result.campaignId !== campaignId) throw new ApiError('command_unknown');
+      setWrapper({jobId: result.jobId, kind: 'voice_import'}); setDirty(false); clearDirty();
+      setNotice('Importação enfileirada. Inicie local_operations; depois, voice_import. Nenhum worker foi iniciado.');
+    } catch (error) {
+      if (!alive.current) return;
+      const failure = error instanceof ApiError ? error : new ApiError('command_unknown');
+      setUnknown(failure.code === 'command_unknown'); setNotice(`${failure.code}: ${failure.message}`);
+    } finally {
+      if (alive.current) { jobs.refresh(); voices.refresh(); setBusy(false); lock.current = false; }
+    }
+  };
+
   return <section aria-label="Operação de voz"><h3>Operar Voice Master</h3>
     {!connected && <p role="alert">Leituras de voz desatualizadas ou indisponíveis. Atualize a campanha.</p>}
     <section aria-label="Orçamento da campanha"><h4>Orçamento da campanha</h4>
@@ -126,6 +151,13 @@ function VoiceForms({campaignId, detail, voices, jobs}: Props) {
       <button disabled={!canGenerate}>Enfileirar geração de voz</button>
     </fieldset></form>
     <p>IDs do ElevenLabs são informados manualmente. A mesma identidade pode reutilizar voz/Job; não há regeneração forçada.</p>
+    <form aria-label="Importação de voz" onSubmit={event => {event.preventDefault(); void importVoice();}}><fieldset disabled={blocked}>
+      <label>Caminho relativo do áudio <input value={sourcePath} onChange={event => edit(() => setSourcePath(event.target.value))} /></label>
+      <label><input type="checkbox" checked={importConfirmed} onChange={event => setImportConfirmed(event.target.checked)} />Confirmo o arquivo e a versão da copy</label>
+      <button disabled={blocked || !copy || !sourceValid(sourcePath) || !importConfirmed}>Enfileirar importação de voz</button>
+    </fieldset></form>
+    <p>Copie o MP3/WAV pelo Explorer para dentro do project root, por exemplo imports/voice.wav (máximo 100 MiB). Informe o caminho relativo; não há upload. O original é preservado e o WAV processado é outro arquivo. Importar não exige orçamento ElevenLabs.</p>
+    {requestId && <p>Request de importação: {requestId}</p>}
     {notice && <p role="status">{notice}</p>}
     {unknown && <p>Intenção anterior preservada, sem reenvio. Inspecione Jobs e vozes persistidos; coincidência de versão/provider não prova identidade.</p>}
     <label>Job de geração para inspecionar <select value={selectedJob} disabled={!connected || busy} onChange={event => {setSelectedJob(event.target.value); setAcceptedVoice(null);}}>
@@ -134,7 +166,30 @@ function VoiceForms({campaignId, detail, voices, jobs}: Props) {
     </select></label>
     {acceptedVoice && <p>Voice Master aceito: {acceptedVoice}</p>}
     {selectedJob && <VoiceJobMonitor key={selectedJob} campaignId={campaignId} jobId={selectedJob} kind="voice.generate" onChange={voices.refresh} />}
+    <label>Operação local de voz para inspecionar <select value={wrapper?.jobId ?? ''} disabled={!connected || busy}
+      onChange={event => setWrapper(event.target.value ? {jobId: event.target.value, kind: null} : null)}>
+      <option value="">Selecione uma operação</option>{wrapper && !jobs.data?.items.some(item => item.jobId === wrapper.jobId) && <option value={wrapper.jobId}>{wrapper.jobId}</option>}
+      {jobs.data?.items.filter(item => item.campaignId === campaignId && item.jobType === 'api.local.operation').map(item => <option key={item.jobId} value={item.jobId}>{item.jobId}</option>)}
+    </select></label>
+    <p>Inspecionar um Job conhecido não o associa a uma intenção cuja resposta foi perdida.</p>
+    {wrapper && <VoiceOperationMonitor key={wrapper.jobId} campaignId={campaignId} jobId={wrapper.jobId} kind={wrapper.kind} onChange={voices.refresh} />}
   </section>;
+}
+
+function VoiceOperationMonitor({campaignId, jobId, kind, onChange}: {campaignId: string; jobId: string; kind: 'voice_import' | 'voice_review' | null; onChange: () => void}) {
+  const operation = usePolling(`${campaignId}:voice-operation:${jobId}`, signal => read<VoiceOperationView>(campaignPath(campaignId, `/operations/${encodeURIComponent(jobId)}`), signal,
+    value => voiceOperationView(value) && value.campaignId === campaignId && value.jobId === jobId && (kind === null || value.operation === kind)), 2000);
+  useEffect(() => { if (operation.data && !operation.error) onChange(); }, [operation.data?.status, operation.error, onChange]);
+  const result = !operation.error && operation.data?.status === 'completed' ? operation.data.result : null;
+  return <div>
+    {operation.error && <p role="alert">{operation.error.message} ({operation.error.code}). Dados desatualizados.</p>}
+    {operation.data && <><p>Operação {jobId}: {operation.data.operation} · {operation.data.status}</p><p>Erro: {operation.data.errorCode ?? 'Não disponível'}</p></>}
+    {!result && <p>Fase 1: executar operação local (local_operations)</p>}
+    {result?.operation === 'voice_import' && <><p>Fase 2: processar voz importada</p><p>Voice Master importado: {result.voiceMasterId}. Inicie voice_import explicitamente.</p>
+      <VoiceJobMonitor key={result.jobId} campaignId={campaignId} jobId={result.jobId} kind="voice.import" onChange={onChange} /></>}
+    {result?.operation === 'voice_review' && <p>Review executado para {result.voiceMasterId}. Consulte a voz persistida; o resultado sozinho não confirma aprovação nem autoria.</p>}
+    <button onClick={operation.refresh}>Consultar operação de voz</button>
+  </div>;
 }
 
 function VoiceJobMonitor({campaignId, jobId, kind, onChange}: {campaignId: string; jobId: string; kind: string; onChange: () => void}) {

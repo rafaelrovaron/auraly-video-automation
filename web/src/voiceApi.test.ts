@@ -1,5 +1,13 @@
 import { expect, it } from 'vitest';
-import { campaignBudgetView, voiceSubmission } from './voiceApi';
+import { campaignBudgetView, voiceSubmission, voiceOperationView } from './voiceApi';
+
+it('test_voice_operation_result_requires_exact_kind_and_complete_ids', () => {
+  const op = {jobId: 'wrapper', campaignId: 'campaign', operation: 'voice_import', status: 'completed', errorCode: null,
+    result: {operation: 'voice_import', jobId: 'child', voiceMasterId: 'voice'}};
+  expect(voiceOperationView(op)).toBe(true);
+  expect(voiceOperationView({...op, result: {...op.result, jobId: null}})).toBe(false);
+  expect(voiceOperationView({...op, result: {...op.result, operation: 'voice_review'}})).toBe(false);
+});
 import { voiceSummary } from './api';
 
 it('test_budget_guard_rejects_invalid_and_unsafe_integer', () => {

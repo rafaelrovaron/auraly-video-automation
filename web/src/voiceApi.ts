@@ -14,3 +14,17 @@ export function voiceSubmission(value: unknown): value is VoiceSubmission {
     && typeof value.campaignId === 'string' && !!value.campaignId && typeof value.jobId === 'string' && !!value.jobId
     && (value.operation !== 'voice_generate' || (typeof value.voiceMasterId === 'string' && !!value.voiceMasterId));
 }
+
+export type VoiceImportResult = {operation: 'voice_import'; voiceMasterId: string; jobId: string};
+export type VoiceReviewResult = {operation: 'voice_review'; voiceMasterId: string; status: string};
+export type VoiceOperationView = {jobId: string; campaignId: string; operation: 'voice_import' | 'voice_review';
+  status: string; result: VoiceImportResult | VoiceReviewResult | null; errorCode: string | null};
+const nonempty = (value: unknown): value is string => typeof value === 'string' && value.length > 0;
+export function voiceOperationView(value: unknown): value is VoiceOperationView {
+  if (!object(value) || !nonempty(value.jobId) || !nonempty(value.campaignId)
+    || !['voice_import', 'voice_review'].includes(String(value.operation)) || !nonempty(value.status)
+    || !(value.errorCode === null || typeof value.errorCode === 'string')) return false;
+  if (value.result === null) return value.status !== 'completed';
+  return object(value.result) && value.result.operation === value.operation && nonempty(value.result.voiceMasterId)
+    && (value.operation === 'voice_import' ? nonempty(value.result.jobId) : nonempty(value.result.status));
+}

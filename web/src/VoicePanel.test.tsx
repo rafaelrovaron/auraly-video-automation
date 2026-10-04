@@ -119,3 +119,74 @@ it('test_stale_or_incomplete_voice_dto_keeps_last_good_data', async () => {
   view.rerender(<VoicePanel {...p} voices={{...p.voices, error: new ApiError('invalid_response')}} />);
   expect((generate() as HTMLButtonElement).disabled).toBe(true); expect(screen.getByText(/Leituras de voz desatualizadas/)).not.toBeNull();
 });
+
+const wrapper = {jobId: 'wrapper-one', campaignId: 'campaign-one', operation: 'voice_import', status: 'completed', errorCode: null,
+  result: {operation: 'voice_import', voiceMasterId: 'voice-one', jobId: 'child-one'}};
+function importApi(_operation: unknown = wrapper, _childStatus = 'queued', responseStatus = 200) {
+  return fakeApi({state: 'missing', currency: null, limitCents: null}, async () => Response.json(responseStatus === 200
+    ? {operation: 'voice_import', campaignId: 'campaign-one', jobId: 'wrapper-one'} : {error: {code: 'internal_error'}}, {status: responseStatus}));
+}
+function wrapReads(operation: unknown = wrapper, childStatus = 'queued') {
+  const base = globalThis.fetch;
+  vi.stubGlobal('fetch', async (path: string, options: RequestInit) => {
+    if (options.method !== 'POST' && path.endsWith('/operations/wrapper-one')) return Response.json(operation);
+    if (options.method !== 'POST' && path.endsWith('/jobs/child-one')) return Response.json({...job, jobId: 'child-one', jobType: 'voice.import', status: childStatus});
+    return base(path, options);
+  });
+}
+async function fillImport() {
+  await screen.findByLabelText('Caminho relativo do áudio');
+  fireEvent.change(screen.getByLabelText('Versão da copy para voz'), {target: {value: '1'}});
+  fireEvent.change(screen.getByLabelText('Caminho relativo do áudio'), {target: {value: 'imports/voice.mp3'}});
+  fireEvent.click(screen.getByLabelText('Confirmo o arquivo e a versão da copy'));
+}
+const importButton = () => screen.getByRole('button', {name: 'Enfileirar importação de voz'});
+
+it('test_import_enqueues_only_then_shows_wrapper_and_child', async () => {
+  const calls = importApi(); wrapReads(); render(<VoicePanel {...props()} />); await fillImport();
+  fireEvent.click(importButton()); fireEvent.click(importButton());
+  await screen.findByText('Fase 2: processar voz importada'); await screen.findByText('voice.import · queued');
+  expect(calls).toHaveLength(1); expect(calls[0].path).toBe('/api/v1/campaigns/campaign-one/voices/import');
+  expect(calls[0].body).toEqual({operation: 'voice_import', campaignId: 'campaign-one', sourcePath: 'imports/voice.mp3',
+    requestId: expect.any(String), request: {campaignId: 'campaign-one', copyMasterVersion: 1}});
+  fireEvent.click(screen.getByRole('button', {name: 'Consultar operação de voz'})); expect(calls).toHaveLength(1);
+  expect(screen.queryByText('Voz aprovada')).toBeNull();
+});
+it('test_completed_wrapper_with_failed_child_is_not_success', async () => {
+  importApi(); wrapReads(wrapper, 'failed'); render(<VoicePanel {...props()} />); await fillImport(); fireEvent.click(importButton());
+  await screen.findByText('voice.import · failed'); expect(screen.queryByText('Voz aprovada')).toBeNull();
+});
+it('test_invalid_source_and_changed_copy_reset_confirmation', async () => {
+  importApi(); render(<VoicePanel {...props()} />); await fillImport();
+  fireEvent.change(screen.getByLabelText('Caminho relativo do áudio'), {target: {value: '../voice.wav'}});
+  expect((screen.getByLabelText('Confirmo o arquivo e a versão da copy') as HTMLInputElement).checked).toBe(false);
+  fireEvent.click(screen.getByLabelText('Confirmo o arquivo e a versão da copy'));
+  expect((importButton() as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.change(screen.getByLabelText('Versão da copy para voz'), {target: {value: '2'}});
+  expect((screen.getByLabelText('Confirmo o arquivo e a versão da copy') as HTMLInputElement).checked).toBe(false);
+});
+it('test_import_unknown_result_does_not_resubmit', async () => {
+  const calls = importApi(wrapper, 'queued', 503); render(<VoicePanel {...props()} />); await fillImport(); fireEvent.click(importButton());
+  await screen.findByText(/command_unknown/); fireEvent.click(importButton()); expect(calls).toHaveLength(1);
+  expect((importButton() as HTMLButtonElement).disabled).toBe(true);
+});
+it('test_adopt_wrapper_validates_campaign_kind_and_ids', async () => {
+  importApi(); wrapReads({...wrapper, campaignId: 'campaign-two'});
+  render(<VoicePanel {...props()} jobs={state({items: [{...job, jobId: 'wrapper-one', jobType: 'api.local.operation'}]})} />);
+  fireEvent.change(screen.getByLabelText('Operação local de voz para inspecionar'), {target: {value: 'wrapper-one'}});
+  await screen.findByText(/invalid_response/); expect(screen.queryByText('Fase 2: processar voz importada')).toBeNull();
+});
+it('test_reload_observes_without_post', async () => {
+  const calls = importApi(); wrapReads(); const p = {...props(), jobs: state({items: [{...job, jobId: 'wrapper-one', jobType: 'api.local.operation'}]})};
+  const view = render(<VoicePanel {...p} />); view.unmount(); render(<VoicePanel {...p} />);
+  fireEvent.change(screen.getByLabelText('Operação local de voz para inspecionar'), {target: {value: 'wrapper-one'}});
+  await screen.findByText('voice.import · queued'); expect(calls).toHaveLength(0);
+});
+it('test_pending_navigation_warns_and_late_import_is_ignored', async () => {
+  let finish!: (response: Response) => void; fakeApi(undefined, () => new Promise(resolve => {finish = resolve;}));
+  const view = render(<VoicePanel {...props()} />); await fillImport(); fireEvent.click(importButton());
+  const event = new Event('beforeunload', {cancelable: true}); window.dispatchEvent(event); expect(event.defaultPrevented).toBe(true);
+  view.unmount(); render(<VoicePanel {...props()} />);
+  await act(async () => finish(Response.json({operation: 'voice_import', campaignId: 'campaign-one', jobId: 'wrapper-one'})));
+  expect(screen.queryByText('Fase 2: processar voz importada')).toBeNull();
+});

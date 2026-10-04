@@ -69,7 +69,7 @@ export function WorkerControls({ campaignId, worker, connected, onRefresh }: Wor
     <p>Parar impede novas capturas e aguarda o trabalho atual. Não cancela Jobs em andamento nem devolve créditos.</p>
     {!connected && <p role="status">Comandos indisponíveis até recuperar as leituras da API.</p>}
     {confirmation?.campaignId === campaignId && <div role="group" aria-label="Confirmação de início" className="confirmation">
-      <p>Iniciar {confirmation.kind} em {confirmation.campaignId}?</p><p>Jobs já enfileirados podem consumir créditos.</p>
+      <p>Iniciar {confirmation.kind} em {confirmation.campaignId}?</p><p>Processa todos os Jobs elegíveis deste tipo nesta campanha, não apenas o Job exibido. Jobs já enfileirados podem consumir créditos.</p>
       <button disabled={blocked} onClick={() => { void send('start', confirmation.kind); }}>Confirmar início</button>
       <button disabled={sending} onClick={() => setConfirmation(null)}>Cancelar</button>
     </div>}
