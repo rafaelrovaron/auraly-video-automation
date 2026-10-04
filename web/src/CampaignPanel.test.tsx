@@ -26,7 +26,7 @@ function fakeApi(overrides: Record<string, unknown> = {}) {
     calls.push({ path, method: options.method ?? 'GET' });
     const suffix = path.replace('/api/v1/campaigns/campaign-one', '');
     const body = { '': detail, '/status': status, '/images': { items: [{ sceneVariantId: 'scene-one', items: [] }] },
-      '/voices': { items: [voice] }, '/heygen/renders': { items: [renderItem] }, '/jobs': { items: [job] },
+      '/voices': { items: [voice] }, '/budget': {state: 'missing', currency: null, limitCents: null}, '/heygen/renders': { items: [renderItem] }, '/jobs': { items: [job] },
       '/jobs/job-one': job, '/worker': { state: 'idle', campaignId: null, kind: null, errorCode: null }, ...overrides }[suffix];
     return Response.json(body);
   });

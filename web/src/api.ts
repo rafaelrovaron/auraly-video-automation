@@ -12,8 +12,9 @@ export type CampaignStatus = { campaignId: string; storedStatus: string; operati
   approvedCopyCount: number; approvedVoiceCount: number; approvedImageCount: number; readyRenderCount: number; planCount: number; scenes: SceneStatus[] };
 export type ImageSummary = { imageCandidateId: string; sceneVariantId: string; sourceKind: string; reviewStatus: string; sourcePath: string; sha256: string; width: number; height: number; sizeBytes: number; format: string; rejectionReason: string | null };
 export type SceneImages = Items<ImageSummary> & { sceneVariantId: string };
-export type VoiceSummary = { voiceMasterId: string; copyMasterId: string; copyMasterVersion: number; provider: string; status: string; processedAudioPath: string | null; durationSeconds: number | null;
-  transcriptMatchStatus: string | null; headlineSpoken: boolean | null; qcFindings: string[]; approvalReviewReason: string | null; rejectionReason: string | null };
+export type VoiceSummary = { voiceMasterId: string; campaignId: string; copyMasterId: string; copyMasterVersion: number; generation: number; provider: string; status: string;
+  processedAudioPath: string | null; processedSha256: string | null; durationSeconds: number | null; transcriptMatchStatus: string | null; headlineSpoken: boolean | null;
+  qcFindings: string[]; approvedAt: string | null; approvedBy: string | null; approvalReviewReason: string | null; rejectedAt: string | null; rejectedBy: string | null; rejectionReason: string | null };
 export type RenderSummary = { renderId: string; sceneVariantId: string; imageCandidateId: string; voiceMasterId: string; jobId: string; status: string; remoteVideoId: string | null; source: { path: string } | null; errorCode: string | null };
 export type JobSummary = { jobId: string; jobType: string; campaignId: string | null; sceneVariantId: string | null; status: string; attemptCount: number; maxAttempts: number;
   retrySafety: string; queuedAt: string; startedAt: string | null; completedAt: string | null; nextRetryAt: string | null; lastErrorCode: string | null };
@@ -101,8 +102,9 @@ export function sceneImages(value: unknown): boolean {
 }
 
 export function voiceSummary(value: unknown): boolean {
-  return hasFields(value, ['voiceMasterId', 'copyMasterId', 'provider', 'status'], ['copyMasterVersion'],
-    ['processedAudioPath', 'transcriptMatchStatus', 'approvalReviewReason', 'rejectionReason'])
+  return hasFields(value, ['voiceMasterId', 'campaignId', 'copyMasterId', 'provider', 'status'], ['copyMasterVersion', 'generation'],
+    ['processedAudioPath', 'processedSha256', 'transcriptMatchStatus', 'approvedAt', 'approvedBy', 'approvalReviewReason', 'rejectedAt', 'rejectedBy', 'rejectionReason'])
+    && (value.processedSha256 === null || /^[a-f0-9]{64}$/.test(String(value.processedSha256)))
     && (value.durationSeconds === null || (typeof value.durationSeconds === 'number' && Number.isFinite(value.durationSeconds)))
     && (value.headlineSpoken === null || typeof value.headlineSpoken === 'boolean') && stringArray(value.qcFindings);
 }

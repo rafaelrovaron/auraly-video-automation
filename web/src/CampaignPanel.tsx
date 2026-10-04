@@ -7,6 +7,7 @@ import type { RemoteState } from './usePolling';
 import { WorkerControls } from './WorkerControls';
 import { CampaignCreateForm, CopyVersionForm } from './CampaignForms';
 import { ImageImportPanel } from './ImageImportPanel';
+import { VoicePanel } from './VoicePanel';
 
 function Updated({ state }: { state: RemoteState<unknown> }) {
   return <>
@@ -102,6 +103,7 @@ export function CampaignDetailPanel({ campaignId }: { campaignId: string }) {
       {images.data && images.data.items.every(scene => scene.items.length === 0) && <p>Nenhuma imagem importada.</p>}
     </Section>
     <Section title="Voice Masters" state={voices}>
+      <VoicePanel campaignId={campaignId} detail={detail} voices={voices} jobs={jobs} />
       {voices.data?.items.map(voice => <article key={voice.voiceMasterId}><h3>{voice.voiceMasterId}</h3><Facts entries={[
         ['Copy', `${voice.copyMasterId} · v${voice.copyMasterVersion}`], ['Provider', voice.provider], ['Status', statusLabel(voice.status)], ['WAV processado', voice.processedAudioPath],
         ['Duração (s)', voice.durationSeconds], ['Transcrição', voice.transcriptMatchStatus], ['Headline falada', voice.headlineSpoken === null ? null : voice.headlineSpoken ? 'Sim' : 'Não'],
