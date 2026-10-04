@@ -24,7 +24,7 @@ export type WorkerObservation = { scope: 'known'; value: WorkerState } | { scope
 
 export async function readWorker(id: string, signal: AbortSignal): Promise<WorkerObservation> {
   try {
-    const value = await read<WorkerState>(campaignPath(id, '/worker'), signal, body => object(body)
+    const value = await read<WorkerState>(campaignPath(id, '/worker'), signal, body => hasFields(body, [], [], ['campaignId', 'kind', 'errorCode'])
       && ['idle', 'running', 'stopping'].includes(String(body.state))
       && (body.campaignId === null || typeof body.campaignId === 'string'));
     return { scope: 'known', value };
@@ -57,8 +57,66 @@ export function object(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-export function collection(value: unknown): boolean {
-  return object(value) && Array.isArray(value.items);
+function hasFields(value: unknown, text: string[], numbers: string[] = [], nullableText: string[] = []): value is Record<string, unknown> {
+  return object(value) && text.every(key => typeof value[key] === 'string')
+    && numbers.every(key => typeof value[key] === 'number' && Number.isFinite(value[key]))
+    && nullableText.every(key => value[key] === null || typeof value[key] === 'string');
+}
+
+function arrayOf(value: unknown, accepts: (item: unknown) => boolean): boolean {
+  return Array.isArray(value) && value.every(accepts);
+}
+
+const stringArray = (value: unknown) => arrayOf(value, item => typeof item === 'string');
+const pending = (value: unknown) => hasFields(value, ['code', 'stage', 'entityId', 'message']);
+
+export function collection(value: unknown, accepts?: (item: unknown) => boolean): boolean {
+  return object(value) && Array.isArray(value.items) && (!accepts || value.items.every(accepts));
+}
+
+export function campaignSummary(value: unknown): boolean {
+  return hasFields(value, ['campaignId', 'character', 'operationalStatus'], ['sceneCount'])
+    && (value.nextPending === null || pending(value.nextPending));
+}
+
+export function campaignDetail(value: unknown): boolean {
+  return campaignSummary(value) && object(value)
+    && arrayOf(value.copyMasters, copy => hasFields(copy, ['copyMasterId', 'approvalState', 'hook', 'body', 'cta'], ['version']))
+    && arrayOf(value.sceneVariants, scene => hasFields(scene, ['sceneVariantId', 'variantId', 'location', 'action']));
+}
+
+export function campaignStatus(value: unknown): boolean {
+  return hasFields(value, ['campaignId', 'operationalStatus'], ['sceneCount', 'approvedCopyCount', 'approvedVoiceCount', 'approvedImageCount', 'readyRenderCount', 'planCount'])
+    && (value.nextPending === null || pending(value.nextPending))
+    && arrayOf(value.scenes, scene => hasFields(scene, ['sceneVariantId'], [], ['currentCopyId', 'currentVoiceId', 'approvedImageId'])
+      && stringArray(scene.readyRenderIds) && stringArray(scene.planHashes) && arrayOf(scene.pending, pending));
+}
+
+export function sceneImages(value: unknown): boolean {
+  return hasFields(value, ['sceneVariantId']) && collection(value, image => hasFields(image,
+    ['imageCandidateId', 'sceneVariantId', 'reviewStatus', 'sourceKind', 'sourcePath', 'format', 'sha256'],
+    ['width', 'height', 'sizeBytes'], ['rejectionReason']));
+}
+
+export function voiceSummary(value: unknown): boolean {
+  return hasFields(value, ['voiceMasterId', 'copyMasterId', 'provider', 'status'], ['copyMasterVersion'],
+    ['processedAudioPath', 'transcriptMatchStatus', 'approvalReviewReason', 'rejectionReason'])
+    && (value.durationSeconds === null || (typeof value.durationSeconds === 'number' && Number.isFinite(value.durationSeconds)))
+    && (value.headlineSpoken === null || typeof value.headlineSpoken === 'boolean') && stringArray(value.qcFindings);
+}
+
+export function renderSummary(value: unknown): boolean {
+  return hasFields(value, ['renderId', 'sceneVariantId', 'imageCandidateId', 'voiceMasterId', 'jobId', 'status'], [], ['remoteVideoId', 'errorCode'])
+    && (value.source === null || hasFields(value.source, ['path']));
+}
+
+export function jobSummary(value: unknown): boolean {
+  return hasFields(value, ['jobId', 'jobType', 'status', 'retrySafety', 'queuedAt'], ['attemptCount', 'maxAttempts'],
+    ['startedAt', 'completedAt', 'nextRetryAt', 'lastErrorCode']);
+}
+
+export function operationView(value: unknown): boolean {
+  return hasFields(value, ['jobId', 'operation'], [], ['errorCode']) && (value.result === null || object(value.result));
 }
 
 async function responseBody(response: Response): Promise<unknown> {
@@ -99,19 +157,21 @@ export async function post<T>(path: string, body: object): Promise<T> {
 }
 
 export function statusLabel(value: string): string {
-  return ({ needs_input: 'Precisa de informação', needs_review: 'Aguardando aprovação', in_progress: 'Em andamento',
+  const label = ({ needs_input: 'Precisa de informação', needs_review: 'Aguardando aprovação', in_progress: 'Em andamento',
     needs_attention: 'Requer atenção', ready_for_editing: 'Pronto para edição', editing_planned: 'Edição planejada',
     idle: 'Parado', running: 'Em execução', stopping: 'Parando após o trabalho atual',
     queued: 'Na fila', completed: 'Concluído', failed: 'Falhou', cancelled: 'Cancelado',
     retry_scheduled: 'Nova tentativa agendada', reconciliation_required: 'Requer reconciliação',
     approved: 'Aprovado', pending: 'Pendente', rejected: 'Rejeitado', ready: 'Disponível', draft: 'Rascunho',
-  } as Record<string, string>)[value] ?? value;
+  } as Record<string, string>)[value];
+  return typeof label === 'string' ? label : value;
 }
 
 export function pendingLabel(item: PendingItem): string {
-  return ({ attention_required: 'Atenção necessária', wait_for_job: 'Aguardando Job', editing_plan_missing: 'Plano de edição ausente',
+  const label = ({ attention_required: 'Atenção necessária', wait_for_job: 'Aguardando Job', editing_plan_missing: 'Plano de edição ausente',
     caption_timing_missing: 'Timing das legendas ausente', renderer_not_implemented: 'Renderer ainda não implementado',
     copy_approval_missing: 'Copy aguarda aprovação', voice_review_required: 'Voz aguarda aprovação', voice_missing: 'Voz ausente',
     image_review_required: 'Imagem aguarda aprovação', image_missing: 'Imagem ausente', heygen_render_missing: 'Render HeyGen ausente',
-  } as Record<string, string>)[item.code] ?? item.code;
+  } as Record<string, string>)[item.code];
+  return typeof label === 'string' ? label : item.code;
 }

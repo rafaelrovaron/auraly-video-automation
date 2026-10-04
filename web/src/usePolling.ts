@@ -1,13 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ApiError } from './api';
-export type RemoteState<T> = { data: T | null; error: ApiError | null; loading: boolean; lastSuccessAt: number | null; refresh: () => void };
+export type RemoteState<T> = { data: T | null; error: ApiError | null; loading: boolean; lastSuccessAt: number | null; lastSuccessReadId: number | null; refresh: () => number };
 export function usePolling<T>(key: string, load: (signal: AbortSignal) => Promise<T>, intervalMs: number | null): RemoteState<T> {
-  const empty = { data: null, error: null, loading: true, lastSuccessAt: null };
+  const empty = { data: null, error: null, loading: true, lastSuccessAt: null, lastSuccessReadId: null };
   const [snapshot, setSnapshot] = useState<Omit<RemoteState<T>, 'refresh'> & { key: string }>({ ...empty, key });
   const loader = useRef(load);
   loader.current = load;
   const trigger = useRef(() => {});
-  const refresh = useCallback(() => trigger.current(), []);
+  const sequence = useRef(0);
+  const refresh = useCallback(() => {
+    const nextReadId = sequence.current + 1;
+    trigger.current();
+    return nextReadId;
+  }, []);
   useEffect(() => {
     let active = true, running = false, queued = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -18,11 +23,12 @@ export function usePolling<T>(key: string, load: (signal: AbortSignal) => Promis
       if (!active || document.hidden) return;
       if (running) { queued = true; return; }
       running = true;
+      const readId = ++sequence.current;
       controller = new AbortController();
       setSnapshot(previous => ({ ...previous, loading: true }));
       try {
         const data = await loader.current(controller.signal);
-        if (active) setSnapshot({ key, data, error: null, loading: false, lastSuccessAt: Date.now() });
+        if (active) setSnapshot({ key, data, error: null, loading: false, lastSuccessAt: Date.now(), lastSuccessReadId: readId });
       } catch (error) {
         if (active) setSnapshot(previous => ({ ...previous, loading: false,
           error: error instanceof ApiError ? error : new ApiError('connection_lost') }));

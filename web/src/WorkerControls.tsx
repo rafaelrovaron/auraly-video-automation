@@ -12,7 +12,7 @@ export function WorkerControls({ campaignId, worker, connected, onRefresh }: Wor
   const [kind, setKind] = useState<WorkerKind>('local_operations');
   const [confirmation, setConfirmation] = useState<{ campaignId: string; kind: WorkerKind } | null>(null);
   const [sending, setSending] = useState(false);
-  const [waitingRead, setWaitingRead] = useState<{ observedAt: number | null } | null>(null);
+  const [waitingRead, setWaitingRead] = useState<{ minimumReadId: number } | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const identity = useRef(campaignId);
   const generation = useRef(0);
@@ -23,8 +23,8 @@ export function WorkerControls({ campaignId, worker, connected, onRefresh }: Wor
     setConfirmation(null); setSending(false); setWaitingRead(null); setNotice(null); lock.current = false;
   }, [campaignId]);
   useEffect(() => {
-    if (waitingRead && connected && worker.lastSuccessAt !== null && worker.lastSuccessAt !== waitingRead.observedAt) setWaitingRead(null);
-  }, [waitingRead, connected, worker.lastSuccessAt]);
+    if (waitingRead && connected && worker.lastSuccessReadId !== null && worker.lastSuccessReadId >= waitingRead.minimumReadId) setWaitingRead(null);
+  }, [waitingRead, connected, worker.lastSuccessReadId]);
   const value = worker.data?.scope === 'known' ? worker.data.value : null;
   const own = value?.campaignId === campaignId;
   const blocked = !connected || sending || waitingRead !== null;
@@ -36,23 +36,25 @@ export function WorkerControls({ campaignId, worker, connected, onRefresh }: Wor
     lock.current = true; setSending(true); setNotice(null);
     const submittedCampaign = campaignId;
     const submittedGeneration = generation.current;
-    const observedAt = worker.lastSuccessAt;
+    let reconcile = false;
     try {
       const result = await post<WorkerState>(campaignPath(submittedCampaign, `/worker/${action}`), {
         campaignId: submittedCampaign, ...(action === 'start' ? { kind: selectedKind } : {}),
       });
       if (!result || !['idle', 'running', 'stopping'].includes(result.state)) throw new ApiError('command_unknown');
       if (identity.current === submittedCampaign && generation.current === submittedGeneration) {
-        setWaitingRead({ observedAt }); setNotice('Comando recebido. Consultando o estado atual; isto não confirma conclusão de Jobs.');
+        reconcile = true; setNotice('Comando recebido. Consultando o estado atual; isto não confirma conclusão de Jobs.');
       }
     } catch (error) {
       if (identity.current === submittedCampaign && generation.current === submittedGeneration) {
         const safe = error instanceof ApiError ? error : new ApiError('command_unknown');
         setNotice(`${safe.message} (${safe.code})`);
-        if (safe.code === 'command_unknown') setWaitingRead({ observedAt });
+        if (safe.code === 'command_unknown') reconcile = true;
       }
     } finally {
       if (identity.current === submittedCampaign && generation.current === submittedGeneration) {
+        const minimumReadId = worker.refresh();
+        if (reconcile) setWaitingRead({ minimumReadId });
         setSending(false); setConfirmation(null); lock.current = false; onRefresh();
       }
     }

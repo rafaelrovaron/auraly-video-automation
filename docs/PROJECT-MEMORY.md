@@ -501,16 +501,27 @@ sem retry automático e reconciliação por GET após resposta incerta. 404 scop
 significa desconhecido, não idle; 409 preserva a autoridade do backend. Stop drena o Job
 ativo e não cancela provider/reembolsa créditos. OAuth segue na CLI.
 
-Frontend tem 41 testes, incluindo regressão A→B→A com POST atrasado. Integração tem seis
+Frontend tem 56 testes, incluindo regressão A→B→A com POST atrasado. Integração tem sete
 testes com navegador/proxy/API reais, provider fake e mídia sintética: leitura sem mutação,
-start/stop/draining, Origin estrangeiro, JSON malformado, responsividade e porta ocupada.
+start/stop/draining, Origin estrangeiro, JSON malformado, responsividade, porta ocupada e
+bloqueio de acesso a arquivos da raiz por alias de dependência ou `/@fs`.
 Harness inclui modo `ui` e quatro etapas UI no `full`; Actions provisiona Node 22/cache
 dos dois lockfiles e FFmpeg no Windows. CI dessa nova branch depende de publicação.
 Compatibilidade das referências Windows nos fixtures foi verificada com mypy Linux.
-Gate local Windows de 2026-10-03: `uv run python scripts/verify.py full`, 19/19 etapas;
+Gate local Windows pré-revisão de 2026-10-03: `uv run python scripts/verify.py full`, 19/19 etapas;
 41 testes frontend e 1.710 Python aprovados / 24 skips. Ruff, mypy source/tests, schemas,
 build/typecheck e audits production aprovados. D4B.1 `IMPLEMENTED`, `LOCAL_VERIFIED`;
 sem nova evidência de provider ou execução runtime Linux da nova branch.
+
+Revisão independente única de `ec9496b..cfa0ce0`: três Important, sem Critical/Minor e
+sem itens deixados fora de julgamento. Uma rodada de correção RED→GREEN removeu a dependência
+parent `file:..` e seu link para a raiz; reconciliação do worker passou a exigir GET iniciado
+após o POST terminar (sequência de request, não timestamp); validação dos campos consumidos
+rejeita DTOs aninhados incompletos antes de substituir o último snapshot válido. Labels
+desconhecidos também permanecem texto, sem usar propriedades herdadas do mapa.
+Lock regenerado a partir do diretório `web/`, sem parent package. Gate pós-fix Windows:
+19/19 etapas, 56 testes frontend e 1.711 Python aprovados / 24 skips em 426,47 s.
+Sem re-review; regressões e gate completo verificam as correções. Nenhuma chamada paga.
 
 Spec e plano: `docs/superpowers/specs/2026-10-03-d4b1-campaign-panel-design.md` e
 `docs/superpowers/plans/2026-10-03-d4b1-campaign-panel.md`. D4B.2 adicionará formulários

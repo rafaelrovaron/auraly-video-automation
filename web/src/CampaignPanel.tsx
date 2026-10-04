@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import { campaignPath, collection, object, pendingLabel, read, readWorker, statusLabel } from './api';
+import { campaignDetail, campaignPath, campaignStatus, campaignSummary, collection, jobSummary, object, operationView, pendingLabel, read, readWorker, renderSummary, sceneImages, statusLabel, voiceSummary } from './api';
 import type { CampaignDetail, CampaignStatus, CampaignSummary, Items, JobSummary, OperationView, RenderSummary, SceneImages, VoiceSummary } from './api';
 import { usePolling } from './usePolling';
 import type { RemoteState } from './usePolling';
@@ -27,7 +27,7 @@ function ErrorCode({ code }: { code: string | null }) {
 }
 
 export function CampaignList() {
-  const state = usePolling('campaign-list', signal => read<Items<CampaignSummary>>('/api/v1/campaigns', signal, collection), 5000);
+  const state = usePolling('campaign-list', signal => read<Items<CampaignSummary>>('/api/v1/campaigns', signal, value => collection(value, campaignSummary)), 5000);
   return <>
     <div className="section-heading"><h1>Campanhas</h1><button onClick={state.refresh}>Atualizar</button></div>
     <p>Consulte o andamento da produção. Nenhuma ação paga é iniciada ao abrir o painel.</p><Updated state={state} />
@@ -42,16 +42,16 @@ export function CampaignList() {
 
 export function CampaignDetailPanel({ campaignId }: { campaignId: string }) {
   const detail = usePolling(campaignPath(campaignId), signal => read<CampaignDetail>(campaignPath(campaignId), signal,
-    value => object(value) && value.campaignId === campaignId && Array.isArray(value.copyMasters) && Array.isArray(value.sceneVariants)), null);
+    value => campaignDetail(value) && object(value) && value.campaignId === campaignId), null);
   const status = usePolling(campaignPath(campaignId, '/status'), signal => read<CampaignStatus>(campaignPath(campaignId, '/status'), signal,
-    value => object(value) && value.campaignId === campaignId && Array.isArray(value.scenes)), 2000);
-  const jobs = usePolling(campaignPath(campaignId, '/jobs'), signal => read<Items<JobSummary>>(campaignPath(campaignId, '/jobs'), signal, collection), 2000);
+    value => campaignStatus(value) && object(value) && value.campaignId === campaignId), 2000);
+  const jobs = usePolling(campaignPath(campaignId, '/jobs'), signal => read<Items<JobSummary>>(campaignPath(campaignId, '/jobs'), signal, value => collection(value, jobSummary)), 2000);
   const worker = usePolling(campaignPath(campaignId, '/worker'), signal => readWorker(campaignId, signal), 2000);
   const images = usePolling(campaignPath(campaignId, '/images'), signal => read<Items<SceneImages>>(campaignPath(campaignId, '/images'), signal,
-    value => collection(value) && (value as Items<unknown>).items.every(scene => object(scene) && Array.isArray(scene.items))), null);
+    value => collection(value, sceneImages)), null);
   const voices = usePolling(campaignPath(campaignId, '/voices'), signal => read<Items<VoiceSummary>>(campaignPath(campaignId, '/voices'), signal,
-    value => collection(value) && (value as Items<unknown>).items.every(voice => object(voice) && typeof voice.voiceMasterId === 'string' && Array.isArray(voice.qcFindings))), null);
-  const renders = usePolling(campaignPath(campaignId, '/heygen/renders'), signal => read<Items<RenderSummary>>(campaignPath(campaignId, '/heygen/renders'), signal, collection), null);
+    value => collection(value, voiceSummary)), null);
+  const renders = usePolling(campaignPath(campaignId, '/heygen/renders'), signal => read<Items<RenderSummary>>(campaignPath(campaignId, '/heygen/renders'), signal, value => collection(value, renderSummary)), null);
   const [selectedJob, setSelectedJob] = useState<string | null>(null);
   const previousFingerprint = useRef<string | null>(null);
   const fingerprint = status.data && jobs.data ? JSON.stringify([
@@ -128,13 +128,13 @@ export function CampaignDetailPanel({ campaignId }: { campaignId: string }) {
     </Section>
     <WorkerControls campaignId={campaignId} worker={worker}
       connected={Boolean(status.data && jobs.data && worker.data && !status.error && !jobs.error && !worker.error)}
-      onRefresh={() => { status.refresh(); jobs.refresh(); worker.refresh(); }} />
+      onRefresh={() => { status.refresh(); jobs.refresh(); }} />
   </>;
 }
 
 export function JobDetail({ campaignId, jobId }: { campaignId: string; jobId: string }) {
   const job = usePolling(campaignPath(campaignId, `/jobs/${encodeURIComponent(jobId)}`), signal => read<JobSummary>(
-    campaignPath(campaignId, `/jobs/${encodeURIComponent(jobId)}`), signal, value => object(value) && value.jobId === jobId), 2000);
+    campaignPath(campaignId, `/jobs/${encodeURIComponent(jobId)}`), signal, value => jobSummary(value) && object(value) && value.jobId === jobId), 2000);
   return <section aria-label="Detalhe do Job"><h3>Detalhe do Job</h3><Updated state={job} />
     {job.data && <><Facts entries={[
       ['ID', job.data.jobId], ['Tipo', job.data.jobType], ['Status', statusLabel(job.data.status)], ['Retry safety', job.data.retrySafety],
@@ -147,7 +147,7 @@ export function JobDetail({ campaignId, jobId }: { campaignId: string; jobId: st
 
 function OperationDetail({ campaignId, jobId }: { campaignId: string; jobId: string }) {
   const operation = usePolling(campaignPath(campaignId, `/operations/${encodeURIComponent(jobId)}`), signal => read<OperationView>(
-    campaignPath(campaignId, `/operations/${encodeURIComponent(jobId)}`), signal, value => object(value) && value.jobId === jobId), 2000);
+    campaignPath(campaignId, `/operations/${encodeURIComponent(jobId)}`), signal, value => operationView(value) && object(value) && value.jobId === jobId), 2000);
   const result = operation.data?.result;
   const fields = result && Object.entries(result).filter(([key, value]) =>
     ['mode', 'total', 'created', 'reused', 'approved', 'manifestPath', 'imagesPath', 'variantCount', 'voiceMasterId', 'status',

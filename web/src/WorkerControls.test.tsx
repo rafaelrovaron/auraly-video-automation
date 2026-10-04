@@ -6,7 +6,7 @@ import type { WorkerKind, WorkerObservation } from './api';
 
 const kinds: WorkerKind[] = ['local_operations', 'voice_generate', 'voice_import', 'heygen_assets', 'heygen_videos'];
 function props(observation: WorkerObservation = { scope: 'known', value: { state: 'idle', campaignId: null, kind: null, errorCode: null } }): WorkerControlsProps {
-  return { campaignId: 'campaign-one', worker: { data: observation, error: null, loading: false, lastSuccessAt: 1, refresh: () => {} }, connected: true, onRefresh: vi.fn() };
+  return { campaignId: 'campaign-one', worker: { data: observation, error: null, loading: false, lastSuccessAt: 1, lastSuccessReadId: 1, refresh: () => 2 }, connected: true, onRefresh: vi.fn() };
 }
 const start = () => fireEvent.click(screen.getByRole('button', { name: 'Iniciar worker' }));
 const confirm = () => fireEvent.click(screen.getByRole('button', { name: 'Confirmar início' }));
@@ -75,7 +75,8 @@ it('does not retry a lost response and waits for a new read without claiming suc
   start(); confirm();
   expect(await screen.findByText(/Resultado do comando desconhecido/)).toBeTruthy();
   expect((screen.getByRole('button', { name: 'Iniciar worker' }) as HTMLButtonElement).disabled).toBe(true);
-  view.rerender(<WorkerControls {...input} worker={{ ...input.worker, lastSuccessAt: 2 }} />);
+  view.rerender(<WorkerControls {...input} worker={{ ...input.worker, lastSuccessAt: 2, lastSuccessReadId: 2 }} />);
+  expect((screen.getByRole('button', { name: 'Iniciar worker' }) as HTMLButtonElement).disabled).toBe(false);
   expect(screen.getByText(/Resultado do comando desconhecido/)).toBeTruthy();
   expect(screen.queryByText(/sucesso|concluído/i)).toBeNull();
   expect(attempts).toBe(1);
@@ -98,4 +99,23 @@ it('discards a late command response even after navigating away and back to the 
   await act(async () => resolve(Response.json({ state: 'running', campaignId: 'campaign-one', kind: 'local_operations', errorCode: null })));
   expect(screen.queryByText(/Comando recebido/)).toBeNull();
   expect(input.onRefresh).not.toHaveBeenCalled();
+});
+
+it.each(['during POST', 'after POST'])('does not reconcile from a GET started before the outcome and completed %s', async completion => {
+  let reject!: (reason: Error) => void;
+  const fetcher = vi.fn(() => new Promise<Response>((_, fail) => { reject = fail; }));
+  vi.stubGlobal('fetch', fetcher);
+  const input = props(); input.worker.refresh = vi.fn(() => 3);
+  const view = render(<WorkerControls {...input} />);
+  start(); confirm();
+  const earlierRead = { ...input.worker, lastSuccessAt: 2, lastSuccessReadId: 2 };
+  if (completion === 'during POST') view.rerender(<WorkerControls {...input} worker={earlierRead} />);
+  await act(async () => reject(new TypeError('lost response')));
+  if (completion === 'after POST') view.rerender(<WorkerControls {...input} worker={earlierRead} />);
+  expect((screen.getByRole('button', { name: 'Iniciar worker' }) as HTMLButtonElement).disabled).toBe(true);
+  expect(input.worker.refresh).toHaveBeenCalledOnce();
+  expect(fetcher).toHaveBeenCalledOnce();
+  view.rerender(<WorkerControls {...input} worker={{ ...input.worker, lastSuccessAt: 3, lastSuccessReadId: 3 }} />);
+  expect((screen.getByRole('button', { name: 'Iniciar worker' }) as HTMLButtonElement).disabled).toBe(false);
+  expect(screen.getByText(/Resultado do comando desconhecido/)).toBeTruthy();
 });

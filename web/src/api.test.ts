@@ -1,7 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
-import { ApiError, campaignPath, post, read } from './api';
+import { ApiError, campaignPath, pendingLabel, post, read, statusLabel } from './api';
 
 const signal = () => new AbortController().signal;
+
+it.each(['__proto__', 'constructor', 'toString'])('unknown label %s stays renderable text', value => {
+  expect(statusLabel(value)).toBe(value);
+  expect(pendingLabel({ code: value, stage: 'editing', entityId: 'one', message: '' })).toBe(value);
+});
 
 describe('API boundary', () => {
   it('reads a relative GET with no query and accepts an empty collection', async () => {

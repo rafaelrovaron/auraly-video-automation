@@ -84,3 +84,17 @@ it('retains last good data and timestamp on partial failure until recovery', asy
   await flush();
   expect(result.current.error).toBeNull();
 });
+
+it('refresh identifies a future request rather than an already inflight observation', async () => {
+  const old = deferred<string>(), fresh = deferred<string>();
+  let reads = 0;
+  const { result } = renderHook(() => usePolling('worker', () => ++reads === 1 ? old.promise : fresh.promise, null));
+  let barrier = 0;
+  act(() => { barrier = result.current.refresh(); });
+  expect(barrier).toBe(2);
+  await act(async () => old.resolve('old'));
+  expect(result.current.lastSuccessReadId).toBe(1);
+  expect(reads).toBe(2);
+  await act(async () => fresh.resolve('fresh'));
+  expect(result.current.lastSuccessReadId).toBe(barrier);
+});

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from pathlib import Path
 import socket
 
 import httpx
@@ -44,6 +45,16 @@ def test_panel_read_navigation_is_non_mutating(panel_servers: PanelServers, pane
     assert database_dump(panel_servers.settings.database) == before
     assert panel_servers.provider.events == []
     assert panel_page.locator('audio,video,img').count() == 0
+
+
+def test_panel_dev_server_does_not_serve_repository_files(panel_servers: PanelServers) -> None:
+    root = Path(__file__).resolve().parents[1]
+    reference = (root / 'AGENTS.md').read_text(encoding='utf-8').splitlines()
+    with httpx.Client(base_url=panel_servers.ui_url) as client:
+        alias = client.get('node_modules/auraly-video-pipeline/AGENTS.md')
+        assert alias.text.splitlines() != reference
+        direct = client.get('/@fs/' + (root / 'AGENTS.md').as_posix())
+        assert direct.status_code == 403
 
 
 def test_explicit_worker_start_stop_through_real_proxy(panel_servers: PanelServers, panel_page: Page) -> None:

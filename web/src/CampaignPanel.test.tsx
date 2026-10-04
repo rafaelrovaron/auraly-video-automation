@@ -133,3 +133,41 @@ it('displays safe operation counts and dry-run mode without arbitrary fields', a
   expect(screen.queryByText('secret-sentinel')).toBeNull();
   expect(screen.getByText('created', { selector: 'dt' }).nextElementSibling?.textContent).toBe('0');
 });
+
+it.each([
+  ['Resumo', '/status', { ...status, scenes: [{ sceneVariantId: 'scene-one' }] }],
+  ['Copy e cenas', '', { ...detail, copyMasters: [null] }],
+  ['Imagens', '/images', { items: [{ sceneVariantId: 'scene-one', items: [null] }] }],
+  ['Voice Masters', '/voices', { items: [{ ...voice, qcFindings: [{}] }] }],
+  ['HeyGen', '/heygen/renders', { items: [{ ...renderItem, status: {} }] }],
+  ['Jobs', '/jobs', { items: [null] }],
+])('keeps last valid %s data stale and other sections usable after malformed nested DTOs', async (title, suffix, invalid) => {
+  const overrides: Record<string, unknown> = {};
+  fakeApi(overrides);
+  render(<CampaignDetailPanel campaignId="campaign-one" />);
+  expect(await screen.findByText('Copy hook')).toBeTruthy();
+  overrides[suffix as string] = invalid;
+  fireEvent.click(screen.getByRole('button', { name: 'Atualizar' }));
+  const section = screen.getByRole('region', { name: title as string });
+  expect(await within(section).findByText(/invalid_response.*Dados desatualizados/)).toBeTruthy();
+  expect(screen.getByText('Copy hook')).toBeTruthy();
+  expect(screen.getByRole('heading', { name: 'Worker' })).toBeTruthy();
+});
+
+it('rejects invalid list entry fields rather than rendering an object', async () => {
+  vi.stubGlobal('fetch', async () => Response.json({ items: [{ ...summary, character: {} }] }));
+  render(<CampaignList />);
+  expect(await screen.findByText(/invalid_response.*Seção indisponível/)).toBeTruthy();
+});
+
+it.each([
+  ['/jobs/job-one', { ...job, status: {} }],
+  ['/operations/job-one', { jobId: 'job-one', operation: {}, result: [], errorCode: {} }],
+])('rejects malformed selected detail at %s without losing the campaign', async (path, invalid) => {
+  const localJob = { ...job, jobType: 'api.local.operation' };
+  fakeApi({ '/jobs': { items: [localJob] }, '/jobs/job-one': localJob, [path as string]: invalid });
+  render(<CampaignDetailPanel campaignId="campaign-one" />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Ver Job job-one' }));
+  expect(await screen.findByText(/invalid_response.*Seção indisponível/)).toBeTruthy();
+  expect(screen.getByText('Copy hook')).toBeTruthy();
+});

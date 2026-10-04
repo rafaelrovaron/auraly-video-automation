@@ -13,7 +13,6 @@
     "build": "tsc --noEmit && vite build"
   },
   "dependencies": {
-    "auraly-video-pipeline": "file:..",
     "react": "19.3.0",
     "react-dom": "19.3.0"
   },

@@ -436,8 +436,9 @@ D4B.1 usa dois processos locais (API 8000 e Vite 5173); distribuição estática
 fica para depois. Worker 404 fora do escopo significa desconhecido; start/stop não
 ganham retry automático. Stop drena o Job ativo, sem cancelar provider ou reembolsar créditos.
 Testes de integração usam navegador/proxy/API reais e mídia sintética, sem créditos.
-Gate Windows de 2026-10-03: `verify.py full`, 19/19 etapas; 41 testes frontend e
-1.710 Python aprovados / 24 skips. Tipos dos três arquivos novos de testes verificados
+Gate Windows pós-revisão de 2026-10-03: `verify.py full`, 19/19 etapas; 56 testes frontend e
+1.711 Python aprovados / 24 skips. Três achados Important corrigidos com regressões
+RED→GREEN em uma rodada; sem Critical/Minor e sem re-review. Tipos dos três arquivos novos de testes verificados
 também para Linux. Isso não substitui execução Linux/Actions da nova branch, ainda não publicada.
 
 ### Objetivo

@@ -49,7 +49,7 @@ entrega.
   Revisão final independente é registrada na memória. Sem novo canário pago.
 - D4B.1 implementado: painel React local de campanhas, assets e Jobs, polling e controle
   explícito start/stop do worker; integração com API/proxy reais e providers fake.
-  Gate Windows 19/19, 41 testes frontend e 1.710 Python aprovados / 24 skips;
+  Gate Windows 19/19, 56 testes frontend e 1.711 Python aprovados / 24 skips;
   `LOCAL_VERIFIED`, sem nova execução de provider. Actions desta branch ainda não executados.
 
 ### Não entregue ainda
