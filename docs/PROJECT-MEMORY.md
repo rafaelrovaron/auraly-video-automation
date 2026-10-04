@@ -531,10 +531,10 @@ Runtime por dois terminais neste slice; launcher/distribuição ficam para depoi
 
 ### D4B.2a — campanhas/copy e import manual pela UI (2026-10-04)
 
-`IMPLEMENTED`, `LOCAL_VERIFIED`; revisão final em execução. CI pendente de publicação,
+`IMPLEMENTED`, `LOCAL_VERIFIED`; revisão independente e correções concluídas. CI pendente de publicação,
 nenhum novo `PROVIDER_VERIFIED` ou chamada paga.
 
-Gate Windows `verify.py full`: 19/19, 86 testes frontend, 1.753 Python aprovados /
+Gate Windows pré-revisão `verify.py full`: 19/19, 86 testes frontend, 1.753 Python aprovados /
 25 skips em 464,31 s. Ruff, mypy src/tests, schemas sem drift, build/typecheck e audits
 production passaram. Nove testes browser/proxy reais passaram. HyperFrames doctor
 continua reportando Docker/opcionais indisponíveis com exit 0, como no baseline; isso
@@ -565,6 +565,29 @@ três importações/reviews, copy versionada, mudança de source bloqueada, nova
 reload sem POST e largura 390px. Providers fake devem registrar zero chamadas.
 Spec/plano: `docs/superpowers/specs/2026-10-04-d4b2a-campaign-import-design.md` e
 `docs/superpowers/plans/2026-10-04-d4b2a-campaign-import.md`.
+
+Checkpoint pós-revisão: um reviewer independente avaliou `e792064`, sem Critical,
+dois Important e três apontamentos inicialmente Minor. Erro HTTP 5xx após escrita
+commitada passa a unknown (GET após submissão, nunca segundo POST automático);
+erros genéricos sem prova de rejeição seguem a mesma regra. Teste browser reproduz
+copy realmente gravada e falha 503 na consulta que monta a resposta, preservando
+uma única versão nova. Recuperação de prepare não usa sufixo como identidade:
+campo aditivo opcional outputPath fixa o output work-root-relative exato.
+Resultados legados identificados pelo job continuam aceitos; resposta perdida
+legada sem essa evidência permanece unknown.
+
+Dois apontamentos reclassificados pelo efeito funcional também foram corrigidos:
+I/O real EIO/EACCES na abertura de imagem vira job failed, não diagnóstico de mídia;
+atmosfera/objeto de prova opcionais da cena entram no DTO/matcher de criação,
+inclusive null, para não confirmar conteúdo diferente. Regressões RED→GREEN na
+mesma rodada; sem re-review. Gate final Windows: 19/19, 96 frontend, 1.757 Python
+aprovados / 25 skips em 472,17 s; typing/build/schemas/audits aprovados.
+
+Minor adiado: exibir ação create/reuse e resumo de cobertura no dry-run; fatos e
+gates continuam corretos. A revisão não estabelece garantias contra substituição
+hostil concorrente de diretórios além das verificações determinísticas já cobertas;
+não foi ampliado hardening para esse cenário. Actions no SHA atual e provedores
+reais não foram exercitados ou declarados verificados. Nenhum merge/push nesta etapa.
 
 Telas mínimas do alvo completo (não todas entregues em D4B.1):
 

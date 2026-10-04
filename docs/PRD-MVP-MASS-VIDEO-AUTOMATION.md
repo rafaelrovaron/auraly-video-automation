@@ -52,7 +52,7 @@ genérico e não terá timeline estilo CapCut ou preview frame-perfect.
   associação por cena, publicação imutável, validação diagnóstica e import ligado aos
   hashes dos sources; review explícito de imagens. Sem CLI/JSON manual nesse fluxo,
   watch folder, upload, auto-start ou provider. `IMPLEMENTED`, `LOCAL_VERIFIED`:
-  gate Windows 19/19, 86 testes frontend e 1.753 Python / 25 skips; CI deste slice pendente,
+  gate final Windows 19/19, 96 testes frontend e 1.757 Python / 25 skips; CI deste slice pendente,
   evidência atual no PROJECT-MEMORY. Voice Master/HeyGen pela UI são D4B.2b planejado;
   edição/preview D4B.3 e renderer D5 continuam não entregues.
 

@@ -426,10 +426,11 @@ negócio.
 **Status:** D4B.1 e D4B.2a `IMPLEMENTED`, `LOCAL_VERIFIED`;
 D4B.2b e D4B.3 `PLANNED`.
 
-Gate D4B.2a Windows de 2026-10-04: 19/19 etapas; 86 testes frontend e 1.753 Python
-aprovados / 25 skips (464,31 s). Browser/proxy/API/worker reais: nove testes passaram,
-incluindo os dois novos fluxos de import. CI Linux/Windows pendente de publicação;
-revisão independente final em andamento. Nenhuma chamada paga.
+Gate final D4B.2a Windows de 2026-10-04: 19/19 etapas; 96 testes frontend e 1.757 Python
+aprovados / 25 skips (472,17 s). Browser/proxy/API/worker reais cobrem import, review e
+copy gravada com resposta 503. Revisão independente concluída sobre `e792064`;
+achados funcionais corrigidos em uma rodada RED→GREEN e gate completo, sem re-review.
+CI Linux/Windows pendente de publicação. Nenhuma chamada paga.
 
 ### Slices e capacidade atual
 

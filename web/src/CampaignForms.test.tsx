@@ -12,7 +12,7 @@ const initial: CampaignDetail = {
   proofObject: 'cards', voicePreset: 'voice', editPreset: 'edit',
   copyMasters: [{ copyMasterId: 'old', version: 1, approvalState: 'approved', approvedBy: 'tester',
     sourceText: 'Old source', sha256: 'a'.repeat(64), headline: 'Old headline', hook: 'Old hook', body: 'Old body', cta: 'Old CTA' }],
-  sceneVariants: [{ sceneVariantId: 'scene-one', variantId: 'first', location: 'Room', action: 'Talk', prompt: 'Portrait' }],
+  sceneVariants: [{ sceneVariantId: 'scene-one', variantId: 'first', location: 'Room', action: 'Talk', prompt: 'Portrait', timeAtmosphere: null, proofObject: null }],
 };
 const newCopy = { copyMasterId: 'new', version: 2, approvalState: 'approved', approvedBy: 'tester',
   sourceText: 'Headline:\nH\n\nHook:\nK\n\nBody:\nB\n\nCTA:\nC', sha256: 'b'.repeat(64), ...copy };
@@ -132,6 +132,33 @@ it('leaves ambiguous copy reconciliation unknown', async () => {
   view.rerender(<CopyVersionForm campaignId="campaign-one" detail={state({ ...initial,
     copyMasters: [...initial.copyMasters, newCopy, { ...newCopy, copyMasterId: 'another', version: 3 }] }, 2)} />);
   expect(copyButton().disabled).toBe(true); expect(screen.queryByText(/Versão de copy registrada/)).toBeNull();
+});
+
+it.each([500, 503])('retains committed-copy intent after HTTP %s until a fresh matching read', async status => {
+  const fetcher = vi.fn(async () => Response.json({ error: { code: 'storage_unavailable' } }, { status }));
+  vi.stubGlobal('fetch', fetcher);
+  const view = render(<CopyVersionForm campaignId="campaign-one" detail={state()} />);
+  fillCopy(); fireEvent.click(copyButton()); await screen.findByText(/command_unknown/);
+  fireEvent.click(screen.getByLabelText('Confirmo a aprovação da copy'));
+  expect(copyButton().matches(':disabled')).toBe(true);
+  fireEvent.click(copyButton()); expect(fetcher).toHaveBeenCalledTimes(1);
+  view.rerender(<CopyVersionForm campaignId="campaign-one" detail={state({ ...initial, copyMasters: [...initial.copyMasters, newCopy] }, 2)} />);
+  await screen.findByText(/Versão de copy registrada/);
+});
+
+it.each(['timeAtmosphere', 'proofObject'])('does not reconcile a creation with different optional scene %s', async field => {
+  const onCreated = vi.fn(); const scene = { ...initial.sceneVariants[0], timeAtmosphere: 'night', proofObject: 'cards', [field]: 'different' };
+  vi.stubGlobal('fetch', async (_: string, options: RequestInit) => {
+    if (options.method === 'POST') throw new TypeError('lost');
+    return Response.json({ ...initial, sceneVariants: [scene], copyMasters: [{ ...newCopy, version: 1 }] });
+  });
+  render(<CampaignCreateForm onCreated={onCreated} />); fillCreate();
+  fireEvent.change(screen.getByLabelText('Atmosfera 1'), { target: { value: 'night' } });
+  fireEvent.change(screen.getByLabelText('Objeto de prova da cena 1'), { target: { value: 'cards' } });
+  fireEvent.click(createButton()); await screen.findByText(/command_unknown/);
+  fireEvent.click(screen.getByRole('button', { name: 'Reconciliar criação' }));
+  await waitFor(() => expect(screen.getByRole('alert').textContent).toMatch(/Criação não confirmada/));
+  expect(onCreated).not.toHaveBeenCalled(); expect(createButton().disabled).toBe(true);
 });
 
 it('ignores a late copy response after changing campaign', async () => {

@@ -535,6 +535,7 @@ class ApiCommands:
                     manifest_path=prepared.manifest_path.relative_to(self.settings.project_root).as_posix(),
                     images_path=prepared.images_path.relative_to(self.settings.project_root).as_posix(),
                     variant_count=prepared.variant_count,
+                    output_path=request.output_path,
                 )
             if isinstance(request, ImageManifestOperation):
                 published = self.images.publish_manifest(

@@ -147,7 +147,9 @@ class ImagePrepareResult(ContractModel):
     manifest_path: str
     images_path: str
     variant_count: int
+    output_path: str | None = None
     _paths = field_validator("manifest_path", "images_path")(relative_path)
+    _output = field_validator("output_path")(lambda value: None if value is None else relative_path(value))
 
 
 class ImageImportItemResult(ContractModel):

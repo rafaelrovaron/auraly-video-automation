@@ -4,7 +4,10 @@ import hashlib
 from pathlib import Path
 
 from PIL import Image
-from playwright.sync_api import Locator, Page, expect
+from playwright.sync_api import Locator, Page, Route, expect
+import pytest
+
+from auraly_pipeline.api.contracts import QueryError
 
 from tests.test_api_operations import count_images
 from tests.test_web_panel_e2e import panel_page as provide_panel_page  # noqa: F401
@@ -140,4 +143,42 @@ def test_changed_source_requires_revalidation_through_panel(panel_servers: Panel
     panel_page.keyboard.type('tester')
     expect(panel.get_by_label('Ator da revisão', exact=True)).to_have_value('tester')
     assert panel_page.evaluate('document.documentElement.scrollWidth <= window.innerWidth')
+    assert panel_servers.provider.events == []
+
+
+def test_committed_copy_with_failed_response_query_requires_reconciliation(
+    panel_servers: PanelServers, panel_page: Page, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    campaign_id = create_campaign(panel_servers, panel_page, 1)
+    panel_page.get_by_text('Nova versão de copy', exact=True).click()
+    form = panel_page.get_by_role('form', name='Nova versão de copy', exact=True)
+    fill_copy(form, 'Headline B')
+    failed = False
+    held: list[Route] = []
+
+    def fail_response(campaign: str) -> object:
+        nonlocal failed
+        failed = True
+        raise QueryError('storage_unavailable')
+
+    def hold_reconciliation(route: Route) -> None:
+        if failed:
+            held.append(route)
+        else:
+            route.continue_()
+
+    monkeypatch.setattr(panel_servers.app.state.commands.queries, 'get_campaign', fail_response)
+    panel_page.route(f'**/api/v1/campaigns/{campaign_id}', hold_reconciliation)
+    posts: list[str] = []
+    panel_page.on('request', lambda request: posts.append(request.url) if request.method == 'POST' else None)
+    with panel_page.expect_response(lambda response: response.url.endswith('/copies')) as response:
+        form.get_by_role('button', name='Adicionar versão de copy aprovada').click()
+    assert response.value.status == 503
+    assert len(panel_servers.app.state.commands.campaigns.get_campaign(campaign_id).copy_masters) == 2
+    expect(form.get_by_role('status')).to_contain_text('command_unknown')
+    expect(form.get_by_role('button', name='Adicionar versão de copy aprovada')).to_be_disabled()
+    assert len(held) == 1
+    held.pop().continue_()
+    expect(form.get_by_text('Versão de copy registrada. Histórico preservado.', exact=True)).to_be_visible()
+    assert len(posts) == 1
     assert panel_servers.provider.events == []

@@ -82,7 +82,9 @@ export function ImageImportPanel({ campaignId, detail, images, jobs }: Props) {
     if (intent.signature !== signature) { setIntent(null); setNotice('As associações mudaram. O resultado anterior não foi aplicado.'); return; }
     const result = view.result;
     if (result.operation === 'image_prepare') {
-      if (result.variantCount !== scenes.length || !folderOf(result.manifestPath).endsWith(`/${normalize(String(intent.body.outputPath))}`)) return;
+      const requestedOutput = normalize(String(intent.body.outputPath));
+      if (result.variantCount !== scenes.length || !folderOf(result.manifestPath).endsWith(`/${requestedOutput}`)
+        || (result.outputPath == null ? intent.jobId === null : result.outputPath !== requestedOutput)) return;
       setDirectory(folderOf(result.manifestPath)); setSaved(null); setDiagnostic(null); setDirty(true);
       setNotice('Pasta preparada. Copie as imagens no Explorer e preencha uma associação por cena.');
     } else if (result.operation === 'image_manifest') {

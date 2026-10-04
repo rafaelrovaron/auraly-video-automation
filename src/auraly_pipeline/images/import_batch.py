@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import errno
 import json
 import os
 from datetime import UTC, datetime
@@ -97,6 +98,14 @@ class ImageImportIssue(ContractModel):
     code: str
     variant_id: str | None = None
     message: str
+
+
+def _raise_unexpected_storage_error(error: BaseException) -> None:
+    cause: BaseException | None = error
+    while cause is not None:
+        if isinstance(cause, OSError) and cause.errno is not None and cause.errno not in {errno.ENOENT, errno.ENOTDIR}:
+            raise ImageImportError("Image storage unavailable.") from cause
+        cause = cause.__cause__
 
 
 class ImageImportPlanItem(ContractModel):
@@ -288,6 +297,7 @@ class ImageImportService:
             payload = json.loads(snapshot.decode("utf-8"))
             batch = ImageImportBatch.model_validate(payload)
         except (OSError, ValueError) as exc:
+            _raise_unexpected_storage_error(exc)
             raise ImageImportValidationError(
                 [self._issue("image_import_manifest_invalid", None, "The import manifest is invalid.")]
             ) from exc
@@ -340,7 +350,8 @@ class ImageImportService:
                     source_root / item.path,
                     trusted_root=source_root,
                 )
-            except FlowArtifactInvalidError:
+            except FlowArtifactInvalidError as exc:
+                _raise_unexpected_storage_error(exc)
                 issues.append(
                     self._issue(
                         "image_import_source_path_invalid",
@@ -351,7 +362,8 @@ class ImageImportService:
                 continue
             try:
                 facts = inspect_image_artifact(source)
-            except FlowArtifactInvalidError:
+            except FlowArtifactInvalidError as exc:
+                _raise_unexpected_storage_error(exc)
                 issues.append(
                     self._issue(
                         "image_import_media_invalid",

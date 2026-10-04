@@ -58,7 +58,8 @@ export function CampaignCreateForm({ onCreated }: { onCreated: (campaignId: stri
       && result.voicePreset === body.voicePreset && result.editPreset === body.editPreset
       && result.copyMasters.some(item => matchesCopy(item, body.copyMaster))
       && result.sceneVariants.length === body.sceneVariants.length && body.sceneVariants.every(scene => result.sceneVariants.some(
-        item => item.variantId === scene.variantId && item.location === scene.location && item.action === scene.action && item.prompt === scene.prompt));
+        item => item.variantId === scene.variantId && item.location === scene.location && item.action === scene.action && item.prompt === scene.prompt
+          && item.timeAtmosphere === scene.timeAtmosphere && item.proofObject === scene.proofObject));
   }
   const finish = (id: string) => { clearDirty(); setDirty(false); setApproved(false); setIntent(null); onCreated(id); };
   const send = async (event: FormEvent<HTMLFormElement>) => {

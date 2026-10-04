@@ -5,7 +5,7 @@ export type CampaignSummary = {
   createdAt: string; updatedAt: string; operationalStatus: string; nextPending: PendingItem | null;
 };
 export type CopyMaster = { copyMasterId: string; version: number; approvalState: string; approvedBy: string | null; sourceText: string; sha256: string; headline: string; hook: string; body: string; cta: string };
-export type SceneVariant = { sceneVariantId: string; variantId: string; location: string; action: string; prompt: string };
+export type SceneVariant = { sceneVariantId: string; variantId: string; location: string; action: string; prompt: string; timeAtmosphere: string | null; proofObject: string | null };
 export type CampaignDetail = CampaignSummary & { proofObject: string; voicePreset: string; editPreset: string; copyMasters: CopyMaster[]; sceneVariants: SceneVariant[] };
 export type SceneStatus = { sceneVariantId: string; variantId: string; currentCopyId: string | null; currentVoiceId: string | null; approvedImageId: string | null; readyRenderIds: string[]; planHashes: string[]; pending: PendingItem[] };
 export type CampaignStatus = { campaignId: string; storedStatus: string; operationalStatus: string; nextPending: PendingItem | null; sceneCount: number;
@@ -84,7 +84,7 @@ export function campaignDetail(value: unknown): boolean {
     && hasFields(value, ['proofObject', 'voicePreset', 'editPreset'])
     && arrayOf(value.copyMasters, copy => hasFields(copy, ['copyMasterId', 'approvalState', 'sourceText', 'sha256', 'headline', 'hook', 'body', 'cta'], ['version'], ['approvedBy'])
       && /^[a-f0-9]{64}$/.test(String(copy.sha256)))
-    && arrayOf(value.sceneVariants, scene => hasFields(scene, ['sceneVariantId', 'variantId', 'location', 'action', 'prompt']));
+    && arrayOf(value.sceneVariants, scene => hasFields(scene, ['sceneVariantId', 'variantId', 'location', 'action', 'prompt'], [], ['timeAtmosphere', 'proofObject']));
 }
 
 export function campaignStatus(value: unknown): boolean {
@@ -153,7 +153,8 @@ export async function post<T>(path: string, body: object): Promise<T> {
       body: JSON.stringify(body), signal: controller.signal,
     })) as T;
   } catch (error) {
-    if (error instanceof ApiError && error.code !== 'invalid_response') throw error;
+    if (error instanceof ApiError && error.code !== 'invalid_response' && error.code !== 'internal_error'
+      && error.status !== null && error.status < 500) throw error;
     throw new ApiError('command_unknown');
   } finally { clearTimeout(timeout); }
 }

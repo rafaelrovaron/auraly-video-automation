@@ -11,7 +11,7 @@ const dry = { operation: 'image_import', mode: 'dry_run', total: 1, created: 0, 
 
 const detail: CampaignDetail = { campaignId: 'campaign-one', character: 'susan-smith', storedStatus: 'draft', sceneCount: 1,
   createdAt: '', updatedAt: '', operationalStatus: 'needs_input', nextPending: null, proofObject: 'cards', voicePreset: 'voice', editPreset: 'edit', copyMasters: [],
-  sceneVariants: [{ sceneVariantId: 'scene-one', variantId: 'first', location: 'Room', action: 'Talk', prompt: 'Portrait' }] };
+  sceneVariants: [{ sceneVariantId: 'scene-one', variantId: 'first', location: 'Room', action: 'Talk', prompt: 'Portrait', timeAtmosphere: null, proofObject: null }] };
 const candidate = { imageCandidateId: 'image-one', sceneVariantId: 'scene-one', sourceKind: 'manual_import', reviewStatus: 'pending_review', sourcePath: 'campaigns/source.png',
   sha256: 'b'.repeat(64), width: 360, height: 640, sizeBytes: 500, format: 'png', rejectionReason: null };
 const job: JobSummary = { jobId: 'saved', jobType: 'api.local.operation', campaignId: 'campaign-one', sceneVariantId: null, status: 'completed', attemptCount: 1, maxAttempts: 1,
@@ -177,4 +177,35 @@ it('ignores a prepare response after unmount rather than refreshing another camp
   fireEvent.click(button('Preparar pasta')); view.unmount();
   await act(async () => { resolve(Response.json({ campaignId: 'campaign-one', jobId: 'job', operation: 'image_prepare' }, { status: 202 })); });
   expect(refresh).not.toHaveBeenCalled();
+});
+
+it.each([undefined, 'nested/inbox'])('does not reconcile a lost prepare using an old same-suffix directory (%s)', async outputPath => {
+  vi.stubGlobal('fetch', async (_: string, options: RequestInit) => {
+    if (options.method === 'POST') throw new TypeError('lost');
+    return Response.json({ campaignId: 'campaign-one', jobId: 'saved', operation: 'image_prepare', status: 'completed', errorCode: null,
+      result: { operation: 'image_prepare', manifestPath: 'pipeline/work/nested/inbox/image-import.json', imagesPath: 'pipeline/work/nested/inbox/images', variantCount: 1, outputPath } });
+  });
+  const view = render(<ImageImportPanel {...props} />);
+  fireEvent.change(screen.getByLabelText('Pasta de importação (relativa ao work root)'), { target: { value: 'inbox' } });
+  fireEvent.click(button('Preparar pasta')); await screen.findByText(/command_unknown/);
+  view.rerender(<ImageImportPanel {...props} jobs={state({ items: [job] }, 2)} />);
+  fireEvent.change(screen.getByLabelText('Job de imagens'), { target: { value: 'saved' } });
+  await screen.findByText(/Operação image_prepare/);
+  expect(screen.queryByText(/Pasta preparada. Copie/)).toBeNull();
+  expect((screen.getByLabelText('Pasta preparada (relativa ao projeto)') as HTMLInputElement).value).toBe('');
+  expect(button('Preparar pasta').disabled).toBe(true);
+});
+
+it('reconciles a lost prepare only with an exact persisted output path', async () => {
+  vi.stubGlobal('fetch', async (_: string, options: RequestInit) => {
+    if (options.method === 'POST') throw new TypeError('lost');
+    return Response.json({ campaignId: 'campaign-one', jobId: 'saved', operation: 'image_prepare', status: 'completed', errorCode: null,
+      result: { operation: 'image_prepare', manifestPath: 'custom/work/inbox/image-import.json', imagesPath: 'custom/work/inbox/images', variantCount: 1, outputPath: 'inbox' } });
+  });
+  const view = render(<ImageImportPanel {...props} />);
+  fireEvent.change(screen.getByLabelText('Pasta de importação (relativa ao work root)'), { target: { value: 'inbox' } });
+  fireEvent.click(button('Preparar pasta')); await screen.findByText(/command_unknown/);
+  view.rerender(<ImageImportPanel {...props} jobs={state({ items: [job] }, 2)} />);
+  fireEvent.change(screen.getByLabelText('Job de imagens'), { target: { value: 'saved' } });
+  await screen.findByDisplayValue('custom/work/inbox');
 });

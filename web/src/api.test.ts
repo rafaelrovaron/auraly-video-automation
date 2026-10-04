@@ -60,6 +60,21 @@ describe('API boundary', () => {
     expect(attempts).toBe(1);
   });
 
+  it.each([500, 503])('treats POST HTTP %s as an unknown write outcome while preserving GET errors', async status => {
+    const fetcher = vi.fn(async () => Response.json({ error: { code: 'storage_unavailable', message: 'private' } }, { status }));
+    vi.stubGlobal('fetch', fetcher);
+    await expect(post('/api/v1/campaigns/campaign-one/copies', {})).rejects.toMatchObject({ code: 'command_unknown' });
+    await expect(read('/api/v1/campaigns/campaign-one', signal())).rejects.toMatchObject({ code: 'storage_unavailable', status });
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps generic unproven POST errors unknown but allows correction of explicit 422 rejection', async () => {
+    vi.stubGlobal('fetch', async () => Response.json({ error: { code: 'unrecognized' } }, { status: 400 }));
+    await expect(post('/api/v1/campaigns/campaign-one/copies', {})).rejects.toMatchObject({ code: 'command_unknown' });
+    vi.stubGlobal('fetch', async () => Response.json({ error: { code: 'invalid_request' } }, { status: 422 }));
+    await expect(post('/api/v1/campaigns/campaign-one/copies', {})).rejects.toMatchObject({ code: 'invalid_request', status: 422 });
+  });
+
   it('times out a POST after 15 seconds without retry', async () => {
     vi.useFakeTimers();
     let attempts = 0;

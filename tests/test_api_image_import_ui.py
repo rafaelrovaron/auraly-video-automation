@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from collections.abc import Iterator
 import hashlib
+import errno
 import json
 from typing import Any, cast
 
@@ -229,6 +230,38 @@ def test_diagnostic_io_failure_remains_failed(
     view = completed(service, diagnostic_request(manifest))
     assert view.status == "failed" and view.result is None and count_images(settings.database) == 0
     assert "private storage" not in view.model_dump_json(by_alias=True)
+
+
+@pytest.mark.parametrize("failure", [errno.EIO, errno.EACCES])
+def test_diagnostic_actual_image_open_failure_remains_failed(
+    image_case: tuple[ApiSettings, Any, Path, str], monkeypatch: pytest.MonkeyPatch, failure: int,
+) -> None:
+    import auraly_pipeline.flow.artifacts as artifacts
+
+    settings, service, manifest, variant = image_case
+    original = artifacts.os.open
+    source = manifest.parent / f"images/{variant}.png"
+
+    def failing(path: Any, *args: Any, **kwargs: Any) -> Any:
+        if str(path).replace("\\\\?\\", "") == str(source):
+            raise OSError(failure, "private storage detail")
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(artifacts.os, "open", failing)
+    view = completed(service, diagnostic_request(manifest))
+    assert view.status == "failed" and view.result is None and count_images(settings.database) == 0
+    assert "private storage" not in view.model_dump_json(by_alias=True)
+
+
+def test_prepare_result_binds_the_exact_work_root_relative_output(tmp_path: Path) -> None:
+    settings = create_api_fixture(tmp_path)
+    service = commands(settings)
+    try:
+        view = completed(service, request(operation="image_prepare", campaignId="campaign-one", outputPath="nested/inbox"))
+        assert view.result.output_path == "nested/inbox"
+        assert view.result.manifest_path == (settings.work_root / "nested/inbox/image-import.json").relative_to(settings.project_root).as_posix()
+    finally:
+        service._engine.dispose()
 
 
 def test_diagnostic_approved_candidate_conflict_is_explicit(image_case: tuple[ApiSettings, Any, Path, str]) -> None:

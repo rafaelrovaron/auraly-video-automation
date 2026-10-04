@@ -1,7 +1,7 @@
 import { object } from './api';
 
 export type Association = { variantId: string; path: string };
-export type ImagePrepareResult = { operation: 'image_prepare'; manifestPath: string; imagesPath: string; variantCount: number };
+export type ImagePrepareResult = { operation: 'image_prepare'; manifestPath: string; imagesPath: string; variantCount: number; outputPath?: string | null };
 export type ImageManifestResult = { operation: 'image_manifest'; manifestPath: string; imagesPath: string; manifestSha256: string; items: Association[] };
 export type ImageImportResult = { operation: 'image_import'; mode: 'dry_run' | 'execute'; total: number; created: number; reused: number; approved: number;
   valid: boolean | null; manifestSha256: string | null; validationId: string | null; issues: { code: string; variantId: string | null }[];
@@ -21,7 +21,8 @@ export function relativeImagePath(value: unknown): value is string {
 export const folderOf = (path: string) => path.slice(0, path.lastIndexOf('/'));
 export function imagePrepareResult(value: unknown): value is ImagePrepareResult {
   return object(value) && value.operation === 'image_prepare' && relativeImagePath(value.manifestPath)
-    && value.manifestPath.endsWith('/image-import.json') && value.imagesPath === `${folderOf(value.manifestPath)}/images` && positive(value.variantCount);
+    && value.manifestPath.endsWith('/image-import.json') && value.imagesPath === `${folderOf(value.manifestPath)}/images` && positive(value.variantCount)
+    && (value.outputPath === undefined || value.outputPath === null || relativeImagePath(value.outputPath));
 }
 export function imageManifestResult(value: unknown): value is ImageManifestResult {
   return object(value) && value.operation === 'image_manifest' && sha(value.manifestSha256) && relativeImagePath(value.manifestPath)
