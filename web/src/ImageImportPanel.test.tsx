@@ -32,7 +32,7 @@ function api(invalid = false) {
         : path.endsWith('/manifests') ? { ...manifest, items: body.items }
           : body.mode === 'dry_run' ? { ...dry, validationId: body.validationId,
             ...(invalid ? { valid: false, items: [], issues: [{ code: '__proto__', variantId: 'first' }] } : {}) }
-            : { ...dry, mode: 'execute', valid: null, validationId: null, created: 1, items: [{ ...dry.items[0], imageCandidateId: 'image-one' }] };
+            : { ...dry, mode: 'execute', valid: null, manifestSha256: null, validationId: null, created: 1, items: [{ ...dry.items[0], imageCandidateId: 'image-one' }] };
       return Response.json({ campaignId: 'campaign-one', jobId: id, operation: (results[id] as { operation: string }).operation }, { status: 202 });
     }
     const id = path.split('/').at(-1)!; const result = results[id] as { operation: string };

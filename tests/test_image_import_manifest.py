@@ -8,6 +8,7 @@ from pathlib import Path
 import subprocess
 
 import pytest
+from PIL import Image
 
 from auraly_pipeline.images.import_batch import ImageImportError, ImageImportItem, ImageImportService
 from tests.test_image_import_batch import _campaign
@@ -47,6 +48,18 @@ def test_publish_preserves_template_without_inspecting_images_and_replays(
     assert service.publish_manifest(campaign_id, directory, list(reversed(items))) == result
     assert len(list(directory.glob("image-import-*.json"))) == 1
     assert list((directory / "images").iterdir()) == []
+
+
+def test_published_unicode_sources_import_and_preserve_provenance(
+    prepared: tuple[ImageImportService, str, Path, list[ImageImportItem]],
+) -> None:
+    service, campaign_id, directory, original = prepared
+    items = [ImageImportItem(variant_id=item.variant_id, path=f"images/visão {index}.png") for index, item in enumerate(original)]
+    for index, item in enumerate(items):
+        Image.new("RGB", (360, 640), (index * 40, 60, 90)).save(directory / item.path)
+    published = service.publish_manifest(campaign_id, directory, items)
+    result = service.execute(service.plan(published.manifest_path))
+    assert result.created == len(items)
 
 
 @pytest.mark.parametrize("coverage", ["missing", "duplicate", "unknown"])

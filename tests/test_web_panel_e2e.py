@@ -15,7 +15,7 @@ from tests.web_panel_support import panel_servers as provide_panel_servers  # no
 pytest_plugins = ['tests.test_heygen_video_media']
 
 
-@pytest.fixture
+@pytest.fixture(name='panel_page')
 def panel_page() -> Iterator[Page]:
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(headless=True)

@@ -89,12 +89,14 @@ export function ImageImportPanel({ campaignId, detail, images, jobs }: Props) {
       if (!coverage(result.items) || folderOf(result.manifestPath) !== normalize(directory) || associations(result.items) !== associations(rows)) return;
       setSaved(result); setDiagnostic(null); setDirty(false); clearDirty(); setNotice('Associações salvas. Valide o batch antes de importar.');
     } else {
-      if (!saved || result.manifestSha256 !== saved.manifestSha256 || result.mode !== intent.body.mode) return;
+      if (!saved || intent.body.manifestSha256 !== saved.manifestSha256 || result.mode !== intent.body.mode) return;
       if (result.mode === 'dry_run') {
-        if (result.validationId !== intent.body.validationId || result.total !== scenes.length
+        if (result.manifestSha256 !== saved.manifestSha256 || result.validationId !== intent.body.validationId || result.total !== scenes.length
           || (result.valid === true && (!coverage(result.items) || result.items.some(item => scenes.find(scene => scene.variantId === item.variantId)?.sceneVariantId !== item.sceneVariantId)))) return;
         setDiagnostic(result); setNotice('');
       } else {
+        if (intent.jobId === null && result.manifestSha256 !== saved.manifestSha256) return;
+        if (result.manifestSha256 !== null && result.manifestSha256 !== saved.manifestSha256) return;
         if (!coverage(result.items) || result.items.some(item => !item.imageCandidateId)) return;
         setDiagnostic(null); setNotice('Importação concluída. Revise os candidatos antes de aprovar.'); images.refresh(); detail.refresh();
       }

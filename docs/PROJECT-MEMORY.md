@@ -1,6 +1,6 @@
 # Auraly Mass Video Pipeline — Memória do Projeto
 
-**Atualizado em:** 2026-10-03
+**Atualizado em:** 2026-10-04
 **Decisão vigente:** MVP delivery-first para uso local e pessoal
 
 Este documento guarda decisões duráveis e fatos verificados. O estado entregue aparece separado
@@ -442,7 +442,8 @@ faz dispatch. Até dry-run persiste um Job, não seus efeitos de domínio. Profi
 metadados imutáveis sem mídia na request; o resolver no Job verifica os assets antes do plano.
 Bodies JSON/Origin loopback, aprovações, budget, idempotência e checkpoints são preservados.
 Uso enqueue/start/poll/stop e import manual está no README. O painel React D4B.1 está
-implementado; formulários/preview (D4B.2/D4B.3) e renderer (D5) continuam planejados;
+implementado; D4B.2a acrescenta campanhas/copy/import/review de imagens. Voz/HeyGen
+pela UI (D4B.2b), preview (D4B.3) e renderer (D5) continuam planejados;
 sem timeline ou preview frame-perfect.
 O comando aceita roots/DB locais confiáveis, bind fixo 127.0.0.1, um processo e sem access logs.
 Banco fora do project root é permitido; work root fora não. Nenhum canário pago é necessário
@@ -527,6 +528,43 @@ Spec e plano: `docs/superpowers/specs/2026-10-03-d4b1-campaign-panel-design.md` 
 `docs/superpowers/plans/2026-10-03-d4b1-campaign-panel.md`. D4B.2 adicionará formulários
 operacionais/import; D4B.3 adicionará profiles, variants e preview aproximado.
 Runtime por dois terminais neste slice; launcher/distribuição ficam para depois.
+
+### D4B.2a — campanhas/copy e import manual pela UI (2026-10-04)
+
+`IMPLEMENTED`, `LOCAL_VERIFIED`; revisão final em execução. CI pendente de publicação,
+nenhum novo `PROVIDER_VERIFIED` ou chamada paga.
+
+Gate Windows `verify.py full`: 19/19, 86 testes frontend, 1.753 Python aprovados /
+25 skips em 464,31 s. Ruff, mypy src/tests, schemas sem drift, build/typecheck e audits
+production passaram. Nove testes browser/proxy reais passaram. HyperFrames doctor
+continua reportando Docker/opcionais indisponíveis com exit 0, como no baseline; isso
+não comprova renderer. Código-base das Tasks 1–4: `7c654c8`, `783e0ba`, `3c65433`, `b0ef949`.
+
+React reutiliza os endpoints e o worker atuais; API acrescenta POST de publicação de
+associações e diagnósticos/snapshot opt-in compatíveis com jobs legados. Sem tabelas,
+migrations, bibliotecas ou segundo motor de jobs. Copy aprovada exige ator/checkbox;
+sourceText canônico e histórico versionado, headline fora da narração.
+
+Prepare retorna paths relativos ao projeto; Explorer recebe arquivos na pasta images.
+Associação por variante é explícita, sem watch/inferência/upload. Worker publica manifest
+por hash dos bytes canônicos, sem sobrescrever o template. Validação inspeciona cobertura,
+paths, orientação e mídia; valid false é completed com erros, nunca importável. Fatos reais
+e ID novo por validação; execute compara snapshot de hashes antes da cópia e preserva
+as rechecagens do serviço existente. Provenance manual admite nomes contidos com
+espaços/Unicode; paths internos gerados continuam restritos.
+
+POST único, sem auto-retry/auto-start; polling somente para job selecionado. Respostas
+tardias ou associações alteradas não restauram validação antiga. Dados bons são preservados
+mas stale bloqueia ações. Reload recupera publicação persistida, nunca validação antiga.
+Perda de POST exige GET pós-submissão/match verificável; resultado ambíguo fica unknown.
+Review approve/replace exige ator/confirmação, reject exige motivo. GET de imagens prova
+apenas estado solicitado, não autoria. Rascunhos não persistidos têm aviso de saída.
+
+Testes browser usam Vite/proxy/FastAPI/SQLite/worker reais e imagens Pillow em tmp_path:
+três importações/reviews, copy versionada, mudança de source bloqueada, nova validação,
+reload sem POST e largura 390px. Providers fake devem registrar zero chamadas.
+Spec/plano: `docs/superpowers/specs/2026-10-04-d4b2a-campaign-import-design.md` e
+`docs/superpowers/plans/2026-10-04-d4b2a-campaign-import.md`.
 
 Telas mínimas do alvo completo (não todas entregues em D4B.1):
 

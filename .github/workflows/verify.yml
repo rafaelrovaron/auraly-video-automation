@@ -100,6 +100,10 @@ jobs:
           uv run python scripts/verify.py fast --pytest
           tests/test_verify_harness.py
           tests/test_web_panel_e2e.py
+          tests/test_web_import_e2e.py
+          tests/test_image_import_manifest.py
+          tests/test_api_image_import_ui.py
+          tests/test_image_import_batch.py
           tests/test_config_paths.py
           tests/test_models.py
           tests/test_image_generation.py

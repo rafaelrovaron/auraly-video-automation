@@ -47,6 +47,14 @@ genérico e não terá timeline estilo CapCut ou preview frame-perfect.
   skips em `73ca358`. Recuperação explícita de checkpoint não repete mutações; DB externo
   configurado é aceito sem relaxar roots de mídia; manifest é validado por snapshot;
 - CLI e harness de verificação.
+- D4B.1: painel local de consultas/polling e worker start/stop confirmado.
+- D4B.2a: formulários de campanha/copy aprovada e versões; batch manual pelo Explorer,
+  associação por cena, publicação imutável, validação diagnóstica e import ligado aos
+  hashes dos sources; review explícito de imagens. Sem CLI/JSON manual nesse fluxo,
+  watch folder, upload, auto-start ou provider. `IMPLEMENTED`, `LOCAL_VERIFIED`:
+  gate Windows 19/19, 86 testes frontend e 1.753 Python / 25 skips; CI deste slice pendente,
+  evidência atual no PROJECT-MEMORY. Voice Master/HeyGen pela UI são D4B.2b planejado;
+  edição/preview D4B.3 e renderer D5 continuam não entregues.
 
 ### 2.2 Capacidade alvo deste PRD
 

@@ -10,6 +10,7 @@ from typing import Literal, Self
 from pydantic import ConfigDict, Field, computed_field, field_validator, model_validator
 
 from auraly_pipeline.jobs.domain import Job
+from auraly_pipeline.editing.domain import relative_path
 from auraly_pipeline.metadata_security import (
     validate_safe_error_message,
     validate_safe_identifier,
@@ -286,7 +287,7 @@ class ImageCandidate(ImageContract):
     @field_validator("import_source_path")
     @classmethod
     def validate_import_source_path(cls, value: str | None) -> str | None:
-        return None if value is None else _validate_workspace_path(value)
+        return None if value is None else relative_path(value)
 
     @model_validator(mode="after")
     def validate_review_audit(self) -> Self:

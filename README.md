@@ -51,12 +51,16 @@ entrega.
   explícito start/stop do worker; integração com API/proxy reais e providers fake.
   Gate Windows 19/19, 56 testes frontend e 1.711 Python aprovados / 24 skips;
   `LOCAL_VERIFIED`, sem nova execução de provider. Actions desta branch ainda não executados.
+- D4B.2a `IMPLEMENTED`, `LOCAL_VERIFIED`: criação de campanha/copy aprovada, novas versões de copy,
+  associações manuais imutáveis, dry-run diagnóstico, importação ligada ao snapshot das
+  fontes e review de imagens pela UI. Evidência atual no PROJECT-MEMORY;
+  sem novas chamadas pagas. Actions deste slice pendentes de publicação.
 
 ### Não entregue ainda
 
 - render final com headline, captions, música e framing configuráveis;
 - renderização das variações A/B já planejadas, reutilizando voz, imagem e HeyGen;
-- formulários de campanha/import/review/voz/HeyGen pela interface (D4B.2);
+- formulários de voz/HeyGen pela interface (D4B.2b);
 - configuração editorial, profiles e variants pela interface (D4B.3);
 - preview aproximado e fluxo end-to-end operável pela interface.
 
@@ -237,7 +241,7 @@ HeyGen deve ser mantido em retries e renovado para uma nova ação. Profiles sã
 imutáveis (`201`), sem probe/hash de mídia na request; o worker de plano valida fontes,
 música e source antes de produzir o plano. Consulte `/docs` para os bodies de cada ação.
 
-## Painel local (D4B.1)
+## Painel local (D4B.1 + D4B.2a)
 
 Use Node 22 (>=22.12) e instale o frontend com `npm --prefix web ci`.
 Com o banco da campanha já preparado pelos comandos CLI existentes, abra dois terminais:
@@ -261,7 +265,37 @@ consumir créditos se houver Jobs pagos já aprovados na fila. Stop impede novas
 deixa o Job ativo terminar; não cancela a geração nem devolve créditos. Um worker de
 outra campanha aparece como desconhecido, não como idle. POSTs não são repetidos
 automaticamente; falhas de resposta exigem reconciliação pelas leituras de status.
-OAuth continua pela CLI. Criação/import/reviews e configuração editorial ainda usam a CLI/API.
+Campanhas/copy e import/review de imagens já usam os formulários abaixo.
+OAuth, voz/HeyGen e configuração editorial continuam pela CLI/API.
+
+### Campanha, copy e batch manual de imagens
+
+1. Na lista, abra **Criar campanha**. Preencha copy e cenas iniciais, informe o ator e
+   confirme a aprovação. A headline é visual; somente hook/body/CTA formam a narração.
+   Novas versões de copy preservam o histórico. Presets são referências, não autorização de gasto.
+2. Na campanha, em **Batch manual de imagens**, informe uma pasta relativa ao work root
+   (por exemplo `imports/campanha-01`) e clique **Preparar pasta**.
+3. Inicie explicitamente o worker **Operações locais** e confirme. Espere a pasta preparada.
+   Copie as imagens pelo Explorer para o path `.../images` exibido, relativo ao project root
+   da API. O work root padrão é `pipeline/work`; roots personalizados mudam esse prefixo.
+4. Preencha **Arquivo de VARIANTE** para cada cena, por exemplo `images/foto 01.png`.
+   Os nomes podem ter espaços/Unicode. Não edite `image-import.json` e não há associação
+   inferida pelo nome. Clique **Salvar associações**; o worker publica outro manifest por hash.
+5. Clique **Validar batch** e execute o worker quando parado. O dry-run mostra fatos reais
+   ou erros; job concluído não significa batch válido. Corrija os arquivos/associações e
+   valide de novo explicitamente. Cada nova validação lê novamente os arquivos.
+6. Com **Batch válido**, confirme e clique **Importar batch validado**. Inicie o worker
+   se necessário. Alterar associações invalida a validação; alterar bytes da imagem bloqueia
+   a execução até nova validação. Sources nunca são movidos ou sobrescritos.
+7. Após importar, selecione cada candidato, ator e ação de review. Aprovar/substituir exige
+   confirmação; rejeitar exige motivo. Importar não aprova automaticamente.
+
+O worker pode terminar ao esvaziar a fila: repita seu início explícito entre etapas.
+Adicionar arquivos à pasta **não** dispara automação. Sem watch folder, upload, file picker,
+thumbnail ou player. Depois de reload, consulte um job de publicação e **Usar associações
+salvas**; uma nova validação é obrigatória. Resposta perdida bloqueia novas escritas até
+inspeção/reconciliação por GET, sem repetir POST. A consulta de imagens confirma estado,
+não autoria da revisão. Rascunhos não salvos pedem confirmação ao sair e não são persistidos.
 
 Verificação do frontend: `uv run python scripts/verify.py ui`.
 O gate `full` instala/testa/builda/audita o frontend antes dos testes Python.
@@ -270,7 +304,7 @@ portas e falham se estiverem ocupadas, sem encerrar processos de terceiros.
 
 ## Próximo slice de desenvolvimento
 
-O próximo slice é **D4B.2 — formulários operacionais e import manual**; D4B.3 adicionará
+O próximo slice é **D4B.2b — formulários de Voice Master e HeyGen**; D4B.3 adicionará
 profiles, variantes A/B e preview aproximado. D5 adicionará o renderer.
 Revisão visual final do vídeo do canário continua humana; configurar um manifest não aprova o vídeo.
 

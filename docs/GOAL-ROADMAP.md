@@ -1,6 +1,6 @@
 # Auraly Delivery-First Goal Roadmap
 
-**Roadmap vigente:** 2026-10-03
+**Roadmap vigente:** 2026-10-04
 
 Este documento é a ordem operacional dos próximos Goals. O PRD define o produto; este roadmap
 define como chegar a ele sem transformar cada Goal em um projeto grande demais.
@@ -62,7 +62,8 @@ D3B Headline A/B Planning & Caption Inputs LOCAL_VERIFIED
 D4A.1 Local Query API & Campaign Status LOCAL_VERIFIED
 D4A.2 Operational Actions & Worker Integration LOCAL_VERIFIED
 D4B.1 Local Campaign Panel                    LOCAL_VERIFIED
-D4B.2 Operational Forms & Manual Import       PLANNED
+D4B.2a Campaign/Copy & Manual Image Import    LOCAL_VERIFIED
+D4B.2b Voice Master & HeyGen Forms            PLANNED
 D4B.3 Editing UI & Approximate Preview        PLANNED
 D5A Deterministic Renderer
 D5B Render QC, Review & Delivery
@@ -422,14 +423,23 @@ negócio.
 
 ## D4B — React Operations UI & Approximate Preview
 
-**Status:** D4B.1 `IMPLEMENTED`, `LOCAL_VERIFIED`; D4B.2 e D4B.3 `PLANNED`.
+**Status:** D4B.1 e D4B.2a `IMPLEMENTED`, `LOCAL_VERIFIED`;
+D4B.2b e D4B.3 `PLANNED`.
+
+Gate D4B.2a Windows de 2026-10-04: 19/19 etapas; 86 testes frontend e 1.753 Python
+aprovados / 25 skips (464,31 s). Browser/proxy/API/worker reais: nove testes passaram,
+incluindo os dois novos fluxos de import. CI Linux/Windows pendente de publicação;
+revisão independente final em andamento. Nenhuma chamada paga.
 
 ### Slices e capacidade atual
 
 - D4B.1: painel React/TypeScript/Vite, lista/detalhe, metadados de assets/voz/HeyGen,
   Jobs/operações, polling com dados anteriores marcados quando stale e start confirmado/stop explícito.
   API é a única fonte de verdade. Sem criação/import/review, mídia ou preview nesta etapa.
-- D4B.2: formulários de campanhas, import manual batch, review, Voice Master e HeyGen.
+- D4B.2a: campanhas/copy aprovada e versões, pasta preparada/Explorer, associação explícita,
+  publicação imutável pelo worker, dry-run diagnóstico, snapshot dos sources e review manual.
+  Sem auto-start/watch/upload, provider ou migration. Fluxo operador sem CLI/JSON manual.
+- D4B.2b: formulários de Voice Master e HeyGen; próximo slice para design/plano aprovado.
 - D4B.3: profiles, overrides, variantes A/B e preview aproximado.
 
 D4B.1 usa dois processos locais (API 8000 e Vite 5173); distribuição estática/launcher
