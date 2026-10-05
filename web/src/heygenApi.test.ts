@@ -22,6 +22,6 @@ it('accepts valid informative plan', () => {expect(heygenOperationView({...view,
 it.each([0, -1, 0.5, true, Number.MAX_SAFE_INTEGER + 1])('rejects invalid plan limit %s', maxPaidRenders => {
   expect(heygenOperationView({...view, operation: plan.operation, result: {...plan, maxPaidRenders}})).toBe(false);
 });
-it.each([['scene', 'scene'], [''], [true]])('rejects nonunique or malformed plan scenes %#', sceneVariantIds => {
+it.each([{sceneVariantIds: ['scene', 'scene']}, {sceneVariantIds: ['']}, {sceneVariantIds: [true]}])('rejects nonunique or malformed plan scenes %#', ({sceneVariantIds}) => {
   expect(heygenOperationView({...view, operation: plan.operation, result: {...plan, sceneVariantIds}})).toBe(false);
 });
