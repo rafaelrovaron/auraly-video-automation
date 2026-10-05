@@ -8,6 +8,7 @@ import { WorkerControls } from './WorkerControls';
 import { CampaignCreateForm, CopyVersionForm } from './CampaignForms';
 import { ImageImportPanel } from './ImageImportPanel';
 import { VoicePanel } from './VoicePanel';
+import { HeyGenPanel } from './HeyGenPanel';
 
 function Updated({ state }: { state: RemoteState<unknown> }) {
   return <>
@@ -50,7 +51,8 @@ export function CampaignDetailPanel({ campaignId }: { campaignId: string }) {
   const status = usePolling(campaignPath(campaignId, '/status'), signal => read<CampaignStatus>(campaignPath(campaignId, '/status'), signal,
     value => campaignStatus(value) && object(value) && value.campaignId === campaignId), 2000);
   const jobs = usePolling(campaignPath(campaignId, '/jobs'), signal => read<Items<JobSummary>>(campaignPath(campaignId, '/jobs'), signal,
-    value => collection(value, item => jobSummary(item) && object(item) && item.campaignId === campaignId)), 2000);
+    value => collection(value, item => jobSummary(item) && object(item) && item.campaignId === campaignId)
+      && object(value) && new Set((value.items as JobSummary[]).map(job => job.jobId)).size === (value.items as JobSummary[]).length), 2000);
   const worker = usePolling(campaignPath(campaignId, '/worker'), signal => readWorker(campaignId, signal), 2000);
   const images = usePolling(campaignPath(campaignId, '/images'), signal => read<Items<SceneImages>>(campaignPath(campaignId, '/images'), signal,
     value => collection(value, sceneImages)), null);
@@ -115,6 +117,7 @@ export function CampaignDetailPanel({ campaignId }: { campaignId: string }) {
       {voices.data?.items.length === 0 && <p>Nenhum Voice Master.</p>}
     </Section>
     <Section title="HeyGen" state={renders}>
+      <HeyGenPanel campaignId={campaignId} detail={detail} status={status} images={images} voices={voices} jobs={jobs} renders={renders} />
       {renders.data?.items.map(render => <article key={render.renderId}><h3>{render.renderId}</h3><Facts entries={[
         ['Status', statusLabel(render.status)], ['Cena', render.sceneVariantId], ['Imagem', render.imageCandidateId], ['Voz', render.voiceMasterId],
         ['Job', render.jobId], ['Vídeo remoto', render.remoteVideoId], ['MP4 local', render.source?.path],
