@@ -11,7 +11,7 @@ import pytest
 from tests.api_helpers import database_dump
 from tests.web_panel_support import PanelServers, reserve_port
 from tests.web_panel_support import panel_servers as provide_panel_servers  # noqa: F401
-from tests.web_panel_support import panel_speech_provider, panel_transcriber  # noqa: F401
+from tests.web_panel_support import panel_heygen_provider, panel_speech_provider, panel_transcriber  # noqa: F401
 
 pytest_plugins = ['tests.test_heygen_video_media']
 

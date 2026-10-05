@@ -1,6 +1,6 @@
 # Auraly Delivery-First Goal Roadmap
 
-**Roadmap vigente:** 2026-10-04
+**Roadmap vigente:** 2026-10-05
 
 Este documento é a ordem operacional dos próximos Goals. O PRD define o produto; este roadmap
 define como chegar a ele sem transformar cada Goal em um projeto grande demais.
@@ -64,7 +64,7 @@ D4A.2 Operational Actions & Worker Integration LOCAL_VERIFIED
 D4B.1 Local Campaign Panel                    LOCAL_VERIFIED
 D4B.2a Campaign/Copy & Manual Image Import    LOCAL_VERIFIED
 D4B.2b.1 Voice Master Forms                  IMPLEMENTED, LOCAL_VERIFIED
-D4B.2b HeyGen Forms                          PLANNED
+D4B.2b.2 HeyGen Forms                        IMPLEMENTED, LOCAL_VERIFIED
 D4B.3 Editing UI & Approximate Preview        PLANNED
 D5A Deterministic Renderer
 D5B Render QC, Review & Delivery
@@ -427,7 +427,10 @@ negócio.
 **Status:** D4B.1 e D4B.2a `IMPLEMENTED`, `LOCAL_VERIFIED`;
 D4B.2b.1 Voice Master `IMPLEMENTED`, `LOCAL_VERIFIED`: gate pós-revisão Windows
 19/19, 130 frontend e 1.789 Python / 25 skips; evidência no PROJECT-MEMORY.
-Formulários HeyGen (design/plano próprios) e D4B.3 permanecem `PLANNED`.
+D4B.2b.2 HeyGen `IMPLEMENTED`, `LOCAL_VERIFIED`: gate Windows 19/19, 214 frontend e
+1.793 Python / 25 skips; revisão independente/Actions deste slice ainda pendentes.
+Evidência no PROJECT-MEMORY, sem nova chamada paga.
+D4B.3 permanece `PLANNED` e é o próximo slice; D5 ainda não tem renderer.
 
 Gate final D4B.2a Windows de 2026-10-04: 19/19 etapas; 96 testes frontend e 1.757 Python
 aprovados / 25 skips (472,17 s). Browser/proxy/API/worker reais cobrem import, review e
@@ -447,7 +450,12 @@ CI Linux/Windows pendente de publicação. Nenhuma chamada paga.
   starts explícitos `voice_generate` ou `local_operations` → `voice_import`, review auditável
   após escuta externa. Backend/QC preservados, sem player/upload/novas dependências/migrations.
   Unknown não dispara repost; wrapper concluído não equivale a filho concluído ou voz aprovada.
-- D4B.2b HeyGen: próximo slice para design/plano aprovados; não entregue nesta etapa.
+- D4B.2b.2 HeyGen: preparação/reuso de imagens e WAV aprovados; plano informativo,
+  limite total de reservas históricas e autorização paga separados; wrappers/filhos,
+  starts explícitos `local_operations` → `heygen_assets` ou `heygen_videos`;
+  reconciliação de Job blocked com binding confirmado e metadados de MP4 por GET.
+  Defaults fixos 9:16/1080p/MP4, concurrency 2, polling 10→60/1800s. Sem auto-start,
+  POST retry, player, OAuth na UI, media serving ou mudança no engine.
 - D4B.3: profiles, overrides, variantes A/B e preview aproximado.
 
 D4B.1 usa dois processos locais (API 8000 e Vite 5173); distribuição estática/launcher

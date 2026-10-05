@@ -102,6 +102,7 @@ jobs:
           tests/test_web_panel_e2e.py
           tests/test_web_import_e2e.py
           tests/test_web_voice_e2e.py
+          tests/test_web_heygen_e2e.py
           tests/test_campaign_budget.py
           tests/test_api_campaign_budget.py
           tests/test_api_voice_actions.py

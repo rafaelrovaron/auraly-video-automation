@@ -1,14 +1,46 @@
 # Auraly Mass Video Pipeline — Memória do Projeto
 
-**Atualizado em:** 2026-10-04
+**Atualizado em:** 2026-10-05
 **Decisão vigente:** MVP delivery-first para uso local e pessoal
 
 Este documento guarda decisões duráveis e fatos verificados. O estado entregue aparece separado
 do produto planejado para impedir que roadmap seja confundido com capacidade existente.
 
-## Entrega atual: D4B.2b.1 — Voice Master UI (2026-10-04)
+## Entrega atual: D4B.2b.2 — HeyGen Operations UI (2026-10-05)
 
-Implementação na branch `codex/d4b2b1`; integração/Actions ainda pendentes. Reusa React,
+Branch `codex/d4b2b2`, execução Nativa do design/plano aprovados. `IMPLEMENTED`,
+`LOCAL_VERIFIED`: gate completo Windows 19/19, 214 frontend e 1.793 Python aprovados /
+25 skips (pytest: 582,02 s). Revisão independente pendente; sem merge/push,
+Actions desta branch ou chamadas pagas nesta etapa.
+Reusa React/FastAPI/SQLite, MCP OAuth e workers existentes, sem contratos backend,
+migrations, dependências ou mudança no engine.
+
+- preparação all-scenes: wrapper `local_operations` → Job `heygen.asset.upload`
+  (`heygen_assets`); reuso sem filho não é novo upload;
+- plano informativo e confirmação paga separados; defaults fixos 1080p, limite total
+  quantitativo incluindo todo histórico; backend recalcula no submit;
+- wrapper de submit cria reservas/Jobs, não MP4s. Start `heygen_videos` explícito;
+- reconciliação só de render cujo Job está blocked: ID conhecido readonly, vínculo
+  manual confirmado para novo ID; sem ID, prova de no-dispatch apenas no backend;
+- recovery Job observado por leituras atuais; sem resume/start automático;
+- MP4: caminho relativo ao work root, hashes, probe e binding; abrir fora da UI;
+- guards de DTO/campanha/cena/IDs únicos, stale preserva último fato; unknown não
+  reenvia nem identifica por coincidência; drafts/lifecycle independentes.
+
+Browser/proxy/API/SQLite/workers reais: 4/4 testes novos passaram isoladamente e
+novamente na seleção focada (21/21, incluindo 4 de serviço) e no gate completo.
+Seed mantém três renders 720p históricos; conta fake nova/default1080 cria mais três
+sob limite total 6. Dois uploads de imagem + um WAV, três creates, MP4/hash/probe reais,
+reuso/reload sem nova mutação; dispatch ambíguo reconciliado por ID exato sem outro
+create. Resposta POST persistida perdida não reenvia. Viewport 390×844 sem overflow,
+sem novo CSS. Download sintético 1080p separado para preservar QC e seed 720p.
+
+D4B.3 (profiles/variants/preview) e D5 (renderer) continuam planejados. Flow permanece
+pausado e não bloqueante. Esta entrega local não amplia o `PROVIDER_VERIFIED` D2C.
+
+### Histórico D4B.2b.1 — Voice Master UI (2026-10-04)
+
+Implementação na branch `codex/d4b2b1`, integrada em `4a06c4d`. Reusa React,
 FastAPI, SQLite e workers existentes. `IMPLEMENTED`, `LOCAL_VERIFIED`.
 Gate completo Windows pós-revisão: 19/19 etapas, 130 testes
 frontend e 1.789 Python aprovados / 25 skips. Browser/proxy/API/SQLite/workers reais
@@ -36,8 +68,11 @@ Sem nova execução real de provider ou autorização paga usada nos testes.
   guards de DTO/campanha/lifecycle, submit único e aviso de draft; unknown faz GET, não repost;
   adoção explícita de Job só inspeciona fatos, não prova identidade/autoria de request perdida.
 
-HeyGen UI tem design/plano próprios ainda não iniciados; D4B.3 (profiles/variants/preview)
-e D5 (renderer) continuam roadmap, não capacidade entregue. Histórico abaixo preservado.
+Actions do Voice slice: Linux passou; Windows inicialmente deu timeout ao aguardar
+“Criar campanha”. Dois runs locais 13/13 não reproduziram (o segundo com diagnóstico
+de erros JS/requests). Um único rerun do Job falho passou; run 37282794254, attempt 2,
+Linux/Windows success. Causa não confirmada: nenhum código corrigido, retry ou timeout
+maior acrescentado. Histórico técnico abaixo preservado.
 
 ## 1. Resultado desejado
 

@@ -59,6 +59,7 @@ def reserve_port(port: int) -> socket.socket:
 def panel_servers(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mp4: bytes,
     panel_speech_provider: SpeechProvider | None, panel_transcriber: TranscriptProvider | None,
+    panel_heygen_provider: FakeHeyGenProvider,
 ) -> Iterator[PanelServers]:
     import auraly_pipeline.api.app as module
 
@@ -77,7 +78,7 @@ def panel_servers(
     server: uvicorn.Server | None = None
     thread: Thread | None = None
     process: subprocess.Popen[bytes] | None = None
-    provider = FakeHeyGenProvider()
+    provider = panel_heygen_provider
     try:
         settings, _ = create_ready_api_fixture(tmp_path, mp4)
         original = ApiCommands.execute_operation
@@ -152,3 +153,8 @@ def panel_speech_provider() -> None:
 @pytest.fixture
 def panel_transcriber() -> None:
     return None
+
+
+@pytest.fixture
+def panel_heygen_provider() -> FakeHeyGenProvider:
+    return FakeHeyGenProvider()

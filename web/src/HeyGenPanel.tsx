@@ -52,7 +52,8 @@ function HeyGenForms({campaignId, detail, status, images, voices, jobs, renders}
         && (value.result?.operation !== 'heygen_video_plan' || (value.result.sceneVariantIds.length === sceneIds.length
           && value.result.sceneVariantIds.every(id => sceneIds.includes(id))))
         && (value.result?.operation !== 'heygen_video_submit' || value.result.renders.every(render => render.campaignId === campaignId
-          && sceneIds.includes(render.sceneVariantId) && images.data?.items.some(scene => scene.items.some(image => image.imageCandidateId === render.imageCandidateId))
+          && sceneIds.includes(render.sceneVariantId) && images.data?.items.some(scene => scene.sceneVariantId === render.sceneVariantId
+            && scene.items.some(image => image.imageCandidateId === render.imageCandidateId))
           && voices.data?.items.some(voice => voice.voiceMasterId === render.voiceMasterId))))
       : Promise.resolve(null), wrapper ? 2000 : null);
   useEffect(() => {
@@ -67,8 +68,10 @@ function HeyGenForms({campaignId, detail, status, images, voices, jobs, renders}
     }
   }, [operation.data, operation.error, wrapper, jobs.refresh, renders.refresh]);
   const child = assets?.jobId && jobs.data?.items.find(job => job.jobId === assets.jobId && job.campaignId === campaignId && job.jobType === 'heygen.asset.upload');
+  const awaiting = !!wrapper && (!operation.data || ['queued', 'running', 'retry_scheduled'].includes(operation.data.status));
+  const actionBlocked = blocked || awaiting;
   async function command(kind: 'heygen_assets' | 'heygen_video_plan' | 'heygen_video_submit') {
-    if (lock.current || blocked || (kind !== 'heygen_assets' && !validCap)
+    if (lock.current || actionBlocked || (kind !== 'heygen_assets' && !validCap)
       || (kind === 'heygen_video_submit' && (!planUsable || !paid || !actor.trim() || plan!.reservedCount + plan!.newCount > capNumber))) return;
     lock.current = true; setBusy(true); setNotice('');
     if (kind === 'heygen_video_plan') {setPlan(null); setPaid(false);}
@@ -97,16 +100,16 @@ function HeyGenForms({campaignId, detail, status, images, voices, jobs, renders}
     {!fresh && <p role="alert">Dados desatualizados ou indisponíveis. Atualize antes de agir.</p>}
     {!eligible && <p>É necessária uma voz aprovada e uma imagem aprovada por cena.</p>}
     {approved.length === 1 && <p>Áudio aprovado: {approved[0].voiceMasterId} · copy v{approved[0].copyMasterVersion}</p>}
-    <button disabled={blocked} onClick={() => void command('heygen_assets')}>Preparar assets HeyGen</button>
+    <button disabled={actionBlocked} onClick={() => void command('heygen_assets')}>Preparar assets HeyGen</button>
     <h4>Planejamento e geração</h4><p>Defaults: imagem · 9:16 · 1080p · MP4 · cover · medium. O plano é informativo; o backend recalcula na submissão.</p>
     <label>Limite total de renders reservados da campanha <input inputMode="numeric" value={cap} onChange={event => setCap(event.target.value)} /></label>
     <p>Inclui reservas históricas, mesmo failed ou blocked. Não é valor em moeda.</p>
-    <button disabled={blocked || !validCap} onClick={() => void command('heygen_video_plan')}>Planejar batch HeyGen</button>
+    <button disabled={actionBlocked || !validCap} onClick={() => void command('heygen_video_plan')}>Planejar batch HeyGen</button>
     {planUsable && <div><p>Novos: {plan!.newCount} · reuso: {plan!.reusedCount} · Reservas históricas: {plan!.reservedCount}</p>
       <p>Total após novas reservas: {plan!.reservedCount + plan!.newCount} · limite: {plan!.maxPaidRenders} · áudio (s): {plan!.totalAudioSeconds}</p></div>}
     <label>Responsável pela geração HeyGen <input value={actor} onChange={event => setActor(event.target.value)} /></label>
-    <label><input type="checkbox" checked={paid} disabled={!planUsable || blocked} onChange={event => setPaid(event.target.checked)} />Autorizo a geração paga deste batch; o limite inclui o histórico da campanha.</label>
-    <button disabled={blocked || !planUsable || !paid || !actor.trim() || plan!.reservedCount + plan!.newCount > capNumber}
+    <label><input type="checkbox" checked={paid} disabled={!planUsable || actionBlocked} onChange={event => setPaid(event.target.checked)} />Autorizo a geração paga deste batch; o limite inclui o histórico da campanha.</label>
+    <button disabled={actionBlocked || !planUsable || !paid || !actor.trim() || plan!.reservedCount + plan!.newCount > capNumber}
       onClick={() => void command('heygen_video_submit')}>Enfileirar geração HeyGen</button>
     {submitted && <div><p>Reservas aceitas; não significa MP4 concluído. Inicie heygen_videos explicitamente para os Jobs de vídeo da campanha.</p>
       {submitted.renders.map(render => <p key={render.renderId}>Reserva: {render.renderId} · Job: {render.jobId}</p>)}</div>}
@@ -139,7 +142,7 @@ function HeyGenReconcileForm({campaignId, jobs, renders}: Pick<HeyGenPanelProps,
   const [selected, setSelected] = useState(''), [video, setVideo] = useState(''), [binding, setBinding] = useState(false);
   const [busy, setBusy] = useState(false), [unknown, setUnknown] = useState(false), [notice, setNotice] = useState('');
   const [intentId, setIntentId] = useState('');
-  const [wrapper, setWrapper] = useState<{jobId: string; renderId: string} | null>(null);
+  const [wrapper, setWrapper] = useState<{jobId: string; expected: HeyGenRenderView} | null>(null);
   const [accepted, setAccepted] = useState<{renderId: string; jobId: string} | null>(null);
   const alive = useRef(true), lock = useRef(false), handled = useRef(new Set<string>());
   useEffect(() => {alive.current = true; return () => {alive.current = false;};}, []);
@@ -154,7 +157,11 @@ function HeyGenReconcileForm({campaignId, jobs, renders}: Pick<HeyGenPanelProps,
     signal => wrapper ? read<HeyGenOperationView>(campaignPath(campaignId, `/operations/${encodeURIComponent(wrapper.jobId)}`), signal,
       value => heygenOperationView(value) && value.campaignId === campaignId && value.jobId === wrapper.jobId && value.operation === 'heygen_reconcile'
         && (value.result === null || (value.result.operation === 'heygen_reconcile' && value.result.render.campaignId === campaignId
-          && value.result.render.renderId === wrapper.renderId))) : Promise.resolve(null), wrapper ? 2000 : null);
+          && value.result.render.renderId === wrapper.expected.renderId
+          && value.result.render.sceneVariantId === wrapper.expected.sceneVariantId
+          && value.result.render.imageCandidateId === wrapper.expected.imageCandidateId && value.result.render.voiceMasterId === wrapper.expected.voiceMasterId
+          && value.result.render.imageSha256 === wrapper.expected.imageSha256 && value.result.render.audioSha256 === wrapper.expected.audioSha256
+          && (!wrapper.expected.remoteVideoId || value.result.render.remoteVideoId === wrapper.expected.remoteVideoId)))) : Promise.resolve(null), wrapper ? 2000 : null);
   useEffect(() => {
     const value = operation.data;
     if (!operation.error && value?.status === 'completed' && value.result?.operation === 'heygen_reconcile' && !handled.current.has(value.jobId)) {
@@ -174,7 +181,7 @@ function HeyGenReconcileForm({campaignId, jobs, renders}: Pick<HeyGenPanelProps,
           videoId: exactId, confirmManualBinding: !render.remoteVideoId && !!exactId && binding});
       if (!alive.current) return;
       if (!heygenSubmission(value) || value.operation !== 'heygen_reconcile' || value.campaignId !== campaignId) throw new ApiError('command_unknown');
-      setWrapper({jobId: value.jobId, renderId: render.renderId}); setNotice('Reconciliação na fila. Inicie local_operations explicitamente.');
+      setWrapper({jobId: value.jobId, expected: {...render, remoteVideoId: exactId}}); setNotice('Reconciliação na fila. Inicie local_operations explicitamente.');
     } catch (error) {
       if (!alive.current) return;
       const failure = error instanceof ApiError ? error : new ApiError('command_unknown'); setUnknown(failure.code === 'command_unknown'); setNotice(failure.message);

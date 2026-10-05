@@ -58,12 +58,15 @@ entrega.
 - D4B.2b.1 `IMPLEMENTED`, `LOCAL_VERIFIED`: formulários de orçamento inicial, geração/importação e review de Voice Master;
   workers explícitos e acompanhamento separado de operação local/Job filho. Verificação
   deste slice registrada no PROJECT-MEMORY; sem nova chamada paga.
+- D4B.2b.2 `IMPLEMENTED`, `LOCAL_VERIFIED`: preparação de assets, plano/autorizações
+  HeyGen, reservas, reconciliação e metadados dos MP4s pela UI local. Gate 19/19;
+  revisão independente/CI deste slice pendentes, evidência no PROJECT-MEMORY;
+  sem novo canário ou uso de créditos.
 
 ### Não entregue ainda
 
 - render final com headline, captions, música e framing configuráveis;
 - renderização das variações A/B já planejadas, reutilizando voz, imagem e HeyGen;
-- formulários de HeyGen pela interface (próximo slice D4B.2b);
 - configuração editorial, profiles e variants pela interface (D4B.3);
 - preview aproximado e fluxo end-to-end operável pela interface.
 
@@ -305,7 +308,7 @@ O gate `full` instala/testa/builda/audita o frontend antes dos testes Python.
 Pare os servidores de desenvolvimento antes do gate: os testes de integração usam essas
 portas e falham se estiverem ocupadas, sem encerrar processos de terceiros.
 
-## Próximo slice de desenvolvimento
+## Operação pela interface
 
 ### Voice Master na interface (D4B.2b.1)
 
@@ -333,8 +336,35 @@ voz/Job: não há regeneração forçada. Resultado perdido/inválido fica desco
 não é reenviado; consulte Jobs e operações conhecidos explicitamente. Coincidência de
 copy/provider não identifica uma request perdida e consulta não prova autoria.
 
-O próximo slice é **D4B.2b — formulários HeyGen**, com design/plano próprios; D4B.3 adicionará
-profiles, variantes A/B e preview aproximado. D5 adicionará o renderer.
+### HeyGen na interface (D4B.2b.2)
+
+Na seção **HeyGen**, use todas as cenas com uma imagem aprovada por cena e uma única
+voz aprovada. O backend resolve o material e a conta conectada pelo MCP/OAuth da CLI.
+
+1. **Preparar assets HeyGen** cria um wrapper; inicie `local_operations`. Se houver
+   Job de upload, inicie `heygen_assets` e confira o filho, não apenas o wrapper.
+2. Informe o **limite total de renders reservados da campanha**, incluindo históricos,
+   failed e blocked. É quantidade, não moeda/saldo. Planeje e inicie `local_operations`.
+3. Confira novos/reuso/histórico. Informe responsável e marque autorização paga.
+   Enfileire a geração; inicie `local_operations` para criar reservas, depois
+   `heygen_videos` para despachar/pollar/baixar. Cada start processa os Jobs elegíveis
+   daquele tipo na campanha; não é limitado ao wrapper recém-criado.
+4. Confira os renders pelo GET: caminho relativo ao work root, hashes, bytes e probe.
+   Abra o MP4 no Explorer. Não há player, media serving ou download no browser.
+5. Para reconciliar, selecione um render com Job blocked. ID conhecido é readonly;
+   ID novo exige vínculo manual explícito. Sem ID, somente o backend prova no-dispatch
+   ou recusa a retomada. Inicie `local_operations`, confira render/Job atual (pode ser
+   Job de recuperação) e inicie `heygen_videos` explicitamente quando necessário.
+
+Config fixa: image/provider_default, 9:16/1080p/MP4, cover, medium, motionPrompt null,
+concorrência 2, polling 10→60 s até 1800 s. O plano é informativo, não token/snapshot
+atômico: a submissão recalcula no backend. Mudanças de material/limite invalidam a
+confirmação; timestamps de polling não. Unknown preserva intenção/draft e bloqueia
+repost; inspecionar Job conhecido não prova autoria de uma resposta perdida.
+Nada inicia ao abrir/recarregar, nem há retry automático de POST ou autenticação na UI.
+
+O próximo slice é **D4B.3 — profiles, variantes A/B e preview aproximado**.
+D5 adicionará o renderer. Sem timeline CapCut ou preview frame-perfect.
 Revisão visual final do vídeo do canário continua humana; configurar um manifest não aprova o vídeo.
 
 A execução de 2026-09-30 aprovou o WAV existente com motivo auditável, completou upload de

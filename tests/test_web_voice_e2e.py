@@ -10,6 +10,7 @@ from tests.test_voice_service import FakeElevenLabs, _mp3
 from tests.test_web_import_e2e import create_campaign, start_local_worker
 from tests.test_web_panel_e2e import panel_page as provide_panel_page  # noqa: F401
 from tests.web_panel_support import PanelServers
+from tests.web_panel_support import panel_heygen_provider  # noqa: F401
 from tests.web_panel_support import panel_servers as provide_panel_servers  # noqa: F401
 
 pytest_plugins = ['tests.test_heygen_video_media']

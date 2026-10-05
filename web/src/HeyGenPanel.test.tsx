@@ -222,10 +222,10 @@ it('test_new_plan_intent_disarms_previous_confirmation', async () => {
   expect((screen.getByLabelText(/Autorizo a geração paga/) as HTMLInputElement).checked).toBe(false);
 });
 
-function fakeReconcileApi(known = false, returned: unknown = {...reservation, jobId: 'recovery-job'}) {
+function fakeReconcileApi(known = false, returned?: unknown) {
   const api = fakeApi({submit: async (_path, body) => {
     api.setWrapper({jobId: 'reconcile-job', campaignId: 'campaign-one', operation: 'heygen_reconcile', status: 'completed', errorCode: null,
-      result: {operation: 'heygen_reconcile', render: returned}});
+      result: {operation: 'heygen_reconcile', render: returned ?? {...reservation, jobId: 'recovery-job', remoteVideoId: body.videoId}}});
     return Response.json({jobId: 'reconcile-job', campaignId: 'campaign-one', operation: body.operation});
   }});
   api.data['/heygen/renders'] = {items: [{...reservation, status: 'reconciliation_required', remoteVideoId: known ? 'video-known' : null}]};
@@ -325,4 +325,24 @@ it.each(['foreign-image', 'duplicate-image', 'duplicate-voice'])('test_material_
 it('test_foreign_scene_job_never_enables_reconciliation', async () => {
   const api = fakeReconcileApi(); api.data['/jobs'] = {items: [{...child, jobId: 'video-job', jobType: 'heygen.video.generate', status: 'blocked', sceneVariantId: 'foreign'}]};
   await openPanel(); expect(screen.queryByRole('option', {name: 'render-one'})).toBeNull();
+});
+
+it.each([{...reservation, sceneVariantId: 'foreign'}, {...reservation, imageCandidateId: 'foreign-image'}, {...reservation, audioSha256: 'd'.repeat(64)}])(
+  'test_reconcile_result_must_match_selected_material %#', async returned => {
+    fakeReconcileApi(false, returned); await selectReconcile(); fireEvent.click(reconcileButton());
+    expect(await screen.findByText(/Leitura da reconciliação indisponível/)).toBeTruthy();
+    expect(screen.queryByText('Reconciliação recebida; consulte o render e o Job atual.')).toBeNull();
+  });
+
+it('test_accepted_queued_wrapper_does_not_allow_duplicate_intent', async () => {
+  const api = fakeApi(); api.setWrapper({jobId: 'wrapper-one', campaignId: 'campaign-one', operation: 'heygen_assets', status: 'queued', result: null, errorCode: null});
+  await openPanel(); fireEvent.click(prepare()); await screen.findByText(/Operação: wrapper-one · queued/);
+  expect((prepare() as HTMLButtonElement).disabled).toBe(true); fireEvent.click(prepare()); expect(api.calls).toHaveLength(1);
+});
+
+it('test_manual_reconciliation_result_must_preserve_exact_video', async () => {
+  fakeReconcileApi(false, {...reservation, remoteVideoId: 'wrong-video'}); await selectReconcile();
+  fireEvent.change(screen.getByLabelText('ID exato do vídeo HeyGen'), {target: {value: 'video-exact'}});
+  fireEvent.click(screen.getByLabelText(/Confirmo o vínculo manual/)); fireEvent.click(reconcileButton());
+  expect(await screen.findByText(/Leitura da reconciliação indisponível/)).toBeTruthy();
 });

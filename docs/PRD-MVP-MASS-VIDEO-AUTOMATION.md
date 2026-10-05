@@ -53,7 +53,7 @@ genérico e não terá timeline estilo CapCut ou preview frame-perfect.
   hashes dos sources; review explícito de imagens. Sem CLI/JSON manual nesse fluxo,
   watch folder, upload, auto-start ou provider. `IMPLEMENTED`, `LOCAL_VERIFIED`:
   gate final Windows 19/19, 96 testes frontend e 1.757 Python / 25 skips; CI deste slice pendente,
-  evidência atual no PROJECT-MEMORY. HeyGen pela UI continua planejado;
+  evidência histórica no PROJECT-MEMORY;
   edição/preview D4B.3 e renderer D5 continuam não entregues.
 - D4B.2b.1: Voice Master pela UI local, com seleção explícita de copy, budget inicial
   transacional sem overwrite, autorização de geração separada, import MP3/WAV relativo
@@ -62,7 +62,19 @@ genérico e não terá timeline estilo CapCut ou preview frame-perfect.
   aceite/worker idle. Exceção de transcript importado permanece restrita e exige motivo.
   Sem player, upload, force-regenerate, provider novo ou migration.
   `IMPLEMENTED`, `LOCAL_VERIFIED`: gate pós-revisão Windows 19/19, 130 frontend e
-  1.789 Python / 25 skips; evidência no PROJECT-MEMORY. Actions pendentes de publicação.
+  1.789 Python / 25 skips; evidência no PROJECT-MEMORY. Actions Linux/Windows passaram
+  após um rerun Windows; timeout inicial não reproduzido nem atribuído a causa confirmada.
+- D4B.2b.2: formulários HeyGen de preparação de assets, plano informativo e submissão
+  paga com responsável/checkbox; limite total por quantidade de reservas da campanha,
+  incluindo histórico. Defaults fixos 1080p/9:16/MP4 e backend autoritativo recalculando.
+  Workers existentes têm starts separados; wrapper concluído não prova filho/MP4 pronto.
+  Reconciliação somente com Job blocked: ID conhecido imutável, novo ID com binding
+  explícito, sem ID exige prova backend de no-dispatch. Recovery Job preserva histórico.
+  Metadados/hash/probe/caminho relativo ao work root, escuta/visualização externas;
+  guards de contexto, snapshots stale, drafts independentes e unknown sem repost.
+  `IMPLEMENTED`, `LOCAL_VERIFIED`: gate Windows 19/19, 214 frontend e 1.793 Python /
+  25 skips; revisão independente/CI deste slice pendentes. Evidência no PROJECT-MEMORY;
+  sem novo canário ou créditos.
 
 ### 2.2 Capacidade alvo deste PRD
 
