@@ -122,7 +122,8 @@ it('test_unmounted_campaign_ignores_late_post', async () => {
 const planResult = {operation: 'heygen_video_plan', newCount: 1, reusedCount: 0, reservedCount: 2,
   maxPaidRenders: 3, totalAudioSeconds: 1, sceneVariantIds: ['scene-one']};
 const reservation = {renderId: 'render-one', campaignId: 'campaign-one', sceneVariantId: 'scene-one', imageCandidateId: 'image-one',
-  voiceMasterId: 'voice-one', jobId: 'video-job', status: 'queued', remoteVideoId: null, source: null, errorCode: null};
+  voiceMasterId: 'voice-one', jobId: 'video-job', status: 'planned', remoteVideoId: null, source: null, errorCode: null,
+  manualBinding: false, imageSha256: 'a'.repeat(64), audioSha256: 'b'.repeat(64), createdAt: time, updatedAt: time};
 function fakePlanApi(result: unknown = planResult) {
   const api = fakeApi({submit: async (_path, body) => {
     const jobId = body.operation === 'heygen_video_plan' ? 'plan-job' : 'submit-job';
@@ -309,4 +310,19 @@ it('test_plan_acceptance_preserves_reconciliation_draft', async () => {
   fireEvent.change(screen.getByLabelText('ID exato do vídeo HeyGen'), {target: {value: 'my-draft'}});
   fireEvent.change(screen.getByLabelText('Limite total de renders reservados da campanha'), {target: {value: '3'}}); fireEvent.click(planButton()); await screen.findByText(/Novos: 1/);
   expect((screen.getByLabelText('ID exato do vídeo HeyGen') as HTMLInputElement).value).toBe('my-draft');
+});
+
+it.each(['foreign-image', 'duplicate-image', 'duplicate-voice'])('test_material_context_blocks_commands (%s)', async kind => {
+  const api = fakeApi();
+  if (kind === 'foreign-image') api.data['/images'] = {items: [{sceneVariantId: 'scene-one', items: [image]}, {sceneVariantId: 'foreign', items: []}]};
+  if (kind === 'duplicate-image') api.data['/images'] = {items: [{sceneVariantId: 'scene-one', items: [image]}, {sceneVariantId: 'scene-one', items: [image]}]};
+  if (kind === 'duplicate-voice') api.data['/voices'] = {items: [voice, voice]};
+  render(<CampaignDetailPanel campaignId="campaign-one" />); await act(async () => {});
+  expect(screen.getByText(/Dados desatualizados ou indisponíveis/)).toBeTruthy();
+  fireEvent.click(prepare()); expect(api.calls).toHaveLength(0);
+});
+
+it('test_foreign_scene_job_never_enables_reconciliation', async () => {
+  const api = fakeReconcileApi(); api.data['/jobs'] = {items: [{...child, jobId: 'video-job', jobType: 'heygen.video.generate', status: 'blocked', sceneVariantId: 'foreign'}]};
+  await openPanel(); expect(screen.queryByRole('option', {name: 'render-one'})).toBeNull();
 });

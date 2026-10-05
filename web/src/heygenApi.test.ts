@@ -25,3 +25,10 @@ it.each([0, -1, 0.5, true, Number.MAX_SAFE_INTEGER + 1])('rejects invalid plan l
 it.each([{sceneVariantIds: ['scene', 'scene']}, {sceneVariantIds: ['']}, {sceneVariantIds: [true]}])('rejects nonunique or malformed plan scenes %#', ({sceneVariantIds}) => {
   expect(heygenOperationView({...view, operation: plan.operation, result: {...plan, sceneVariantIds}})).toBe(false);
 });
+
+it('rejects incomplete media result in submit and reconcile', () => {
+  const render = {renderId: 'render', campaignId: 'campaign', sceneVariantId: 'scene', imageCandidateId: 'image', voiceMasterId: 'voice',
+    jobId: 'child', status: 'planned', remoteVideoId: null, source: null, errorCode: null};
+  expect(heygenOperationView({...view, operation: 'heygen_video_submit', result: {operation: 'heygen_video_submit', renders: [render]}})).toBe(false);
+  expect(heygenOperationView({...view, operation: 'heygen_reconcile', result: {operation: 'heygen_reconcile', render}})).toBe(false);
+});

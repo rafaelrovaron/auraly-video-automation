@@ -1,14 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
 import { ApiError, campaignPath, post, read } from './api';
-import type { CampaignDetail, CampaignStatus, Items, JobSummary, RenderSummary, SceneImages, VoiceSummary } from './api';
+import type { CampaignDetail, CampaignStatus, Items, JobSummary, SceneImages, VoiceSummary } from './api';
 import { HEYGEN_DEFAULT_CONFIG, heygenOperationView, heygenSubmission } from './heygenApi';
-import type { HeyGenAssetsResult, HeyGenOperationKind, HeyGenOperationView, HeyGenPlanResult, HeyGenSubmitResult } from './heygenApi';
+import type { HeyGenAssetsResult, HeyGenOperationKind, HeyGenOperationView, HeyGenPlanResult, HeyGenSubmitResult, HeyGenRenderView } from './heygenApi';
 import { usePolling } from './usePolling';
 import type { RemoteState } from './usePolling';
 import { useUnsavedChanges } from './useUnsavedChanges';
 
 export type HeyGenPanelProps = {campaignId: string; detail: RemoteState<CampaignDetail>; status: RemoteState<CampaignStatus>;
-  images: RemoteState<Items<SceneImages>>; voices: RemoteState<Items<VoiceSummary>>; jobs: RemoteState<Items<JobSummary>>; renders: RemoteState<Items<RenderSummary>>};
+  images: RemoteState<Items<SceneImages>>; voices: RemoteState<Items<VoiceSummary>>; jobs: RemoteState<Items<JobSummary>>; renders: RemoteState<Items<HeyGenRenderView>>};
 
 export function HeyGenPanel(props: HeyGenPanelProps) { return <HeyGenForms key={props.campaignId} {...props} />; }
 function HeyGenForms({campaignId, detail, status, images, voices, jobs, renders}: HeyGenPanelProps) {
@@ -28,7 +28,8 @@ function HeyGenForms({campaignId, detail, status, images, voices, jobs, renders}
   const fresh = snapshots.every(state => state.data && !state.error)
     && detail.data?.campaignId === campaignId && status.data?.campaignId === campaignId
     && voices.data?.items.every(voice => voice.campaignId === campaignId)
-    && jobs.data?.items.every(job => job.campaignId === campaignId);
+    && jobs.data?.items.every(job => job.campaignId === campaignId)
+    && images.data?.items.every(scene => detail.data?.sceneVariants.some(known => known.sceneVariantId === scene.sceneVariantId));
   const approved = voices.data?.items.filter(voice => voice.status === 'approved') ?? [];
   const eligible = approved.length === 1 && !!approved[0].processedSha256 && !!approved[0].processedAudioPath
     && !!detail.data?.sceneVariants.length && detail.data.sceneVariants.every(scene => {
@@ -145,6 +146,7 @@ function HeyGenReconcileForm({campaignId, jobs, renders}: Pick<HeyGenPanelProps,
   useUnsavedChanges(!!selected || !!video || binding || busy || unknown);
   const fresh = !!jobs.data && !!renders.data && !jobs.error && !renders.error;
   const candidates = renders.data?.items.filter(render => jobs.data?.items.some(job => job.jobId === render.jobId
+    && (job.sceneVariantId === null || job.sceneVariantId === render.sceneVariantId)
     && job.campaignId === campaignId && job.jobType === 'heygen.video.generate' && job.status === 'blocked')) ?? [];
   const render = candidates.find(render => render.renderId === selected);
   const exactId = render?.remoteVideoId ?? (video.trim() || null);

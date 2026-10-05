@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import { campaignDetail, campaignPath, campaignStatus, campaignSummary, collection, jobSummary, object, operationView, pendingLabel, read, readWorker, renderSummary, sceneImages, statusLabel, voiceSummary } from './api';
-import type { CampaignDetail, CampaignStatus, CampaignSummary, Items, JobSummary, OperationView, RenderSummary, SceneImages, VoiceSummary } from './api';
+import { ApiError, campaignDetail, campaignPath, campaignStatus, campaignSummary, collection, jobSummary, object, operationView, pendingLabel, read, readWorker, sceneImages, statusLabel, voiceSummary } from './api';
+import type { CampaignDetail, CampaignStatus, CampaignSummary, Items, JobSummary, OperationView, SceneImages, VoiceSummary } from './api';
+import { heygenRenderView } from './heygenApi';
+import type { HeyGenRenderView } from './heygenApi';
 import { usePolling } from './usePolling';
 import type { RemoteState } from './usePolling';
 import { WorkerControls } from './WorkerControls';
@@ -47,7 +49,8 @@ export function CampaignList() {
 
 export function CampaignDetailPanel({ campaignId }: { campaignId: string }) {
   const detail = usePolling(campaignPath(campaignId), signal => read<CampaignDetail>(campaignPath(campaignId), signal,
-    value => campaignDetail(value) && object(value) && value.campaignId === campaignId), null);
+    value => campaignDetail(value) && object(value) && value.campaignId === campaignId
+      && new Set((value.sceneVariants as CampaignDetail['sceneVariants']).map(scene => scene.sceneVariantId)).size === (value.sceneVariants as unknown[]).length), null);
   const status = usePolling(campaignPath(campaignId, '/status'), signal => read<CampaignStatus>(campaignPath(campaignId, '/status'), signal,
     value => campaignStatus(value) && object(value) && value.campaignId === campaignId), 2000);
   const jobs = usePolling(campaignPath(campaignId, '/jobs'), signal => read<Items<JobSummary>>(campaignPath(campaignId, '/jobs'), signal,
@@ -55,10 +58,20 @@ export function CampaignDetailPanel({ campaignId }: { campaignId: string }) {
       && object(value) && new Set((value.items as JobSummary[]).map(job => job.jobId)).size === (value.items as JobSummary[]).length), 2000);
   const worker = usePolling(campaignPath(campaignId, '/worker'), signal => readWorker(campaignId, signal), 2000);
   const images = usePolling(campaignPath(campaignId, '/images'), signal => read<Items<SceneImages>>(campaignPath(campaignId, '/images'), signal,
-    value => collection(value, sceneImages)), null);
+    value => collection(value, sceneImages) && object(value)
+      && new Set((value.items as SceneImages[]).map(scene => scene.sceneVariantId)).size === (value.items as SceneImages[]).length
+      && (value.items as SceneImages[]).every(scene => scene.items.every(image => image.sceneVariantId === scene.sceneVariantId))
+      && new Set((value.items as SceneImages[]).flatMap(scene => scene.items.map(image => image.imageCandidateId))).size === (value.items as SceneImages[]).flatMap(scene => scene.items).length), null);
   const voices = usePolling(campaignPath(campaignId, '/voices'), signal => read<Items<VoiceSummary>>(campaignPath(campaignId, '/voices'), signal,
-    value => collection(value, item => voiceSummary(item) && object(item) && item.campaignId === campaignId)), null);
-  const renders = usePolling(campaignPath(campaignId, '/heygen/renders'), signal => read<Items<RenderSummary>>(campaignPath(campaignId, '/heygen/renders'), signal, value => collection(value, renderSummary)), null);
+    value => collection(value, item => voiceSummary(item) && object(item) && item.campaignId === campaignId)
+      && object(value) && new Set((value.items as VoiceSummary[]).map(voice => voice.voiceMasterId)).size === (value.items as VoiceSummary[]).length), null);
+  const sceneIds = detail.data?.sceneVariants.map(scene => scene.sceneVariantId);
+  const renders = usePolling(`${campaignPath(campaignId, '/heygen/renders')}:${JSON.stringify(sceneIds)}`, signal => {
+    if (!sceneIds) return Promise.reject(new ApiError('invalid_response'));
+    return read<Items<HeyGenRenderView>>(campaignPath(campaignId, '/heygen/renders'), signal,
+      value => collection(value, item => heygenRenderView(item) && item.campaignId === campaignId && sceneIds.includes(item.sceneVariantId))
+        && object(value) && new Set((value.items as HeyGenRenderView[]).map(render => render.renderId)).size === (value.items as HeyGenRenderView[]).length);
+  }, null);
   const [selectedJob, setSelectedJob] = useState<string | null>(null);
   const previousFingerprint = useRef<string | null>(null);
   const fingerprint = status.data && jobs.data ? JSON.stringify([
@@ -121,7 +134,15 @@ export function CampaignDetailPanel({ campaignId }: { campaignId: string }) {
       {renders.data?.items.map(render => <article key={render.renderId}><h3>{render.renderId}</h3><Facts entries={[
         ['Status', statusLabel(render.status)], ['Cena', render.sceneVariantId], ['Imagem', render.imageCandidateId], ['Voz', render.voiceMasterId],
         ['Job', render.jobId], ['Vídeo remoto', render.remoteVideoId], ['MP4 local', render.source?.path],
-      ]} /><ErrorCode code={render.errorCode} /></article>)}
+        ['Vínculo manual', render.manualBinding ? 'Sim' : 'Não'], ['SHA256 imagem', render.imageSha256], ['SHA256 áudio', render.audioSha256],
+        ['Criado em', render.createdAt], ['Atualizado em', render.updatedAt], ['SHA256 MP4', render.source?.sha256], ['Bytes MP4', render.source?.sizeBytes],
+        ['Duração MP4 (s)', render.source?.probe.durationSec], ['Codec vídeo', render.source?.probe.video.codec],
+        ['Dimensões MP4', render.source && `${render.source.probe.video.width} × ${render.source.probe.video.height}`],
+        ['FPS', render.source?.probe.video.fps], ['Áudio MP4', render.source && (render.source.probe.audio
+          ? `${render.source.probe.audio.codec} · ${render.source.probe.audio.sampleRate} Hz · ${render.source.probe.audio.channels} canais` : 'Sem áudio')],
+        ['Avisos MP4', render.source?.probe.warnings.join(', ') || null],
+      ]} />{render.source && <p>Caminho relativo ao work root. Abra o MP4 pelo Explorer; não há player ou download neste painel.</p>}
+      <ErrorCode code={render.errorCode} /></article>)}
       {renders.data?.items.length === 0 && <p>Nenhum render HeyGen.</p>}
     </Section>
     <Section title="Jobs" state={jobs}>

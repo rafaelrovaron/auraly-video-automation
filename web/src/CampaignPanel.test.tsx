@@ -185,3 +185,31 @@ it.each([
   expect(await screen.findByText(/invalid_response.*Seção indisponível/)).toBeTruthy();
   expect(screen.getByText('Copy hook')).toBeTruthy();
 });
+
+const source = {path: 'outputs/scene-one.mp4', sha256: 'c'.repeat(64), sizeBytes: 1234,
+  probe: {formatName: 'mov,mp4', durationSec: 2, sizeBytes: 1234, video: {codec: 'h264', width: 1080, height: 1920,
+    fps: 30, nominalFps: 30, isVfr: false, rotation: 0}, audio: {codec: 'aac', sampleRate: 48000, channels: 1}, warnings: [], hasAudio: true}};
+it('test_ready_render_shows_local_media_facts_without_player', async () => {
+  const calls = fakeApi({'/heygen/renders': {items: [{...renderItem, status: 'ready', source}]}});
+  const view = render(<CampaignDetailPanel campaignId="campaign-one" />); await screen.findByText('outputs/scene-one.mp4');
+  expect(screen.getByText('1080 × 1920')).toBeTruthy(); expect(screen.getByText('h264')).toBeTruthy();
+  expect(screen.getByText('1234', {selector: 'dd'})).toBeTruthy(); expect(screen.getByText('aac · 48000 Hz · 1 canais')).toBeTruthy();
+  expect(view.container.querySelector('audio,video,img')).toBeNull(); expect(calls.every(call => call.method === 'GET')).toBe(true);
+});
+it.each([
+  {...renderItem, campaignId: 'foreign'}, {...renderItem, sceneVariantId: 'foreign'}, {...renderItem, manualBinding: undefined},
+  {...renderItem, source: {...source, sha256: ''}}, {...renderItem, source: {...source, probe: {...source.probe, video: {codec: 'h264'}}}},
+  {...renderItem, source: {...source, path: 'https://signed.invalid/video.mp4'}},
+])('test_foreign_or_incomplete_render_snapshot_preserves_last_good %#', async invalid => {
+  const overrides: Record<string, unknown> = {}; fakeApi(overrides); render(<CampaignDetailPanel campaignId="campaign-one" />);
+  await screen.findByRole('heading', {name: 'render-one'}); overrides['/heygen/renders'] = {items: [invalid]};
+  fireEvent.click(screen.getByRole('button', {name: 'Atualizar'}));
+  expect(await within(screen.getByRole('region', {name: 'HeyGen'})).findByText(/invalid_response.*Dados desatualizados/)).toBeTruthy();
+  expect(screen.getByRole('heading', {name: 'render-one'})).toBeTruthy();
+});
+it('test_duplicate_render_ids_preserve_snapshot', async () => {
+  const overrides: Record<string, unknown> = {}; fakeApi(overrides); render(<CampaignDetailPanel campaignId="campaign-one" />);
+  await screen.findByRole('heading', {name: 'render-one'}); overrides['/heygen/renders'] = {items: [renderItem, renderItem]};
+  fireEvent.click(screen.getByRole('button', {name: 'Atualizar'}));
+  expect(await within(screen.getByRole('region', {name: 'HeyGen'})).findByText(/invalid_response.*Dados desatualizados/)).toBeTruthy();
+});
