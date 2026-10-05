@@ -16,3 +16,12 @@ it.each([
   {...view, status: 'invented'}, {...view, result: null}, {...view, result: {...view.result, operation: 'heygen_video_plan'}},
   ...[-1, 0.5, true, Number.MAX_SAFE_INTEGER + 1].map(uploadCount => ({...view, result: {...view.result, uploadCount}})),
 ])('rejects malformed operation %#', value => {expect(heygenOperationView(value)).toBe(false);});
+
+const plan = {operation: 'heygen_video_plan', newCount: 1, reusedCount: 0, reservedCount: 2, maxPaidRenders: 3, totalAudioSeconds: 1, sceneVariantIds: ['scene']};
+it('accepts valid informative plan', () => {expect(heygenOperationView({...view, operation: plan.operation, result: plan})).toBe(true);});
+it.each([0, -1, 0.5, true, Number.MAX_SAFE_INTEGER + 1])('rejects invalid plan limit %s', maxPaidRenders => {
+  expect(heygenOperationView({...view, operation: plan.operation, result: {...plan, maxPaidRenders}})).toBe(false);
+});
+it.each([['scene', 'scene'], [''], [true]])('rejects nonunique or malformed plan scenes %#', sceneVariantIds => {
+  expect(heygenOperationView({...view, operation: plan.operation, result: {...plan, sceneVariantIds}})).toBe(false);
+});

@@ -118,3 +118,105 @@ it('test_unmounted_campaign_ignores_late_post', async () => {
   await act(async () => release(Response.json({jobId: 'wrapper-one', campaignId: 'campaign-one', operation: 'heygen_assets'})));
   expect(api.calls).toHaveLength(1); expect(screen.queryByText(/Operação: wrapper-one/)).toBeNull();
 });
+
+const planResult = {operation: 'heygen_video_plan', newCount: 1, reusedCount: 0, reservedCount: 2,
+  maxPaidRenders: 3, totalAudioSeconds: 1, sceneVariantIds: ['scene-one']};
+const reservation = {renderId: 'render-one', campaignId: 'campaign-one', sceneVariantId: 'scene-one', imageCandidateId: 'image-one',
+  voiceMasterId: 'voice-one', jobId: 'video-job', status: 'queued', remoteVideoId: null, source: null, errorCode: null};
+function fakePlanApi(result: unknown = planResult) {
+  const api = fakeApi({submit: async (_path, body) => {
+    const jobId = body.operation === 'heygen_video_plan' ? 'plan-job' : 'submit-job';
+    api.setWrapper({jobId, campaignId: 'campaign-one', operation: body.operation, status: 'completed', errorCode: null,
+      result: body.operation === 'heygen_video_plan' ? result : {operation: 'heygen_video_submit', renders: [reservation]}});
+    return Response.json({jobId, campaignId: 'campaign-one', operation: body.operation});
+  }});
+  return api;
+}
+const planButton = () => screen.getByRole('button', {name: 'Planejar batch HeyGen'});
+const submitButton = () => screen.getByRole('button', {name: 'Enfileirar geração HeyGen'});
+async function planBatch() {
+  await openPanel(); fireEvent.change(screen.getByLabelText('Limite total de renders reservados da campanha'), {target: {value: '3'}});
+  fireEvent.click(planButton()); await screen.findByText(/Novos: 1/);
+}
+function confirmPaid() {
+  fireEvent.change(screen.getByLabelText('Responsável pela geração HeyGen'), {target: {value: 'tester'}});
+  fireEvent.click(screen.getByLabelText(/Autorizo a geração paga/));
+}
+it('test_plan_never_authorizes_generation', async () => {
+  const api = fakePlanApi(); await planBatch();
+  expect((submitButton() as HTMLButtonElement).disabled).toBe(true); expect(api.calls).toHaveLength(1);
+  expect(api.calls[0].body).toEqual({operation: 'heygen_video_plan', campaignId: 'campaign-one', requestId: expect.any(String), maxPaidRenders: 3,
+    config: {schemaVersion: 1, generationMode: 'image', engineSelection: 'provider_default', aspectRatio: '9:16', resolution: '1080p',
+      outputFormat: 'mp4', fit: 'cover', expressiveness: 'medium', motionPrompt: null, concurrency: 2,
+      pollInitialSeconds: 10, pollMaxSeconds: 60, pollTimeoutSeconds: 1800}});
+});
+it('test_submit_uses_confirmed_plan_config_and_separate_request_id', async () => {
+  const api = fakePlanApi(); await planBatch(); confirmPaid(); fireEvent.click(submitButton());
+  expect(await screen.findByText(/Reserva: render-one/)).toBeTruthy(); expect(api.calls).toHaveLength(2);
+  expect(api.calls[1].body).toEqual({...api.calls[0].body, operation: 'heygen_video_submit', approvedBy: 'tester', requestId: expect.any(String)});
+  expect(api.calls[1].body.requestId).not.toBe(api.calls[0].body.requestId);
+  expect(api.calls.some(call => call.path.endsWith('/worker/start'))).toBe(false);
+});
+it('test_historical_reservations_are_not_free_budget', async () => {
+  fakePlanApi(); await planBatch(); expect(screen.getByText(/Reservas históricas: 2/)).toBeTruthy();
+  expect(screen.getByText(/Total após novas reservas: 3/)).toBeTruthy();
+  expect(screen.getByRole('region', {name: 'HeyGen'}).textContent).not.toMatch(/saldo/i);
+});
+it.each(['0', '-1', '1.5', '9007199254740992'])('test_invalid_cap_blocks_plan (%s)', async value => {
+  const api = fakePlanApi(); await openPanel();
+  fireEvent.change(screen.getByLabelText('Limite total de renders reservados da campanha'), {target: {value}});
+  fireEvent.click(planButton()); expect(api.calls).toHaveLength(0);
+});
+it.each([
+  {...planResult, sceneVariantIds: ['foreign']}, {...planResult, sceneVariantIds: ['scene-one', 'scene-one']},
+  {...planResult, maxPaidRenders: true}, {...planResult, maxPaidRenders: 0},
+])('test_invalid_plan_does_not_authorize %#', async result => {
+  fakePlanApi(result); await openPanel();
+  fireEvent.change(screen.getByLabelText('Limite total de renders reservados da campanha'), {target: {value: '3'}}); fireEvent.click(planButton());
+  expect(await screen.findByText(/Leitura da operação indisponível/)).toBeTruthy(); expect((submitButton() as HTMLButtonElement).disabled).toBe(true);
+});
+it.each(['voice', 'image', 'reservation', 'limit', 'stale'])('test_material_change_invalidates_paid_confirmation (%s)', async field => {
+  const api = fakePlanApi(); await planBatch(); confirmPaid();
+  if (field === 'limit') fireEvent.change(screen.getByLabelText('Limite total de renders reservados da campanha'), {target: {value: '4'}});
+  else {
+    if (field === 'voice') api.data['/voices'] = {items: [{...voice, processedSha256: 'c'.repeat(64)}]};
+    if (field === 'image') api.data['/images'] = {items: [{sceneVariantId: 'scene-one', items: [{...image, sha256: 'c'.repeat(64)}]}]};
+    if (field === 'reservation') api.data['/heygen/renders'] = {items: [reservation]};
+    if (field === 'stale') api.data['/voices'] = Response.json({}, {status: 503});
+    fireEvent.click(screen.getByRole('button', {name: 'Atualizar'}));
+  }
+  await waitFor(() => expect((submitButton() as HTMLButtonElement).disabled).toBe(true));
+  await waitFor(() => expect((screen.getByLabelText(/Autorizo a geração paga/) as HTMLInputElement).checked).toBe(false));
+  expect(api.calls).toHaveLength(1);
+});
+it('test_polling_timestamps_do_not_invalidate_plan', async () => {
+  const api = fakePlanApi(); await planBatch(); confirmPaid(); api.data['/voices'] = {items: [{...voice, updatedAt: 'later'}]};
+  fireEvent.click(screen.getByRole('button', {name: 'Atualizar'}));
+  await waitFor(() => expect((submitButton() as HTMLButtonElement).disabled).toBe(false));
+  expect((screen.getByLabelText(/Autorizo a geração paga/) as HTMLInputElement).checked).toBe(true);
+});
+
+it('test_material_changes_during_pending_plan_do_not_authorize_late_result', async () => {
+  let release!: (response: Response) => void;
+  const api = fakeApi({submit: () => new Promise(resolve => {release = resolve;})});
+  api.setWrapper({jobId: 'plan-job', campaignId: 'campaign-one', operation: 'heygen_video_plan', status: 'completed', errorCode: null, result: planResult});
+  await openPanel(); fireEvent.change(screen.getByLabelText('Limite total de renders reservados da campanha'), {target: {value: '3'}});
+  fireEvent.click(planButton()); fireEvent.change(screen.getByLabelText('Limite total de renders reservados da campanha'), {target: {value: '4'}});
+  await act(async () => release(Response.json({jobId: 'plan-job', campaignId: 'campaign-one', operation: 'heygen_video_plan'})));
+  await screen.findByText(/Operação: plan-job/);
+  expect(screen.queryByText(/Novos: 1/)).toBeNull(); expect((submitButton() as HTMLButtonElement).disabled).toBe(true);
+});
+it('test_unknown_submit_preserves_intent_without_retry', async () => {
+  const api = fakePlanApi(); await planBatch(); confirmPaid();
+  const fetchPlan = globalThis.fetch;
+  vi.stubGlobal('fetch', (path: string, request: RequestInit) => request.method === 'POST' && path.endsWith('/submit')
+    ? Promise.resolve(Response.json({}, {status: 503})) : fetchPlan(path, request));
+  fireEvent.click(submitButton()); expect(await screen.findByText(/Resultado do comando desconhecido/)).toBeTruthy();
+  fireEvent.click(submitButton()); expect((submitButton() as HTMLButtonElement).disabled).toBe(true);
+  expect((screen.getByLabelText(/Autorizo a geração paga/) as HTMLInputElement).checked).toBe(true);
+});
+
+it('test_new_plan_intent_disarms_previous_confirmation', async () => {
+  fakePlanApi(); await planBatch(); confirmPaid(); fireEvent.click(planButton());
+  expect((screen.getByLabelText(/Autorizo a geração paga/) as HTMLInputElement).checked).toBe(false);
+});
