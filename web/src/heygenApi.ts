@@ -8,7 +8,8 @@ export type HeyGenPlanResult = {operation: 'heygen_video_plan'; newCount: number
   maxPaidRenders: number; totalAudioSeconds: number; sceneVariantIds: string[]};
 export type HeyGenReservedRender = RenderSummary & {campaignId: string};
 export type HeyGenSubmitResult = {operation: 'heygen_video_submit'; renders: HeyGenReservedRender[]};
-export type HeyGenOperationView = HeyGenSubmission & {status: string; errorCode: string | null; result: HeyGenAssetsResult | HeyGenPlanResult | HeyGenSubmitResult | null};
+export type HeyGenReconcileResult = {operation: 'heygen_reconcile'; render: HeyGenReservedRender};
+export type HeyGenOperationView = HeyGenSubmission & {status: string; errorCode: string | null; result: HeyGenAssetsResult | HeyGenPlanResult | HeyGenSubmitResult | HeyGenReconcileResult | null};
 export const HEYGEN_DEFAULT_CONFIG = {schemaVersion: 1, generationMode: 'image', engineSelection: 'provider_default', aspectRatio: '9:16', resolution: '1080p',
   outputFormat: 'mp4', fit: 'cover', expressiveness: 'medium', motionPrompt: null, concurrency: 2,
   pollInitialSeconds: 10, pollMaxSeconds: 60, pollTimeoutSeconds: 1800} as const;
@@ -36,5 +37,6 @@ export function heygenOperationView(value: unknown): value is HeyGenOperationVie
   if (value.operation === 'heygen_video_submit') return Array.isArray(result.renders)
     && result.renders.every(render => renderSummary(render) && object(render) && text(render.campaignId))
     && new Set(result.renders.map(render => render.renderId)).size === result.renders.length;
+  if (value.operation === 'heygen_reconcile') return renderSummary(result.render) && object(result.render) && text(result.render.campaignId);
   return false;
 }

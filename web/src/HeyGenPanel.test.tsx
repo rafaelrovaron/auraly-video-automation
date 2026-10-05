@@ -220,3 +220,93 @@ it('test_new_plan_intent_disarms_previous_confirmation', async () => {
   fakePlanApi(); await planBatch(); confirmPaid(); fireEvent.click(planButton());
   expect((screen.getByLabelText(/Autorizo a geração paga/) as HTMLInputElement).checked).toBe(false);
 });
+
+function fakeReconcileApi(known = false, returned: unknown = {...reservation, jobId: 'recovery-job'}) {
+  const api = fakeApi({submit: async (_path, body) => {
+    api.setWrapper({jobId: 'reconcile-job', campaignId: 'campaign-one', operation: 'heygen_reconcile', status: 'completed', errorCode: null,
+      result: {operation: 'heygen_reconcile', render: returned}});
+    return Response.json({jobId: 'reconcile-job', campaignId: 'campaign-one', operation: body.operation});
+  }});
+  api.data['/heygen/renders'] = {items: [{...reservation, status: 'reconciliation_required', remoteVideoId: known ? 'video-known' : null}]};
+  api.data['/jobs'] = {items: [{...child, jobId: 'video-job', jobType: 'heygen.video.generate', status: 'blocked'}]};
+  return api;
+}
+const reconcileButton = () => screen.getByRole('button', {name: 'Reconciliar render HeyGen'});
+async function selectReconcile() {await openPanel(); fireEvent.change(screen.getByLabelText('Render para reconciliação'), {target: {value: 'render-one'}});}
+it('test_known_video_id_cannot_be_replaced', async () => {
+  const api = fakeReconcileApi(true); await selectReconcile();
+  const input = screen.getByLabelText('ID exato do vídeo HeyGen') as HTMLInputElement;
+  expect(input.value).toBe('video-known'); expect(input.readOnly).toBe(true); fireEvent.click(reconcileButton());
+  expect(await screen.findByText('Reconciliação recebida; consulte o render e o Job atual.')).toBeTruthy();
+  expect(api.calls[0].body.videoId).toBe('video-known'); expect(api.calls[0].body.confirmManualBinding).toBe(false);
+});
+it('test_manual_binding_requires_confirmation', async () => {
+  const api = fakeReconcileApi(); await selectReconcile();
+  fireEvent.change(screen.getByLabelText('ID exato do vídeo HeyGen'), {target: {value: 'video-exact'}});
+  expect((reconcileButton() as HTMLButtonElement).disabled).toBe(true); fireEvent.click(reconcileButton()); expect(api.calls).toHaveLength(0);
+  fireEvent.click(screen.getByLabelText(/Confirmo o vínculo manual/)); fireEvent.click(reconcileButton());
+  await screen.findByText('Reconciliação recebida; consulte o render e o Job atual.');
+  expect(api.calls[0].body).toEqual({operation: 'heygen_reconcile', campaignId: 'campaign-one', renderId: 'render-one',
+    requestId: expect.any(String), videoId: 'video-exact', confirmManualBinding: true});
+});
+it('test_no_id_reconciliation_does_not_assume_no_dispatch', async () => {
+  const api = fakeReconcileApi(); await selectReconcile(); expect(screen.getByText(/Somente o backend pode provar ausência de dispatch/)).toBeTruthy();
+  fireEvent.click(reconcileButton()); await screen.findByText('Reconciliação recebida; consulte o render e o Job atual.');
+  expect(api.calls[0].body.videoId).toBeNull(); expect(api.calls[0].body.confirmManualBinding).toBe(false);
+  expect(api.calls.some(call => call.path.endsWith('/resume') || call.path.endsWith('/worker/start'))).toBe(false);
+});
+it('test_reconciliation_observes_recovery_job_without_start', async () => {
+  fakeReconcileApi(); await selectReconcile(); fireEvent.click(reconcileButton());
+  expect(await screen.findByText(/Job retornado: recovery-job/)).toBeTruthy(); expect(screen.getByText(/Retomada ainda não comprovada/)).toBeTruthy();
+});
+it('test_acceptance_preserves_other_drafts', async () => {
+  fakeReconcileApi(); await selectReconcile();
+  fireEvent.change(screen.getByLabelText('Limite total de renders reservados da campanha'), {target: {value: '10'}});
+  fireEvent.change(screen.getByLabelText('Responsável pela geração HeyGen'), {target: {value: 'my-draft'}});
+  fireEvent.click(reconcileButton()); await screen.findByText('Reconciliação recebida; consulte o render e o Job atual.');
+  expect((screen.getByLabelText('Responsável pela geração HeyGen') as HTMLInputElement).value).toBe('my-draft');
+  expect((screen.getByLabelText('Limite total de renders reservados da campanha') as HTMLInputElement).value).toBe('10');
+});
+it('test_nonblocked_job_does_not_offer_reconciliation', async () => {
+  const api = fakeReconcileApi(); api.data['/jobs'] = {items: [{...child, jobId: 'video-job', jobType: 'heygen.video.generate', status: 'running'}]};
+  await openPanel(); expect(screen.queryByRole('option', {name: 'render-one'})).toBeNull(); expect((reconcileButton() as HTMLButtonElement).disabled).toBe(true);
+});
+it('test_wrong_reconcile_render_is_not_adopted', async () => {
+  fakeReconcileApi(false, {...reservation, renderId: 'different'}); await selectReconcile(); fireEvent.click(reconcileButton());
+  expect(await screen.findByText(/Leitura da reconciliação indisponível/)).toBeTruthy();
+  expect(screen.queryByText('Reconciliação recebida; consulte o render e o Job atual.')).toBeNull();
+});
+it.each([503, 409])('test_reconcile_errors_preserve_draft (%s)', async httpStatus => {
+  const api = fakeReconcileApi(); await selectReconcile();
+  fireEvent.change(screen.getByLabelText('ID exato do vídeo HeyGen'), {target: {value: 'video-exact'}}); fireEvent.click(screen.getByLabelText(/Confirmo o vínculo manual/));
+  const before = globalThis.fetch;
+  let posts = 0;
+  vi.stubGlobal('fetch', (path: string, request: RequestInit) => {
+    if (request.method === 'POST') {posts++; return Promise.resolve(Response.json({error: {code: 'operation_not_allowed'}}, {status: httpStatus}));}
+    return before(path, request);
+  });
+  fireEvent.click(reconcileButton()); await screen.findByText(httpStatus === 503 ? /Resultado do comando desconhecido/ : /Operação não permitida neste estado/);
+  expect((screen.getByLabelText('ID exato do vídeo HeyGen') as HTMLInputElement).value).toBe('video-exact');
+  if (httpStatus === 503) {fireEvent.click(reconcileButton()); expect(posts).toBe(1);}
+  expect(api.calls).toHaveLength(0);
+});
+
+it('test_unmounted_reconciliation_ignores_late_post', async () => {
+  const api = fakeReconcileApi(); let release!: (response: Response) => void;
+  const before = globalThis.fetch;
+  vi.stubGlobal('fetch', (path: string, request: RequestInit) => request.method === 'POST'
+    ? new Promise<Response>(resolve => {release = resolve;}) : before(path, request));
+  const view = render(<CampaignDetailPanel campaignId="campaign-one" />);
+  await waitFor(() => expect((prepare() as HTMLButtonElement).disabled).toBe(false));
+  fireEvent.change(screen.getByLabelText('Render para reconciliação'), {target: {value: 'render-one'}}); fireEvent.click(reconcileButton()); view.unmount();
+  await act(async () => release(Response.json({jobId: 'reconcile-job', campaignId: 'campaign-one', operation: 'heygen_reconcile'})));
+  expect(screen.queryByText(/Wrapper de reconciliação/)).toBeNull(); expect(api.calls).toHaveLength(0);
+});
+it('test_plan_acceptance_preserves_reconciliation_draft', async () => {
+  const api = fakePlanApi(); api.data['/heygen/renders'] = {items: [{...reservation, status: 'reconciliation_required'}]};
+  api.data['/jobs'] = {items: [{...child, jobId: 'video-job', jobType: 'heygen.video.generate', status: 'blocked'}]};
+  await openPanel(); fireEvent.change(screen.getByLabelText('Render para reconciliação'), {target: {value: 'render-one'}});
+  fireEvent.change(screen.getByLabelText('ID exato do vídeo HeyGen'), {target: {value: 'my-draft'}});
+  fireEvent.change(screen.getByLabelText('Limite total de renders reservados da campanha'), {target: {value: '3'}}); fireEvent.click(planButton()); await screen.findByText(/Novos: 1/);
+  expect((screen.getByLabelText('ID exato do vídeo HeyGen') as HTMLInputElement).value).toBe('my-draft');
+});
