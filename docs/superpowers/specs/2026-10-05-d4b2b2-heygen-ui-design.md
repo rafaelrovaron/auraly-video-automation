@@ -1,7 +1,7 @@
 # D4B.2b.2 — HeyGen na UI local
 
 Data: 2026-10-05.
-Status: escopo conversacional aprovado; especificação escrita aguardando revisão.
+Status: escopo conversacional e especificação escrita aprovados pelo usuário em 2026-10-05.
 Capacidade proposta: PLANNED, ainda não implementada.
 
 ## Objetivo e baseline
