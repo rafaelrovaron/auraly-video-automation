@@ -29,6 +29,8 @@ export function readOverrides(draft:OverrideDraft):{overrides:EditOverrides|null
     for(const [field,item] of Object.entries(draft[section])){
       const name=`${section}.${field}`;if(item.mode==='inherit')continue;
       let value:unknown=item.value;
+      if(typeof value==='string')value=value.trim();
+      else if(value&&typeof value==='object')value={path:(value as {path:string}).path.trim(),sha256:(value as {sha256:string}).sha256.trim()};
       if(item.mode==='clear'){if(!nullable.has(name))return {overrides:null,invalidField:name};value=null;}
       else if(typeof (defaults[section] as unknown as Record<string,unknown>)[field]==='number'||name==='headline.endSec'||name==='music.trimEndSec'){
         value=typeof item.value==='string'&&item.value.trim()?Number(item.value):NaN;

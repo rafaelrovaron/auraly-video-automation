@@ -24,6 +24,8 @@ dl { display: grid; grid-template-columns: minmax(100px, 180px) minmax(0, 1fr); 
 .heygen-panel select { display: block; width: 100%; max-width: 100%; }
 .profile-panel select { display: block; width: 100%; max-width: 100%; }
 .profile-panel label, .profile-panel legend, .profile-panel summary { overflow-wrap: anywhere; }
+[aria-label="Edição e variantes"] pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+[aria-label="Edição e variantes"] select { max-width: 100%; }
 .actions { display: flex; gap: .6rem; flex-wrap: wrap; margin-top: 1rem; }
 .confirmation { border-left: 3px solid #d5b967; padding: 0 1rem; }
 .confirmation button { margin: 0 .5rem .5rem 0; }

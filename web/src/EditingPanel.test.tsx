@@ -7,11 +7,12 @@ import type {EditBatchRequest,EditBatchPlan} from './editingApi';
 
 const renders={data:{items:[EDIT_RENDER,{...EDIT_RENDER,renderId:'render-two'}]},loading:false,error:null,lastSuccessAt:1,lastSuccessReadId:1,refresh:()=>1};
 type Call={request:EditBatchRequest;persist:boolean};
-function server(options:{lost?:boolean;queued?:boolean;failed?:boolean;getFail?:boolean;getDivergent?:boolean;wrongPersist?:boolean;saveHash?:boolean;wrongRender?:boolean;divergent?:boolean;postMalformed?:boolean;delay?:Promise<Response>}={}){
+function server(options:{trim?:boolean;lost?:boolean;queued?:boolean;failed?:boolean;getFail?:boolean;getDivergent?:boolean;wrongPersist?:boolean;saveHash?:boolean;wrongRender?:boolean;divergent?:boolean;postMalformed?:boolean;delay?:Promise<Response>}={}){
   const posts:Call[]=[];const saved:EditBatchPlan[]=[];let current:Call|null=null,queued=options.queued;
   vi.stubGlobal('fetch',async(path:string,init:RequestInit)=>{
     if(init.method==='POST'){
       current=JSON.parse(String(init.body));posts.push(current!);
+      if(options.trim)current=JSON.parse(String(init.body),(_,v)=>typeof v==='string'?v.trim():v);
       if(current!.persist)saved.push(editPlanFixture(current!.request));
       if(options.lost&&current!.persist)return Response.json({error:{code:'storage_unavailable'}},{status:503});
       return Response.json({jobId:'edit-job',campaignId:options.postMalformed?'other':'campaign-one',operation:'edit_plan'});
@@ -54,6 +55,16 @@ it('one_mp4_three_headlines',async()=>{
   fireEvent.click(save());await screen.findByText('Plano salvo e confirmado. Não é um vídeo renderizado.');
   expect(s.posts[1]).toEqual({campaignId:'campaign-one',operation:'edit_plan',request:s.posts[0].request,persist:true});
 });
+it('normalizes editorial text before freezing the request to match local Job storage',async()=>{
+  const s=server({trim:true});render(<EditingPanel campaignId="campaign-one" renders={renders}/>);await draft();
+  fireEvent.change(screen.getByLabelText('Headline base'),{target:{value:' Headline with spaces '}});
+  fireEvent.change(screen.getByLabelText('Nome da variante a'),{target:{value:' Label '}});
+  fireEvent.change(screen.getByLabelText('Variante a · Headline · Texto · Modo'),{target:{value:'replace'}});
+  fireEvent.change(screen.getByLabelText('Variante a · Headline · Texto'),{target:{value:' Variant '}});
+  validate();await screen.findByText(/Plano validado\./);
+  expect(s.posts[0].request.headlineText).toBe('Headline with spaces');expect(s.posts[0].request.variants[0].label).toBe('Label');
+  expect(s.posts[0].request.variants[0].overrides.headline?.text).toBe('Variant');
+});
 it('validation_required_for_save and queued is not validated',async()=>{
   const s=server({queued:true});render(<EditingPanel campaignId="campaign-one" renders={renders}/>);await draft();
   expect(save().matches(':disabled')).toBe(true);validate();
@@ -71,6 +82,13 @@ it('music_acceptance_resets_selectively',async()=>{
   const acceptance=screen.getByLabelText('Aceito o uso da música nesta edição');fireEvent.click(acceptance);
   fireEvent.change(screen.getByLabelText('Headline base'),{target:{value:'New'}});expect((acceptance as HTMLInputElement).checked).toBe(true);
   fireEvent.change(screen.getByLabelText('Vídeo · Música · asset · Modo'),{target:{value:'clear'}});expect((acceptance as HTMLInputElement).checked).toBe(false);
+});
+it('removing a headline-only variant keeps music acceptance',async()=>{
+  server();render(<EditingPanel campaignId="campaign-one" renders={renders}/>);await draft();
+  fireEvent.click(screen.getByRole('button',{name:'Adicionar variante'}));
+  fireEvent.click(screen.getByLabelText('Aceito o uso da música nesta edição'));
+  fireEvent.click(screen.getByRole('button',{name:'Remover variante b'}));
+  expect((screen.getByLabelText('Aceito o uso da música nesta edição') as HTMLInputElement).checked).toBe(true);
 });
 it('lost_post_stays_unknown even when the artifact exists',async()=>{
   const s=server({lost:true});render(<EditingPanel campaignId="campaign-one" renders={renders}/>);await draft();validate();await screen.findByText(/Plano validado\./);

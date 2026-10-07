@@ -29,7 +29,7 @@ export function editPlanFixture(request: EditBatchRequest = EDIT_REQUEST): EditB
     return {key:variant.key,label:variant.label,outputVariantId,manifestHash:digest,outputHash:sha,filename:`${outputVariantId}-${sha}.mp4`,captionState:'disabled' as const,
       manifest:{schemaVersion:'2.0' as const,resolverVersion:'1.0' as const,campaignId:request.campaignId,videoId:request.videoId,outputVariantId,
         source,profileRef:request.profileRef,copyRef:{id:copyRef.id,hash:copyRef.hash},voiceRef,musicAccepted:request.musicAccepted,
-        ...defaults,headline,overrides:{campaign:request.campaign,video:request.video,outputVariant:variant.overrides},provenance,manifestHash:digest}};
+        ...defaults,headline:{...headline,spoken:false as const},overrides:{campaign:request.campaign,video:request.video,outputVariant:variant.overrides},provenance:{...provenance,'headline.spoken':'profile' as const},manifestHash:digest}};
   });
   return {schemaVersion:'1.0',plannerVersion:'1.0',campaignId:request.campaignId,renderId:request.renderId,videoId:request.videoId,source,copyRef,voiceRef,
     imageRef:{id:'image-one',hash:'c'.repeat(64)},maxOutputs:request.maxOutputs,outputCount:outputs.length,

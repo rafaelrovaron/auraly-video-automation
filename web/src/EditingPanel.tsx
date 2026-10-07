@@ -78,9 +78,9 @@ function EditorialFlow({campaignId,renders}:Props){
     if(!c.overrides){invalid(`Campanha.${c.invalidField}`);return null;}if(!v.overrides){invalid(`Vídeo.${v.invalidField}`);return null;}
     const rows:EditBatchRequest['variants']=[];
     for(const variant of variants){const o=readOverrides(variant.draft);if(!o.overrides){invalid(`Variante ${variant.key}.${o.invalidField}`);return null;}
-      rows.push({key:variant.key,label:variant.label,overrides:o.overrides});}
+      rows.push({key:variant.key,label:variant.label.trim(),overrides:o.overrides});}
     const body:EditBatchRequest={schemaVersion:'1.0',campaignId,renderId,videoId,profileRef:{profileId:profile.profile.profileId,version:profile.profile.version,hash:profile.profileHash},
-      headlineText:headline,campaign:c.overrides,video:v.overrides,musicAccepted,variants:rows,maxOutputs:maxOutputs.trim()?Number(maxOutputs):NaN,
+      headlineText:headline.trim(),campaign:c.overrides,video:v.overrides,musicAccepted,variants:rows,maxOutputs:maxOutputs.trim()?Number(maxOutputs):NaN,
       timingRef:timingPath||timingHash?{path:timingPath,sha256:timingHash}:null};
     if(!editBatchRequest(body)){
       const duplicate=rows.find((r,i)=>!r.key.trim()||rows.findIndex(other=>other.key===r.key)!==i);
@@ -176,7 +176,7 @@ function EditorialFlow({campaignId,renders}:Props){
           <label>Key da variante {variant.key}<input name={`variant.${variant.row}.key`} value={variant.key} onChange={e=>{change();setVariants(old=>old.map(v=>v.row===variant.row?{...v,key:e.target.value}:v));}}/></label>
           <label>Nome da variante {variant.key}<input value={variant.label} onChange={e=>{change();setVariants(old=>old.map(v=>v.row===variant.row?{...v,label:e.target.value}:v));}}/></label>
           <EditOverridesForm label={`Variante ${variant.key}`} draft={variant.draft} inherited={vHints} disabled={busy} onChange={(d,f)=>overrideChange(()=>setVariants(old=>old.map(v=>v.row===variant.row?{...v,draft:d}:v)),f)}/>
-          <button type="button" disabled={variants.length===1} onClick={()=>{change();setVariants(old=>old.filter(v=>v.row!==variant.row));setMusicAccepted(false);}}>Remover variante {variant.key}</button>
+          <button type="button" disabled={variants.length===1} onClick={()=>{change();setVariants(old=>old.filter(v=>v.row!==variant.row));if(variant.draft.music.asset.mode!=='inherit')setMusicAccepted(false);}}>Remover variante {variant.key}</button>
         </fieldset>)}
         <button type="button" disabled={busy} onClick={()=>{change();const row=nextRow.current++;let n=1;let key='b';while(variants.some(v=>v.key===key)){n++;key=n<26?String.fromCharCode(97+n):`v${row}`;}
           setVariants(old=>[...old,{row,key,label:key.toUpperCase(),draft:newOverrideDraft()}]);}}>Adicionar variante</button>

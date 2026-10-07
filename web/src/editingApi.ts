@@ -13,7 +13,7 @@ export type EditBatchRequest={schemaVersion:'1.0';campaignId:string;renderId:str
   headlineText:string;campaign:EditOverrides;video:EditOverrides;musicAccepted:boolean;
   variants:{key:string;label:string;overrides:EditOverrides}[];maxOutputs:number;timingRef:AssetRef|null};
 type Origin='profile'|'input'|'source'|'campaign'|'video'|'outputVariant';
-export type EditManifest=Omit<EditDefaults,'headline'> & {headline:Omit<HeadlineStyle,'endSec'> & {endSec:number;text:string};
+export type EditManifest=Omit<EditDefaults,'headline'> & {headline:Omit<HeadlineStyle,'endSec'> & {endSec:number;text:string;spoken:false};
   schemaVersion:'2.0';resolverVersion:'1.0';campaignId:string;videoId:string;outputVariantId:string;source:SourceRef;profileRef:ProfileRef;
   copyRef:IdentityRef|null;voiceRef:IdentityRef|null;musicAccepted:boolean;
   overrides:{campaign:EditOverrides;video:EditOverrides;outputVariant:EditOverrides};provenance:Record<string,Origin>;manifestHash:string};
@@ -83,8 +83,8 @@ function manifest(v:unknown):v is EditManifest{
   if(!keys(v,['schemaVersion','resolverVersion','campaignId','videoId','outputVariantId','source','profileRef','copyRef','voiceRef','musicAccepted',...sections,'overrides','provenance','manifestHash'])
     ||v.schemaVersion!=='2.0'||v.resolverVersion!=='1.0'||!id(v.campaignId)||!id(v.videoId)||!id(v.outputVariantId)||!source(v.source)||!profile(v.profileRef)
     ||!(v.copyRef===null||identity(v.copyRef))||!(v.voiceRef===null||identity(v.voiceRef))||typeof v.musicAccepted!=='boolean'||!sha(v.manifestHash)
-    ||!object(v.headline)||!text(v.headline.text)||!positive(v.headline.endSec))return false;
-  const {text:headlineText,...headline}=v.headline;void headlineText;
+    ||!object(v.headline)||!text(v.headline.text)||!positive(v.headline.endSec)||v.headline.spoken!==false)return false;
+  const {text:headlineText,spoken,...headline}=v.headline;void headlineText;void spoken;
   if(!editProfile({...base,defaults:{output:v.output,headline,captions:v.captions,music:v.music,framing:v.framing}}))return false;
   if(!keys(v.overrides,['campaign','video','outputVariant'])||!Object.values(v.overrides).every(editOverrides)||!object(v.provenance))return false;
   const expected=sections.flatMap(s=>Object.keys(v[s] as object).map(f=>`${s}.${f}`));
