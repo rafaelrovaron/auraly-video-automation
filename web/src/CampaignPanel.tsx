@@ -11,6 +11,7 @@ import { CampaignCreateForm, CopyVersionForm } from './CampaignForms';
 import { ImageImportPanel } from './ImageImportPanel';
 import { VoicePanel } from './VoicePanel';
 import { HeyGenPanel } from './HeyGenPanel';
+import { EditingPanel } from './EditingPanel';
 
 function Updated({ state }: { state: RemoteState<unknown> }) {
   return <>
@@ -145,6 +146,7 @@ export function CampaignDetailPanel({ campaignId }: { campaignId: string }) {
       <ErrorCode code={render.errorCode} /></article>)}
       {renders.data?.items.length === 0 && <p>Nenhum render HeyGen.</p>}
     </Section>
+    <section aria-label="Edição e variantes"><h2>Edição e variantes</h2><EditingPanel campaignId={campaignId} renders={renders}/></section>
     <Section title="Jobs" state={jobs}>
       {jobs.data?.items.map(job => <article key={job.jobId}><button onClick={() => setSelectedJob(job.jobId)}>Ver Job {job.jobId}</button>
         <p>{job.jobType} · {statusLabel(job.status)} · Tentativas {job.attemptCount}/{job.maxAttempts}</p>
