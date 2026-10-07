@@ -69,7 +69,7 @@ Exportar:
 - `listEditPlans(campaignId: string, signal: AbortSignal): Promise<PlanSummary[]>`;
 - `getEditPlan(campaignId: string, videoId: string, planHash: string, signal: AbortSignal): Promise<EditBatchPlan>`.
 
-- [ ] Escrever testes de payload/resultados. Assertion mínima:
+- [x] Escrever testes de payload/resultados. Assertion mínima:
   ```ts
   expect(editOverrides({music:{volumeDb:0,loop:false,asset:null}})).toBe(true);
   expect(editOverrides({headline:{anchor:['top']}})).toBe(false);
@@ -85,9 +85,9 @@ Exportar:
   props ausentes vs null e headline resolvida conforme último text fornecido.
   Rejeitar enum array, NaN/Infinity, DTO incompleto/extra, hashes/IDs inseguros,
   cues/invariantes inconsistentes. Não confiar em type assertions no guard.
-- [ ] RED: `rtk npm --prefix web test -- src/editingApi.test.ts`.
+- [x] RED: `rtk npm --prefix web test -- src/editingApi.test.ts`.
   Expected: falha por módulo/comportamento ausente, não ambiente.
-- [ ] Implementar tipos/guards e clientes usando read/post/campaignPath existentes.
+- [x] Implementar tipos/guards e clientes usando read/post/campaignPath existentes.
   Partials validam só propriedades fornecidas; não validar safe zones combinadas
   usando defaults inventados. Plano exige invariantes completos, sorted keys,
   caption states e referências internas coerentes; hash é verificado pela API.
@@ -95,7 +95,7 @@ Exportar:
   campos escalares; textos usam precedência dos overrides, não outro resolver.
   Submission exige campaignId/operation exatos e jobId válido; resposta POST
   incompatível → command_unknown. GET exige identidade exata, sem retry.
-- [ ] GREEN: comando focado e `rtk npm --prefix web run typecheck`.
+- [x] GREEN: comando focado e `rtk npm --prefix web run typecheck`.
   Expected: exit 0 nos dois. Revisar diff e commit
   `feat: add typed editorial planning client`.
 
@@ -115,7 +115,7 @@ inherited: OverrideHints, label:string, onChange:
 `(draft: OverrideDraft, field: string) => void`. Não contém submit/form aninhado;
 pai decide validação/foco com nomes de campo prefixados pelo label.
 
-- [ ] Escrever `omits_inherited`, `preserves_false_zero_alpha`,
+- [x] Escrever `omits_inherited`, `preserves_false_zero_alpha`,
   `clear_is_not_inherit`, `all_fields_roundtrip`, `invalid_numbers_and_assets`:
   ```ts
   expect(readOverrides(newOverrideDraft()).overrides).toEqual({});
@@ -129,15 +129,15 @@ pai decide validação/foco com nomes de campo prefixados pelo label.
   Testar todos os campos atuais, AssetRef parcial/path/hash inválido, nullable
   end/trim/font/asset e modo clear proibido em non-nullable. Controls disabled
   por fieldset usam :disabled; labels acessíveis não incluem textos das opções.
-- [ ] RED: `rtk npm --prefix web test -- src/EditOverridesForm.test.tsx`.
+- [x] RED: `rtk npm --prefix web test -- src/EditOverridesForm.test.tsx`.
   Expected: falha por componente ausente.
-- [ ] Implementar controles nativos focados, cinco seções details avançadas;
+- [x] Implementar controles nativos focados, cinco seções details avançadas;
   campo text de headline visível e modes explícitos. Mostrar inherited como
   ajuda, não como payload. Usar editOverrides do Task 1 para validação escalar;
   sem generic schema engine/dependência/refactor ProfileForm. Error field seguro
   e foco/details aberto ficarão no submit do pai. Valores raw nunca viram zero
   por conversão de vazio. onChange informa o campo para reset de musicAccepted.
-- [ ] GREEN: teste focado e typecheck, Expected: exit 0. Commit
+- [x] GREEN: teste focado e typecheck, Expected: exit 0. Commit
   `feat: add inherited editing override controls`.
 
 ### Task 3: Painel, variantes e fluxo validar/salvar
@@ -153,7 +153,7 @@ maxOutputs raw='3', base headline vazia, musicAccepted=false. Validado guarda
 request/render/profile snapshot e plano; submissão guarda persist, payload,
 jobId opcional e geração, independentemente da lista readonly.
 
-- [ ] Escrever `one_mp4_three_headlines`, `validation_required_for_save`,
+- [x] Escrever `one_mp4_three_headlines`, `validation_required_for_save`,
   `editing_invalidates_validation`, `music_acceptance_resets_selectively`,
   `lost_post_stays_unknown`, `divergent_result_is_not_success`,
   `late_operation_does_not_unlock_save`, `refresh_keeps_draft`,
@@ -174,15 +174,15 @@ jobId opcional e geração, independentemente da lista readonly.
   persistência, resultado outro persist/render/hash, GET404/divergente após Save,
   consulta readonly de outro plano sem trocar draft. Toggling música asset limpa
   acceptance; alterar headline não limpa. ID safe e paths de raízes diferentes.
-- [ ] RED: `rtk npm --prefix web test -- src/EditingPanel.test.tsx src/CampaignPanel.test.tsx`.
+- [x] RED: `rtk npm --prefix web test -- src/EditingPanel.test.tsx src/CampaignPanel.test.tsx`.
   Expected: falha no painel ainda ausente; preservar testes legados.
-- [ ] Implementar seção Edição e variantes no CampaignPanel, seleção ready/profile
+- [x] Implementar seção Edição e variantes no CampaignPanel, seleção ready/profile
   exatos, request completo, camada campaign/video e lista variante explícita.
   Adicionar/remover variantes sem renumerar keys restantes; hints herdados seguem
   último campo fornecido na camada anterior, sem alegar resolução validada.
   Submit valida request; em erro abre details/foca primeiro campo e limpa aria
   após correção. Refresh não reseta draft; confirmar source/profile/descarte.
-- [ ] Implementar estados idle/pending/validated/saving/saved/unknown/failed.
+- [x] Implementar estados idle/pending/validated/saving/saved/unknown/failed.
   Lock síncrono impede clique duplo. 202 guarda Job; GET operação com polling
   2000ms somente enquanto não terminal, AbortController/generation/unmount guards.
   Explicar início manual local_operations nos controles existentes; não iniciar
@@ -192,7 +192,7 @@ jobId opcional e geração, independentemente da lista readonly.
   sem Job mostrar inspeção manual e abandono com aviso/confirm, nunca repost.
   Falha conhecida libera correção sem reaproveitar validação. Rascunho em memória,
   useUnsavedChanges incluindo saída para profiles; consulta saved readonly separada.
-- [ ] GREEN: focados, `rtk npm --prefix web test`, `rtk npm --prefix web run build`.
+- [x] GREEN: focados, `rtk npm --prefix web test`, `rtk npm --prefix web run build`.
   Expected: exit 0 nos três. Revisar/commit
   `feat: plan headline variants from campaign UI`.
 
@@ -206,7 +206,7 @@ de test_web_voice_e2e inicia worker explicitamente. Usar profile existente da
 seed ou criar profile sintético via endpoint; fontes/timing de teste devem ter
 bytes/hash reais quando habilitados, não fake path aprovado pelo browser.
 
-- [ ] Escrever testes com assertions de resultado, não sleeps arbitrários:
+- [x] Escrever testes com assertions de resultado, não sleeps arbitrários:
   `test_three_headlines_validate_save_reload`: validar três rows; iniciar
   local_operations; assert lista de planos continua vazia após persist=false;
   Save/iniciar worker/GET confirmado; assert três outputs textos A/B/C,
@@ -221,14 +221,14 @@ bytes/hash reais quando habilitados, não fake path aprovado pelo browser.
   editar draft, page.go_back com dialog dismiss; mesmo hash e valores; testar
   troca profile/source recusada e link profiles. `test_editing_narrow_width`
   parametrizado [320,390]: scrollWidth<=innerWidth, teclado/labels, long text/path.
-- [ ] RED: `rtk uv run python -m pytest tests/test_web_editing_e2e.py -q`.
+- [x] RED: `rtk uv run python -m pytest tests/test_web_editing_e2e.py -q`.
   Expected: demonstrar falha real se existir; se integra de primeira, registrar
   GREEN sem inventar RED, mantendo TDD dos Tasks 1–3. Correção nova exige reprodução.
-- [ ] Corrigir só comportamento demonstrado, sem retries/timeouts genéricos ou
+- [x] Corrigir só comportamento demonstrado, sem retries/timeouts genéricos ou
   relaxamento de overflow/correlation/paths. Browser Back pode revelar defeito
   no hook compartilhado: diagnosticar callers e correção mínima com regressão
   compartilhada, não workaround que perde o draft. Preservar guards atuais.
-- [ ] GREEN: mesmo comando; `rtk uv run python scripts/verify.py fast --pytest tests/test_web_editing_e2e.py tests/test_api_operations_e2e.py tests/test_editing_batch_service.py`.
+- [x] GREEN: mesmo comando; `rtk uv run python scripts/verify.py fast --pytest tests/test_web_editing_e2e.py tests/test_api_operations_e2e.py tests/test_editing_batch_service.py`.
   Expected: exit 0. Commit `test: verify editorial UI planning and recovery`.
 
 ### Task 5: Revisão independente, gate e documentação
@@ -236,20 +236,20 @@ bytes/hash reais quando habilitados, não fake path aprovado pelo browser.
 **Files:** README.md, docs/PROJECT-MEMORY.md, docs/GOAL-ROADMAP.md,
 docs/PRD-MVP-MASS-VIDEO-AUTOMATION.md, spec/plano e evidência acima.
 
-- [ ] Rodar `rtk uv run python scripts/verify.py full`, Expected: 19/19 PASS;
+- [x] Rodar `rtk uv run python scripts/verify.py full`, Expected: 19/19 PASS;
   registrar contagens reais/skips, schemas sem drift, build/audits conforme harness.
-- [ ] Uma revisão independente da branch completa conforme método escolhido e
+- [x] Uma revisão independente da branch completa conforme método escolhido e
   AGENTS.md, com Review Focus e spec/plan. Corrigir Critical/Important com
   regressões RED→GREEN e repetir gate após mudanças; registrar Minor adiado.
-- [ ] Documentar somente D4B.3b IMPLEMENTED/LOCAL_VERIFIED quando checks passam:
+- [x] Documentar somente D4B.3b IMPLEMENTED/LOCAL_VERIFIED quando checks passam:
   worker manual, Jobs locais, diferença Validar/Salvar/render, música/timing,
   limites/unknown/draft. D4B.3c preview e D5 renderer continuam PLANNED;
   nenhum PROVIDER_VERIFIED novo. Registrar ponto atual de integração sem
   transformar checkpoints históricos em fatos atuais de merge/CI.
-- [ ] Self-review de diff por secrets/mídia/paths privados/escopo e
+- [x] Self-review de diff por secrets/mídia/paths privados/escopo e
   `rtk git diff --check`, Expected: exit 0; commit
   `docs: record editorial variants UI verification`. Sem merge/push automático.
-- [ ] Handoff com evidência, pendências e próxima etapa.
+- [x] Handoff com evidência, pendências e próxima etapa.
 
 ## Self-review e execução
 
@@ -264,5 +264,8 @@ Execução Nativa foi previamente escolhida pelo usuário no projeto; recomendad
 aqui pelos três componentes sequenciais dependentes e revisão final única.
 Confirmar que o plano captura o solicitado antes de começar. Reutilizar/criar
 checkout isolado com using-git-worktrees na execução; não implementar em main,
-não apagar scratch de outros planos. Especificação aprovada, este plano aguarda
-revisão; nenhuma implementação executada.
+não apagar scratch de outros planos. Especificação/plano aprovados; execução Nativa concluída em 2026-10-07.
+Revisão independente final, uma rodada de correções RED→GREEN e gate completo
+Windows 19/19: 341 frontend, 1.807 Python / 25 skips. Evidência e decisões em
+`docs/superpowers/2026-10-07-d4b3b-verification.md`.
+Sem merge/push/Actions desta branch; D4B.3c/D5 continuam planejados.

@@ -6,14 +6,47 @@
 Este documento guarda decisões duráveis e fatos verificados. O estado entregue aparece separado
 do produto planejado para impedir que roadmap seja confundido com capacidade existente.
 
-## Entrega atual: D4B.3a — Profiles UI (2026-10-07)
+## Entrega atual: D4B.3b — Overrides e variantes UI (2026-10-07)
+
+`IMPLEMENTED`, `LOCAL_VERIFIED` na branch `feat/d4b3b-editing`, base `12823be`.
+Gate fresco Windows após revisão/correções no código `e33d9df`: 19/19 etapas,
+341 frontend e 1.807 Python / 25 skips (pytest 660,75 s). Ruff, mypy, build e
+schemas sem drift; audits no limiar high aprovados, cinco moderate transitivos
+preexistentes permanecem. Doctor retorna sucesso com avisos de memória/recursos
+opcionais; isto não certifica render. Sem merge/push ou Actions desta branch.
+Evidência e decisões: `docs/superpowers/2026-10-07-d4b3b-verification.md`.
+
+Painel por campanha seleciona um MP4 HeyGen ready e profile exato por ID/versão/hash.
+Overrides completos em campanha/vídeo/variante e headlines A/B explícitas,
+limite inicial três; herdar omite, limpar nullable envia null, false/zero/RGBA
+preservados. Fonte/música/timing por path/hash, música com aceite separado.
+Captions seguem copy/voz aprovadas; timing ausente fica pendente, sem editor/ASR.
+Validar persist=false cria Job/audit, não artefatos; Salvar persist=true revalida
+o mesmo request/plano e exige GET exato. Worker local_operations manual.
+Unknown congela sem repost; plano encontrado sem Job não prova autoria do POST.
+Draft somente em memória, com descarte confirmado inclusive Back; consulta
+readonly não reconstrói draft. Assets upstream/profile e budget/copy não mudam.
+Sem backend/schema/migration/dependências novos, provider pago, preview ou render.
+
+Revisão independente: nenhum Critical, três Important corrigidos em uma rodada
+RED→GREEN (guarda de múltiplos drafts, colisão de key, foco do campo inválido),
+sem re-review. Duas Minor adiadas: guard cliente de trim invertido (backend
+rejeita) e loading preso ao limpar seleção durante GET. Primeiro gate passou
+todos os testes, mas parou no mypy de JSON nullable do teste; narrowing mínimo
+passou no mypy/browser e gate completo foi repetido com sucesso.
+Sete browser E2E editoriais reais com providers fake passaram no gate final.
+Não amplia PROVIDER_VERIFIED D2C. Próximo recorte: D4B.3c preview aproximado;
+D5 renderer continua planejado, Flow pausado/não bloqueante.
+
+## Histórico: D4B.3a — Profiles UI (2026-10-07)
 
 `IMPLEMENTED`, `LOCAL_VERIFIED` na branch `feat/d4b3a-profiles`.
 Gate final Windows pós-correções: 19/19, 275 frontend e 1.800 Python / 25 skips
 (602,27 s). Revisão independente: nenhum Critical, três Important corrigidos
 com regressões RED→GREEN; browser Back específico adiado como Minor.
 Cinco moderate transitivos preexistentes permanecem; audits no limiar high passam.
-Sem merge/push ou Actions desta branch. Evidência em
+Estado no fechamento daquele checkpoint: sem merge/push ou Actions da branch.
+Integração posterior em `main`: `f3ac38a`. Evidência em
 `docs/superpowers/2026-10-07-d4b3a-verification.md`.
 Design e plano aprovados, execução Nativa. UI global `#/profiles`, formulário
 completo, consulta readonly, criação e base + 1 imutável sobre quatro endpoints
@@ -24,7 +57,7 @@ Unknown congela payload e exige GET exato; nenhuma repetição automática do PO
 Rascunhos em memória com confirmação de descarte; seleção antiga não troca dados atuais.
 Browser/API/arquivos reais de teste: seis testes passaram, incluindo conflito,
 resposta perdida, reload, teclado e viewport 320/390; zero provider/Jobs novos.
-D4B.3b/c (overrides/variants/preview) e D5 continuam planejados. Flow pausado.
+D4B.3b/c e D5 eram planejados neste checkpoint; o estado vigente é registrado acima. Flow pausado.
 
 ## Histórico: D4B.2b.2 — HeyGen Operations UI (2026-10-05)
 

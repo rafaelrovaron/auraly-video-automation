@@ -186,8 +186,16 @@ reload um Job inspecionado manualmente não restaura a correlação do draft per
   gate completo 19 etapas e revisão independente antes de LOCAL_VERIFIED.
   Nenhuma chamada paga necessária; não ampliar PROVIDER_VERIFIED.
 
-## Próximo gate
+## Gate de planejamento (histórico)
 
 Revisar esta especificação antes de escrever o plano de implementação.
 Execução só depois de plano aprovado e método confirmado. D4B.3a permanece
 capacidade entregue; D4B.3b segue PLANNED até implementação/verificação real.
+
+## Fechamento de execução — 2026-10-07
+
+Design/plano aprovados, execução Nativa e revisão independente final concluídos.
+D4B.3b `IMPLEMENTED`, `LOCAL_VERIFIED`: gate Windows 19/19, 341 frontend e
+1.807 Python / 25 skips, sete browser editoriais. Evidência/decisões/Minor em
+`docs/superpowers/2026-10-07-d4b3b-verification.md`. Sem merge/push/Actions da
+branch ou novo PROVIDER_VERIFIED. D4B.3c preview e D5 renderer continuam planejados.
