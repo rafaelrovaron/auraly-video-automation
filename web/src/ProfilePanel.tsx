@@ -104,7 +104,7 @@ export function ProfilePanel() {
     {listLoading&&<p role="status">Carregando profiles…</p>}
     {listError&&<p role="alert">{listError} {items.length>0?'Lista desatualizada.':'Lista indisponível.'}</p>}
     {!listLoading&&!listError&&items.length===0&&<p>Nenhum profile publicado.</p>}
-    <label>Consultar profile e versão<select value={selected} disabled={busy} onChange={e=>void select(e.target.value)}>
+    <label>Consultar profile e versão<select aria-label="Consultar profile e versão" value={selected} disabled={busy} onChange={e=>void select(e.target.value)}>
       <option value="">Selecione uma versão</option>
       {items.map(v=><option key={`${v.profile.profileId}/${v.profile.version}`} value={`${v.profile.profileId}/${v.profile.version}`}>
         {v.profile.profileId} · v{v.profile.version} · {v.profile.name}

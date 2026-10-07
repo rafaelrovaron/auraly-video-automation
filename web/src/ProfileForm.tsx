@@ -17,7 +17,7 @@ export function ProfileForm({initial,creating,readOnly,disabled,onSubmit,onDirty
     return <label key={`${section}.${key}`}><input name={`${section}.${key}`} type="checkbox" defaultChecked={Boolean(value(section,key))}/>{label}</label>;
   }
   function select(section:keyof EditProfile['defaults'],key:string,label:string,options:string[]) {
-    return <label key={`${section}.${key}`}>{label}<select name={`${section}.${key}`} defaultValue={String(value(section,key))}>
+    return <label key={`${section}.${key}`}>{label}<select aria-label={label} name={`${section}.${key}`} defaultValue={String(value(section,key))}>
       {options.map(v=><option key={v} value={v}>{v}</option>)}
     </select></label>;
   }
