@@ -1,7 +1,7 @@
 # D4B.3b — Overrides e variantes A/B pela UI
 
-Status: direção conversacional aprovada em 2026-10-07. Especificação escrita
-para revisão do usuário; implementação e plano ainda não iniciados.
+Status: direção conversacional e especificação aprovadas pelo usuário em
+2026-10-07. Plano em preparação; implementação ainda não iniciada.
 Base: D4B.3a integrado na main em `f3ac38a`.
 
 ## Resultado e fronteiras
