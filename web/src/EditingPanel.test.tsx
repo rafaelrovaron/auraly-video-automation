@@ -1,4 +1,4 @@
-import {act,fireEvent,render,screen,waitFor} from '@testing-library/react';
+import {act,fireEvent,render,screen,waitFor,within} from '@testing-library/react';
 import {expect,it,vi} from 'vitest';
 import {EditingPanel} from './EditingPanel';
 import {EDIT_RENDER,editPlanFixture} from './editingTestSupport';
@@ -46,8 +46,9 @@ it('one_mp4_three_headlines',async()=>{
   const s=server();render(<EditingPanel campaignId="campaign-one" renders={renders}/>);await draft();
   for(const key of ['a','b','c']){
     if(key!=='a')fireEvent.click(screen.getByRole('button',{name:'Adicionar variante'}));
-    fireEvent.change(screen.getByLabelText(`Variante ${key} · Headline · Texto · Modo`),{target:{value:'replace'}});
-    fireEvent.change(screen.getByLabelText(`Variante ${key} · Headline · Texto`),{target:{value:key.toUpperCase()}});
+    const variant=within(screen.getByRole('group',{name:`Variante ${key}`}));
+    fireEvent.change(variant.getByLabelText(`Variante ${key} · Headline · Texto · Modo`),{target:{value:'replace'}});
+    fireEvent.change(variant.getByLabelText(`Variante ${key} · Headline · Texto`),{target:{value:key.toUpperCase()}});
   }
   validate();await screen.findByText('Plano validado. Nenhum arquivo de edição publicado.');
   expect(s.posts[0]).toMatchObject({persist:false,request:{maxOutputs:3,variants:[
