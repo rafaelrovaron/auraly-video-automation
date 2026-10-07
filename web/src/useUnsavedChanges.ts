@@ -15,20 +15,34 @@ export function useUnsavedChanges(dirty: boolean): () => void {
       const link = event.target instanceof Element ? event.target.closest('a') : null;
       if (!link || link.target || !link.getAttribute('href')?.startsWith('#') || link.hash === window.location.hash) return;
       if (!window.confirm(warning)) event.preventDefault();
-      else { unsaved.current = false; acceptedHash = link.hash; }
+      else queueMicrotask(() => {
+        if (!event.defaultPrevented && window.location.hash === link.hash) {
+          unsaved.current = false; acceptedHash = link.hash;
+        }
+      });
     };
-    const hash = () => {
+    const hash = (event: Event) => {
       if (window.location.hash === acceptedHash) return;
-      if (unsaved.current && !window.confirm(warning)) window.location.replace(acceptedHash || '#/campaigns');
-      else { unsaved.current = false; acceptedHash = window.location.hash; }
+      if (unsaved.current && !window.confirm(warning)) {
+        window.history.replaceState(null, '', acceptedHash || '#/campaigns');
+        event.stopImmediatePropagation();
+      }
+      else {
+        const destination = window.location.hash;
+        queueMicrotask(() => {
+          if (window.location.hash === destination) { unsaved.current = false; acceptedHash = destination; }
+        });
+      }
     };
     window.addEventListener('beforeunload', unload);
     document.addEventListener('click', click, true);
     window.addEventListener('hashchange', hash, true);
+    window.addEventListener('popstate', hash, true);
     return () => {
       window.removeEventListener('beforeunload', unload);
       document.removeEventListener('click', click, true);
       window.removeEventListener('hashchange', hash, true);
+      window.removeEventListener('popstate', hash, true);
     };
   }, []);
   return clear;

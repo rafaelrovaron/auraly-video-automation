@@ -21,12 +21,24 @@ genérico e não terá timeline estilo CapCut ou preview frame-perfect.
 
 Checkpoint D4B.3a (2026-10-07): profiles pela UI global `#/profiles` implementados,
 `IMPLEMENTED`, `LOCAL_VERIFIED`: gate pós-revisão 19/19, 275 frontend e
-1.800 Python / 25 skips; sem merge/push ou Actions desta branch. Criar, consultar readonly e publicar
+1.800 Python / 25 skips; fechamento anterior à integração `f3ac38a` em main. Criar, consultar readonly e publicar
 base + 1 por formulário; versões imutáveis e consulta explícita de resposta perdida.
 Fonte/música por path relativo/SHA-256, sem upload/catálogo. Profile salvo não valida
 disponibilidade de mídia nem aceita seu uso; o serviço de edição faz a validação
 posterior. Sem novas dependências, migrations, Jobs ou chamadas pagas.
-Overrides/variants D4B.3b, preview D4B.3c e renderer D5 continuam planejados.
+O checkpoint acima não entrega overrides, preview ou render; consultar o estado D4B.3b abaixo.
+
+Checkpoint atual D4B.3b (2026-10-07): `IMPLEMENTED`, `LOCAL_VERIFIED` na branch
+`feat/d4b3b-editing`, sem merge/push ou Actions. Gate Windows pós-correções 19/19,
+341 frontend e 1.807 Python / 25 skips. Painel de campanha para um MP4 ready e
+profile exato, overrides em três camadas e variantes explícitas de headline.
+Validar não publica artefatos; Salvar revalida o mesmo plano e confirma GET exato,
+com worker local_operations manual. Captions da copy/voz aprovadas e timing
+pendente quando ausente; assets path/hash e aceite separado de música.
+Draft em memória, descarte confirmado e unknown sem repost. Não regenera
+voz/imagem/HeyGen, não entrega preview/render ou novo PROVIDER_VERIFIED.
+Revisão independente e correções concluídas; duas Minor registradas na evidência
+`docs/superpowers/2026-10-07-d4b3b-verification.md`. D4B.3c/D5 seguem planejados.
 
 - Campaign, CopyMaster e SceneVariant persistentes;
 - Jobs locais retomáveis e auditáveis;

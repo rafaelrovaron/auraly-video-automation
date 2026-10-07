@@ -64,14 +64,16 @@ entrega.
   220 frontend e 1.793 Python / 25 skips. CI pendente. Evidência no PROJECT-MEMORY;
   sem novo canário ou uso de créditos.
 
-D4B.3a — gestão de profiles pela UI está `IMPLEMENTED`, `LOCAL_VERIFIED`
-nesta branch; veja o fluxo operacional abaixo. Isso não entrega overrides/variants ou preview.
+D4B.3b — overrides e variantes de headline pela UI está `IMPLEMENTED`, `LOCAL_VERIFIED`
+na branch `feat/d4b3b-editing`: gate Windows 19/19, 341 frontend e 1.807 Python / 25 skips.
+Valida/salva planos sobre um MP4 existente, sem regenerar assets. Revisão independente e
+correções concluídas; sem merge/push ou Actions desta branch. D4B.3a está integrado em `main`.
+Evidência: [verificação D4B.3b](docs/superpowers/2026-10-07-d4b3b-verification.md).
 
 ### Não entregue ainda
 
 - render final com headline, captions, música e framing configuráveis;
 - renderização das variações A/B já planejadas, reutilizando voz, imagem e HeyGen;
-- overrides e variants pela interface (D4B.3b);
 - preview aproximado e fluxo end-to-end operável pela interface.
 
 ### Google Flow: preservado, mas pausado
@@ -369,9 +371,9 @@ Nada inicia ao abrir/recarregar, nem há retry automático de POST ou autentica�
 
 ### Profiles de edição pela UI — D4B.3a
 
-`IMPLEMENTED`, `LOCAL_VERIFIED` nesta branch: gate final 19/19, 275 testes frontend
-e 1.800 Python / 25 skips. Revisão independente concluída e achados importantes corrigidos.
-Sem merge/push ou Actions desta branch ainda.
+Checkpoint D4B.3a: `IMPLEMENTED`, `LOCAL_VERIFIED`, gate 19/19, 275 frontend
+e 1.800 Python / 25 skips. Integrado em `main` no commit `f3ac38a`.
+Essas contagens são históricas; a evidência D4B.3b registra a verificação da nova branch.
 Abra **Profiles de edição** na navegação global (`#/profiles`). Use **Novo profile**
 para criar a versão 1; selecione uma versão publicada e **Criar nova versão**
 para editar sua cópia e publicar base + 1. Versões anteriores não são alteradas.
@@ -390,8 +392,40 @@ consulta prévia. Conteúdo conflitante não é sobrescrito ou renumerado. Rascu
 ficam em memória, com aviso antes de descartar; não sobrevivem a reload.
 Versões publicadas podem ser consultadas novamente após reload.
 
-O próximo slice é **D4B.3b — overrides e variantes A/B**; D4B.3c adicionará preview aproximado.
-D5 adicionará o renderer. Sem timeline CapCut ou preview frame-perfect.
+### Edição e variantes pela UI — D4B.3b
+
+Na campanha, abra **Edição e variantes**:
+
+1. Selecione um MP4 HeyGen `ready` e uma versão publicada do profile. O ID editorial
+   começa com o ID do render; informe a headline base manualmente.
+2. Configure overrides da campanha, do vídeo e de cada variante explícita.
+   **Herdar** omite o campo; **Substituir** envia o valor; **Limpar** envia null
+   somente quando permitido. A precedência é profile → campanha → vídeo → variante.
+3. A variante inicial é `a`/A; adicione B/C e altere o texto da headline.
+   O limite inicial é três saídas, ajustável; não há combinação cartesiana.
+4. Clique **Validar plano** (`persist=false`) e inicie o worker `local_operations`
+   nos controles existentes. A validação cria/reutiliza Job e audit locais,
+   mas não publica plano ou mídia. O backend valida referências e configuração.
+5. Depois de validar, clique **Salvar plano** (`persist=true`) e inicie o worker
+   novamente. Sucesso exige revalidação do mesmo request/plano e GET exato do arquivo.
+   Editar o rascunho invalida a validação anterior.
+
+Fonte/música/timing usam caminhos relativos ao project root e SHA-256 explícitos;
+não há upload, catálogo ou cálculo de hash pelo browser. Música exige aceite
+separado, limpo ao trocar fonte/profile/referência de música. Legendas seguem a copy
+vinculada à voz aprovada; sem timing, ficam pendentes, não sincronizadas.
+Espaços nas bordas dos campos editoriais são normalizados antes da submissão,
+alinhando o payload ao armazenamento dos Jobs locais.
+
+Rascunhos ficam somente em memória, com confirmação de descarte. Planos salvos
+podem ser consultados readonly após reload, sem preencher automaticamente o draft.
+Resposta perdida mantém o envio congelado: consultar Job conhecido/artefato não
+reenvia POST, e um arquivo existente não prova autoria do POST sem Job confirmado.
+Abandonar acompanhamento não cancela o Job no backend.
+
+Um plano reutiliza MP4/WAV/imagem/profile, não regenera assets nem renderiza vídeo.
+D4B.3c adicionará preview aproximado; D5 continua responsável pelo render final.
+Sem timeline CapCut ou preview frame-perfect.
 Revisão visual final do vídeo do canário continua humana; configurar um manifest não aprova o vídeo.
 
 A execução de 2026-09-30 aprovou o WAV existente com motivo auditável, completou upload de

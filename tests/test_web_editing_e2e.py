@@ -1,0 +1,179 @@
+from __future__ import annotations
+
+import json
+import sqlite3
+import re
+import struct
+from pathlib import Path
+from collections.abc import Iterator
+from tempfile import TemporaryDirectory
+from contextlib import closing
+
+from playwright.sync_api import Locator, Page, Route, expect
+import pytest
+
+from tests.editing_helpers import file_sha
+from tests.test_web_panel_e2e import panel_page as provide_panel_page  # noqa: F401
+from tests.test_web_voice_e2e import start_kind
+from tests.web_panel_support import PanelServers
+from tests.web_panel_support import panel_servers as provide_panel_servers  # noqa: F401
+from tests.web_panel_support import panel_heygen_provider, panel_speech_provider, panel_transcriber  # noqa: F401
+
+pytest_plugins = ['tests.test_heygen_video_media']
+
+
+@pytest.fixture(name='tmp_path')
+def short_root() -> Iterator[Path]:
+    # Keep deep immutable artifact paths below Windows legacy MAX_PATH.
+    with TemporaryDirectory(prefix='ae-') as directory:
+        yield Path(directory)
+
+
+def draft(servers: PanelServers, page: Page) -> Locator:
+    servers.release.set()
+    page.goto(servers.ui_url)
+    page.get_by_role('link', name='campaign-one', exact=True).click()
+    panel = page.get_by_role('region', name='Edição e variantes', exact=True)
+    source = panel.get_by_label('MP4 HeyGen para edição', exact=True)
+    expect(source.locator('option')).to_have_count(4)
+    source.select_option(index=1)
+    panel.get_by_label('Profile de edição', exact=True).select_option('plain/1')
+    panel.get_by_label('Headline base', exact=True).fill('Base')
+    return panel
+
+
+def validate(page: Page, panel: Locator) -> None:
+    panel.get_by_role('button', name='Validar plano', exact=True).click()
+    expect(panel.get_by_text(re.compile('^Operação editorial na fila'))).to_be_visible()
+    start_kind(page, 'local_operations')
+    expect(panel.get_by_text('Plano validado. Nenhum arquivo de edição publicado.', exact=True)).to_be_visible(timeout=15000)
+
+
+def save(page: Page, panel: Locator) -> None:
+    panel.get_by_role('button', name='Salvar plano', exact=True).click()
+    expect(panel.get_by_text(re.compile('^Operação editorial na fila'))).to_be_visible()
+    start_kind(page, 'local_operations')
+    expect(panel.get_by_text('Plano salvo e confirmado. Não é um vídeo renderizado.', exact=True)).to_be_visible(timeout=15000)
+
+
+def upstream(servers: PanelServers) -> tuple[list[tuple[Path, str]], list[tuple[object, ...]]]:
+    files = [(p, file_sha(p)) for p in servers.settings.work_root.rglob('*')
+             if p.suffix in {'.mp4', '.wav', '.png'} or p.name == 'profile.json']
+    with closing(sqlite3.connect(servers.settings.database)) as connection:
+        rows = connection.execute('SELECT budget_json FROM campaigns ORDER BY id').fetchall()
+        rows += connection.execute('SELECT approval_state,approved_by FROM copy_masters ORDER BY id').fetchall()
+    return files, rows
+
+
+def test_three_headlines_validate_save_reload(panel_servers: PanelServers, panel_page: Page) -> None:
+    before = upstream(panel_servers)
+    panel = draft(panel_servers, panel_page)
+    for key in ['a', 'b', 'c']:
+        if key != 'a':
+            panel.get_by_role('button', name='Adicionar variante', exact=True).click()
+        panel.get_by_label(f'Variante {key} · Headline · Texto · Modo', exact=True).select_option('replace')
+        panel.get_by_label(f'Variante {key} · Headline · Texto', exact=True).fill(key.upper())
+    validate(panel_page, panel)
+    assert not list(panel_servers.settings.work_root.rglob('plan.json'))
+    assert not list(panel_servers.settings.work_root.rglob('manifest.json'))
+    save(panel_page, panel)
+    plans = list(panel_servers.settings.work_root.rglob('plan.json'))
+    assert len(plans) == 1
+    plan = json.loads(plans[0].read_text(encoding='utf-8'))
+    assert [o['manifest']['headline']['text'] for o in plan['outputs']] == ['A', 'B', 'C']
+    panel_page.reload()
+    panel.get_by_label('Consultar plano salvo', exact=True).select_option(f"{plan['videoId']}/{plan['planHash']}")
+    expect(panel.get_by_text('Saída planejada: ' + plan['outputs'][0]['filename'] + '. Nenhum MP4 final foi renderizado.', exact=True)).to_be_visible()
+    assert upstream(panel_servers) == before
+    assert panel_servers.provider.events == []
+
+
+def test_caption_timing_missing_is_pending(panel_servers: PanelServers, panel_page: Page) -> None:
+    panel = draft(panel_servers, panel_page)
+    font = panel_servers.settings.project_root / 'font.ttf'
+    # Synthetic SFNT tables exercise real local asset/hash validation, not rendered glyphs.
+    tags = [b'cmap', b'head', b'hhea', b'hmtx', b'maxp', b'name']
+    font.write_bytes(struct.pack('>IHHHH', 0x10000, len(tags), 0, 0, 0)
+                    + b''.join(struct.pack('>4sIII', tag, 0, 108 + index, 1)
+                               for index, tag in enumerate(tags)) + b'\0' * len(tags))
+    panel.get_by_text('Vídeo · Opções avançadas', exact=True).click()
+    panel.get_by_role('group', name='Vídeo · Overrides', exact=True).get_by_text('Legendas', exact=True).click()
+    panel.get_by_label('Vídeo · Legendas · enabled · Modo', exact=True).select_option('replace')
+    panel.get_by_label('Vídeo · Legendas · enabled', exact=True).check()
+    panel.get_by_label('Vídeo · Legendas · font · Modo', exact=True).select_option('replace')
+    panel.get_by_label('Vídeo · Legendas · font · Caminho', exact=True).fill('font.ttf')
+    panel.get_by_label('Vídeo · Legendas · font · SHA-256', exact=True).fill(file_sha(font))
+    validate(panel_page, panel)
+    expect(panel.get_by_text('Legendas: Timing pendente', exact=True)).to_be_visible()
+    save(panel_page, panel)
+    plan = json.loads(next(panel_servers.settings.work_root.rglob('plan.json')).read_text(encoding='utf-8'))
+    assert plan['outputs'][0]['captionState'] == 'timing_missing'
+    assert panel_servers.provider.events == []
+
+
+def test_lost_save_response_never_reposts(panel_servers: PanelServers, panel_page: Page) -> None:
+    panel = draft(panel_servers, panel_page)
+    validate(panel_page, panel)
+    posts: list[str] = []
+
+    def lose(route: Route) -> None:
+        body = route.request.post_data_json
+        if route.request.method == 'POST' and isinstance(body, dict) and body['persist']:
+            posts.append(route.request.url)
+            assert route.fetch().status == 202
+            route.fulfill(status=503, json={'error': {'code': 'storage_unavailable'}})
+        else:
+            route.continue_()
+
+    panel_page.route('**/editing/plans', lose)
+    panel.get_by_role('button', name='Salvar plano', exact=True).click()
+    expect(panel.get_by_text('Resultado editorial desconhecido. Nenhum POST será reenviado.', exact=True)).to_be_visible()
+    start_kind(panel_page, 'local_operations')
+    expect(panel_page.get_by_role('button', name='Iniciar worker', exact=True)).to_be_enabled(timeout=15000)
+    panel.get_by_role('button', name='Consultar plano enviado', exact=True).click()
+    expect(panel.get_by_text('Resultado editorial desconhecido. Artefato encontrado; isto não confirma autoria do POST perdido.', exact=True)).to_be_visible()
+    expect(panel.get_by_role('button', name='Salvar plano', exact=True)).to_be_disabled()
+    assert len(posts) == 1
+    assert len(list(panel_servers.settings.work_root.rglob('plan.json'))) == 1
+    assert panel_servers.provider.events == []
+
+
+def test_editing_navigation_and_back_cancel(panel_servers: PanelServers, panel_page: Page) -> None:
+    panel = draft(panel_servers, panel_page)
+    panel_page.on('dialog', lambda dialog: dialog.dismiss())
+    panel.get_by_label('MP4 HeyGen para edição', exact=True).select_option(index=2)
+    panel.get_by_label('Profile de edição', exact=True).select_option('')
+    expect(panel.get_by_label('Headline base', exact=True)).to_have_value('Base')
+    panel.get_by_role('link', name='Gerenciar profiles de edição', exact=True).click()
+    expect(panel.get_by_label('Headline base', exact=True)).to_have_value('Base')
+    panel_page.go_back()
+    expect(panel.get_by_label('Headline base', exact=True)).to_have_value('Base')
+    assert panel_page.url.endswith('#/campaigns/campaign-one')
+
+
+def test_variant_fallback_collision_does_not_hang(panel_servers: PanelServers, panel_page: Page) -> None:
+    panel = draft(panel_servers, panel_page)
+    panel.get_by_label('Limite de saídas', exact=True).fill('30')
+    panel.get_by_label('Key da variante a', exact=True).fill('v27')
+    for _ in range(25):
+        panel.get_by_role('button', name='Adicionar variante', exact=True).click()
+    panel.get_by_role('button', name='Adicionar variante', exact=True).click(timeout=5000)
+    expect(panel.get_by_label('Key da variante v26', exact=True)).to_be_visible()
+    assert panel_servers.provider.events == []
+
+
+@pytest.mark.parametrize('width', [320, 390])
+def test_editing_narrow_width(panel_servers: PanelServers, panel_page: Page, width: int) -> None:
+    panel_page.set_viewport_size({'width': width, 'height': 844})
+    panel = draft(panel_servers, panel_page)
+    panel.get_by_label('ID do vídeo editorial', exact=True).fill('v' * 64)
+    panel.get_by_label('Headline base', exact=True).fill('Long headline ' * 30)
+    panel.get_by_role('button', name='Adicionar variante', exact=True).focus()
+    panel_page.keyboard.press('Enter')
+    expect(panel.get_by_label('Key da variante b', exact=True)).to_be_visible()
+    assert panel_page.evaluate('document.documentElement.scrollWidth <= innerWidth')
+    validate(panel_page, panel)
+    panel.get_by_text('Configuração resolvida e origem · a', exact=True).click()
+    assert panel_page.evaluate('document.documentElement.scrollWidth <= innerWidth'), panel_page.evaluate(
+        'Array.from(document.querySelectorAll("pre,select,input,button")).filter(el=>el.getBoundingClientRect().right>innerWidth||el.scrollWidth>el.clientWidth).map(el=>({tag:el.tagName,width:el.clientWidth,scroll:el.scrollWidth,text:el.textContent?.slice(0,30)}))'
+    )

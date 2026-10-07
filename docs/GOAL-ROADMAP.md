@@ -1,6 +1,6 @@
 # Auraly Delivery-First Goal Roadmap
 
-**Roadmap vigente:** 2026-10-05
+**Roadmap vigente:** 2026-10-07
 
 Este documento é a ordem operacional dos próximos Goals. O PRD define o produto; este roadmap
 define como chegar a ele sem transformar cada Goal em um projeto grande demais.
@@ -66,7 +66,7 @@ D4B.2a Campaign/Copy & Manual Image Import    LOCAL_VERIFIED
 D4B.2b.1 Voice Master Forms                  IMPLEMENTED, LOCAL_VERIFIED
 D4B.2b.2 HeyGen Forms                        IMPLEMENTED, LOCAL_VERIFIED
 D4B.3a Profiles UI                           IMPLEMENTED, LOCAL_VERIFIED
-D4B.3b Overrides & Headline Variants UI       PLANNED
+D4B.3b Overrides & Headline Variants UI       IMPLEMENTED, LOCAL_VERIFIED
 D4B.3c Approximate Preview                   PLANNED
 D5A Deterministic Renderer
 D5B Render QC, Review & Delivery
@@ -436,8 +436,12 @@ fechamento 2026-10-07: gate completo pós-revisão 19/19, UI 220/220 e Python
 autorizados, sem upgrade do HyperFrames; cinco moderate permanecem. Actions pendentes.
 Evidência no PROJECT-MEMORY, sem nova chamada paga.
 D4B.3a está `IMPLEMENTED`, `LOCAL_VERIFIED`: gate pós-revisão 19/19,
-275 frontend e 1.800 Python / 25 skips. Sem merge/push ou Actions desta branch.
-D4B.3b (overrides/variantes) é o próximo slice; preview D4B.3c e renderer D5 planejados.
+275 frontend e 1.800 Python / 25 skips no checkpoint; integrado em main `f3ac38a`.
+D4B.3b `IMPLEMENTED`, `LOCAL_VERIFIED`: gate Windows pós-correções 19/19,
+341 frontend e 1.807 Python / 25 skips; revisão independente, três Important
+corrigidos e duas Minor adiadas. Sem merge/push ou Actions desta branch.
+Evidência em `docs/superpowers/2026-10-07-d4b3b-verification.md`.
+Próximo slice: D4B.3c preview aproximado; renderer D5 continua planejado.
 
 Gate final D4B.2a Windows de 2026-10-04: 19/19 etapas; 96 testes frontend e 1.757 Python
 aprovados / 25 skips (472,17 s). Browser/proxy/API/worker reais cobrem import, review e
@@ -466,7 +470,12 @@ CI Linux/Windows pendente de publicação. Nenhuma chamada paga.
 - D4B.3a: UI global de profiles, criação/consulta/base + 1 imutável; formulário
   completo via API existente e recuperação de resultado incerto por GET, sem repost automático.
   Assets por path/hash explícito, sem validação de mídia na publicação ou worker.
-- D4B.3b/c: overrides, variantes A/B e preview aproximado ainda planejados.
+- D4B.3b: configuração completa de overrides em campanha/vídeo/variante, um MP4
+  ready/profile exato e headlines explícitas A/B. Validar/Salvar por Jobs locais,
+  worker manual, revalidação do mesmo plano e GET exato; unknown sem repost,
+  draft em memória e guardas de descarte/Back. Timing ausente fica pendente,
+  música exige aceite e assets usam path/hash. Sem novas gerações ou render.
+- D4B.3c: preview aproximado ainda planejado, sem timeline/frame-perfect.
 
 D4B.1 usa dois processos locais (API 8000 e Vite 5173); distribuição estática/launcher
 fica para depois. Worker 404 fora do escopo significa desconhecido; start/stop não
