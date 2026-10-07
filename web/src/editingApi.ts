@@ -39,6 +39,8 @@ const id=(v:unknown):v is string=>text(v)&&/^[a-z0-9][a-z0-9_-]{0,63}$/.test(v)&
 const path=(v:unknown)=>text(v)&&!/[\\:]/.test(v)&&v.split('/').every(p=>!!p&&p!=='.'&&p!=='..'&&!/[ .]$/.test(p)&&!/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(p));
 function keys(v:unknown,names:string[],optional:string[]=[]):v is Record<string,unknown>{return object(v)&&names.every(k=>Object.hasOwn(v,k))&&Object.keys(v).every(k=>names.includes(k)||optional.includes(k));}
 const asset=(v:unknown):v is AssetRef=>keys(v,['path','sha256'])&&path(v.path)&&sha(v.sha256);
+export const editIdentifier=id;
+export const editAsset=asset;
 const identity=(v:unknown):v is IdentityRef=>keys(v,['id','hash'])&&text(v.id)&&sha(v.hash);
 const copy=(v:unknown):v is CopyRef=>keys(v,['id','hash','version'])&&text(v.id)&&sha(v.hash)&&integer(v.version);
 const profile=(v:unknown):v is ProfileRef=>keys(v,['profileId','version','hash'])&&id(v.profileId)&&integer(v.version)&&sha(v.hash);

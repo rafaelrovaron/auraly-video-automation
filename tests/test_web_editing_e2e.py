@@ -150,6 +150,17 @@ def test_editing_navigation_and_back_cancel(panel_servers: PanelServers, panel_p
     assert panel_page.url.endswith('#/campaigns/campaign-one')
 
 
+def test_variant_fallback_collision_does_not_hang(panel_servers: PanelServers, panel_page: Page) -> None:
+    panel = draft(panel_servers, panel_page)
+    panel.get_by_label('Limite de saídas', exact=True).fill('30')
+    panel.get_by_label('Key da variante a', exact=True).fill('v27')
+    for _ in range(25):
+        panel.get_by_role('button', name='Adicionar variante', exact=True).click()
+    panel.get_by_role('button', name='Adicionar variante', exact=True).click(timeout=5000)
+    expect(panel.get_by_label('Key da variante v26', exact=True)).to_be_visible()
+    assert panel_servers.provider.events == []
+
+
 @pytest.mark.parametrize('width', [320, 390])
 def test_editing_narrow_width(panel_servers: PanelServers, panel_page: Page, width: int) -> None:
     panel_page.set_viewport_size({'width': width, 'height': 844})

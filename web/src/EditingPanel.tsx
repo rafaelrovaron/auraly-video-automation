@@ -7,7 +7,7 @@ import {getProfile,listProfiles} from './profileApi';
 import type {ProfileView} from './profileApi';
 import {EditOverridesForm,newOverrideDraft,readOverrides} from './EditOverridesForm';
 import type {OverrideDraft,OverrideHints} from './EditOverridesForm';
-import {editBatchRequest,getEditOperation,getEditPlan,listEditPlans,planMatchesRequest,samePlan,submitEditPlan} from './editingApi';
+import {editAsset,editBatchRequest,editIdentifier,getEditOperation,getEditPlan,listEditPlans,planMatchesRequest,samePlan,submitEditPlan} from './editingApi';
 import type {EditBatchPlan,EditBatchRequest,EditOverrides,PlanSummary} from './editingApi';
 import {useUnsavedChanges} from './useUnsavedChanges';
 
@@ -74,19 +74,22 @@ function EditorialFlow({campaignId,renders}:Props){
   };
   const request=():EditBatchRequest|null=>{
     clearErrors();if(!selectedRender){invalid('renderId');return null;}if(!profile){invalid('profile');return null;}
+    if(!editIdentifier(videoId)){invalid('videoId');return null;}
+    if(!headline.trim()||headline.includes('\0')){invalid('headlineText');return null;}
     const c=readOverrides(campaign),v=readOverrides(video);
     if(!c.overrides){invalid(`Campanha.${c.invalidField}`);return null;}if(!v.overrides){invalid(`Vídeo.${v.invalidField}`);return null;}
     const rows:EditBatchRequest['variants']=[];
-    for(const variant of variants){const o=readOverrides(variant.draft);if(!o.overrides){invalid(`Variante ${variant.key}.${o.invalidField}`);return null;}
+    for(const variant of variants){
+      if(!editIdentifier(variant.key)||rows.some(row=>row.key===variant.key)){invalid(`variant.${variant.row}.key`);return null;}
+      if(!variant.label.trim()||variant.label.includes('\0')){invalid(`variant.${variant.row}.label`);return null;}
+      const o=readOverrides(variant.draft);if(!o.overrides){invalid(`Variante ${variant.key}.${o.invalidField}`);return null;}
       rows.push({key:variant.key,label:variant.label.trim(),overrides:o.overrides});}
     const body:EditBatchRequest={schemaVersion:'1.0',campaignId,renderId,videoId,profileRef:{profileId:profile.profile.profileId,version:profile.profile.version,hash:profile.profileHash},
       headlineText:headline.trim(),campaign:c.overrides,video:v.overrides,musicAccepted,variants:rows,maxOutputs:maxOutputs.trim()?Number(maxOutputs):NaN,
       timingRef:timingPath||timingHash?{path:timingPath,sha256:timingHash}:null};
-    if(!editBatchRequest(body)){
-      const duplicate=rows.find((r,i)=>!r.key.trim()||rows.findIndex(other=>other.key===r.key)!==i);
-      invalid(!headline.trim()?'headlineText':duplicate?`variant.${variants.find(r=>r.key===duplicate.key)!.row}.key`:
-        timingPath||timingHash?'timingPath':!videoId.trim()?'videoId':'maxOutputs');return null;
-    }return body;
+    if(!Number.isSafeInteger(body.maxOutputs)||body.maxOutputs<rows.length){invalid('maxOutputs');return null;}
+    if(body.timingRef&&!editAsset(body.timingRef)){invalid(!/^[a-f0-9]{64}$/.test(timingHash)?'timingHash':'timingPath');return null;}
+    if(!editBatchRequest(body)){invalid('maxOutputs');return null;}return body;
   };
   const isCurrent=(s:Submission,token:number)=>alive.current&&generation.current===token&&sent.current===s;
   const release=()=>{clearTimeout(timer.current);sent.current=null;setSubmission(null);lock.current=false;setUnknown(false);};
@@ -166,7 +169,7 @@ function EditorialFlow({campaignId,renders}:Props){
         <label>Aceito o uso da música nesta edição<input type="checkbox" checked={musicAccepted} onChange={e=>{change();setMusicAccepted(e.target.checked);}}/></label>
         <details><summary>Timing de legendas existente</summary>
           <label>Timing: caminho relativo ao project root<input name="timingPath" value={timingPath} onChange={e=>{change();setTimingPath(e.target.value);}}/></label>
-          <label>Timing: SHA-256<input value={timingHash} onChange={e=>{change();setTimingHash(e.target.value);}}/></label>
+          <label>Timing: SHA-256<input name="timingHash" value={timingHash} onChange={e=>{change();setTimingHash(e.target.value);}}/></label>
         </details><p>Fontes/música/timing por path/hash explícitos. Sem timing, captions habilitadas ficam pendentes; não há editor de texto de legendas.</p>
       </fieldset>
       {hints&&cHints&&vHints&&<>
@@ -174,11 +177,11 @@ function EditorialFlow({campaignId,renders}:Props){
         <EditOverridesForm label="Vídeo" draft={video} inherited={cHints} disabled={busy} onChange={(d,f)=>overrideChange(()=>setVideo(d),f)}/>
         {variants.map(variant=><fieldset key={variant.row} disabled={busy}><legend>Variante {variant.key}</legend>
           <label>Key da variante {variant.key}<input name={`variant.${variant.row}.key`} value={variant.key} onChange={e=>{change();setVariants(old=>old.map(v=>v.row===variant.row?{...v,key:e.target.value}:v));}}/></label>
-          <label>Nome da variante {variant.key}<input value={variant.label} onChange={e=>{change();setVariants(old=>old.map(v=>v.row===variant.row?{...v,label:e.target.value}:v));}}/></label>
+          <label>Nome da variante {variant.key}<input name={`variant.${variant.row}.label`} value={variant.label} onChange={e=>{change();setVariants(old=>old.map(v=>v.row===variant.row?{...v,label:e.target.value}:v));}}/></label>
           <EditOverridesForm label={`Variante ${variant.key}`} draft={variant.draft} inherited={vHints} disabled={busy} onChange={(d,f)=>overrideChange(()=>setVariants(old=>old.map(v=>v.row===variant.row?{...v,draft:d}:v)),f)}/>
           <button type="button" disabled={variants.length===1} onClick={()=>{change();setVariants(old=>old.filter(v=>v.row!==variant.row));if(variant.draft.music.asset.mode!=='inherit')setMusicAccepted(false);}}>Remover variante {variant.key}</button>
         </fieldset>)}
-        <button type="button" disabled={busy} onClick={()=>{change();const row=nextRow.current++;let n=1;let key='b';while(variants.some(v=>v.key===key)){n++;key=n<26?String.fromCharCode(97+n):`v${row}`;}
+        <button type="button" disabled={busy} onClick={()=>{change();const row=nextRow.current++;let n=1;let key='b';while(variants.some(v=>v.key===key)){n++;key=n<26?String.fromCharCode(97+n):`v${n}`;}
           setVariants(old=>[...old,{row,key,label:key.toUpperCase(),draft:newOverrideDraft()}]);}}>Adicionar variante</button>
       </>}
       <p>{variants.length} variantes explícitas; sem multiplicação automática.</p>

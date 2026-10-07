@@ -15,7 +15,11 @@ export function useUnsavedChanges(dirty: boolean): () => void {
       const link = event.target instanceof Element ? event.target.closest('a') : null;
       if (!link || link.target || !link.getAttribute('href')?.startsWith('#') || link.hash === window.location.hash) return;
       if (!window.confirm(warning)) event.preventDefault();
-      else { unsaved.current = false; acceptedHash = link.hash; }
+      else queueMicrotask(() => {
+        if (!event.defaultPrevented && window.location.hash === link.hash) {
+          unsaved.current = false; acceptedHash = link.hash;
+        }
+      });
     };
     const hash = (event: Event) => {
       if (window.location.hash === acceptedHash) return;
@@ -23,7 +27,12 @@ export function useUnsavedChanges(dirty: boolean): () => void {
         window.history.replaceState(null, '', acceptedHash || '#/campaigns');
         event.stopImmediatePropagation();
       }
-      else { unsaved.current = false; acceptedHash = window.location.hash; }
+      else {
+        const destination = window.location.hash;
+        queueMicrotask(() => {
+          if (window.location.hash === destination) { unsaved.current = false; acceptedHash = destination; }
+        });
+      }
     };
     window.addEventListener('beforeunload', unload);
     document.addEventListener('click', click, true);

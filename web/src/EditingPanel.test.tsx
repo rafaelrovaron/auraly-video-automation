@@ -139,6 +139,13 @@ it.each(['limit','blank','timing','id'])('rejects incomplete draft before POST: 
   if(kind==='id')fireEvent.change(screen.getByLabelText('ID do vídeo editorial'),{target:{value:'../unsafe'}});
   validate();await screen.findByRole('alert');expect(s.posts).toHaveLength(0);
 });
+it.each([
+  ['ID do vídeo editorial','../unsafe'],['Key da variante a','../unsafe'],['Nome da variante a',' '],
+])('focuses the actual invalid input: %s',async(label,value)=>{
+  const s=server();render(<EditingPanel campaignId="campaign-one" renders={renders}/>);await draft();
+  const input=screen.getByLabelText(label);fireEvent.change(input,{target:{value}});validate();
+  await waitFor(()=>expect(document.activeElement).toBe(input));expect(input.getAttribute('aria-invalid')).toBe('true');expect(s.posts).toHaveLength(0);
+});
 it('double click does not duplicate submissions',async()=>{
   const s=server({queued:true});render(<EditingPanel campaignId="campaign-one" renders={renders}/>);await draft();validate();validate();
   await screen.findByText(/Operação editorial na fila/);expect(s.posts).toHaveLength(1);
