@@ -60,7 +60,7 @@ Reutilizar `read`, `post`, `object`, `ApiError` de api.ts. Comparação por camp
 conhecidos completos, independente de ordem de chaves, excluindo somente createdAt;
 sem SHA próprio. Validador não aplica defaults a respostas incompletas.
 
-- [ ] Escrever `defaults_match_contract`, `rejects_invalid_profile_view`,
+- [x] Escrever `defaults_match_contract`, `rejects_invalid_profile_view`,
   `reads_exact_identity`, `malformed_post_is_unknown`, `content_ignores_only_date`.
   Assertions: `newProfile('plain','Plain',date).defaults.output.width === 1080`;
   `defaults.captions.y === 0.8`; `profileView({...valid,profileHash:'bad'}) === false`;
@@ -70,14 +70,14 @@ sem SHA próprio. Validador não aplica defaults a respostas incompletas.
   data sem timezone, AssetRef incompleto/URL/traversal/drive e safe zones inválidas.
   GET errado é invalid_response; POST 201 com ID/versão/conteúdo divergente é
   command_unknown; caminhos usam encodeURIComponent. Backend permanece autoridade.
-- [ ] RED: `rtk npm --prefix web test -- src/profileApi.test.ts`; confirmar
+- [x] RED: `rtk npm --prefix web test -- src/profileApi.test.ts`; confirmar
   falha causada pelo módulo/comportamento ausente, não pelo ambiente.
-- [ ] Implementar tipos/defaults/validação e wrappers; constranger resposta de
+- [x] Implementar tipos/defaults/validação e wrappers; constranger resposta de
   publicação ao payload enviado. Manter erro 4xx explícito, desconhecido para
   transporte/5xx/resposta inválida, sem retry. Fixture `PROFILE` e função
   `profileFixture(): ProfileView` fornecem cópia independente em cada teste.
-- [ ] GREEN: mesmo comando e `rtk npm --prefix web run typecheck`; ambos exit 0.
-- [ ] Revisar diff e commit `feat: add typed editing profile client`.
+- [x] GREEN: mesmo comando e `rtk npm --prefix web run typecheck`; ambos exit 0.
+- [x] Revisar diff e commit `feat: add typed editing profile client`.
 
 ### Task 2: Formulário completo, sem perda de valores
 
@@ -90,23 +90,23 @@ caso por prop `creating: boolean`, não pelo número da versão publicada.
 Versão/data não editáveis. Rascunho numérico como texto até validar; componente
 montado com key do rascunho para reset explícito, não por polling.
 
-- [ ] Escrever `submits_all_style_fields`, `preserves_disabled_values_and_alpha`,
+- [x] Escrever `submits_all_style_fields`, `preserves_disabled_values_and_alpha`,
   `blank_required_number_is_not_zero`, `nullable_empty_is_null`,
   `rejects_partial_asset_reference`, `readonly_cannot_submit`.
   Assertions por onSubmit: volumeDb=0, loop=false, color='#FFFFFF80' conservados;
   endSec vazio resulta null; fontSizePx vazio não chama onSubmit; x=1.1 e
   safeLeft+safeRight>=1 falham; scale/zoom fora de 1–1.25 falham; path sem hash
   falha. Fonte ausente continua null, sem instalar/sugerir fonte presumida.
-- [ ] RED: `rtk npm --prefix web test -- src/ProfileForm.test.tsx`.
-- [ ] Implementar seções com labels, inputs nativos e details para avançados;
+- [x] RED: `rtk npm --prefix web test -- src/ProfileForm.test.tsx`.
+- [x] Implementar seções com labels, inputs nativos e details para avançados;
   todos os campos listados na spec. Preservar cor alpha com input textual;
   números finitos/inteiros conforme campo, peso 100–900, tempos não negativos,
   fim nullable positivo, intervalos conhecidos crescentes e safe zones válidas.
   Sem duração fictícia ou exigência de arquivo existente. Path/hash opcionais
   como par, mensagens sanitizadas, foco no primeiro erro. Mostrar aviso fixo
   de assets e informar que música/timing ainda não foram aprovados/verificados.
-- [ ] GREEN: teste focado e `rtk npm --prefix web run typecheck`.
-- [ ] Revisar diff e commit `feat: add editing profile form`.
+- [x] GREEN: teste focado e `rtk npm --prefix web run typecheck`.
+- [x] Revisar diff e commit `feat: add editing profile form`.
 
 ### Task 3: Navegação, publicação e recuperação explícita
 
@@ -117,7 +117,7 @@ formulário Task 2. App adiciona Route `{page:'profiles'}` e parseRoute aceita
 somente `#/profiles` exato. Estado local separa lista, seleção confirmada,
 rascunho e submissão congelada; não usa worker nem status de campanha.
 
-- [ ] Escrever `lists_and_versions_profiles`, `conflict_never_overwrites`,
+- [x] Escrever `lists_and_versions_profiles`, `conflict_never_overwrites`,
   `unknown_queries_exact_version_without_repost`, `not_found_retry_rechecks`,
   `late_get_does_not_replace_selection`, `refresh_preserves_draft`,
   `discard_cancel_keeps_draft`, `published_content_is_readonly`.
@@ -127,8 +127,8 @@ rascunho e submissão congelada; não usa worker nem status de campanha.
   GET falho não libera novo save; resposta de ID errado não confirma sucesso.
   Antes de retry explícito após 404, GET encontra conflito e nenhum segundo
   POST ocorre. GET atrasado de A não substitui B, nem após sair da rota.
-- [ ] RED: `rtk npm --prefix web test -- src/ProfilePanel.test.tsx src/App.test.tsx`.
-- [ ] Implementar lista/consulta readOnly/novo/versão; loading/empty/error e
+- [x] RED: `rtk npm --prefix web test -- src/ProfilePanel.test.tsx src/App.test.tsx`.
+- [x] Implementar lista/consulta readOnly/novo/versão; loading/empty/error e
   estados pending/confirmed/unknown/rejected. Bloquear clique duplo, congelar
   timestamp/payload, consultar publicação e refrescar lista sem perder edição.
   Resultado desconhecido oferece consulta exata; comparação ignora createdAt
@@ -137,9 +137,9 @@ rascunho e submissão congelada; não usa worker nem status de campanha.
   distinguir corrupção de conflito sem consulta válida. Não reexecutar POST.
   Reaproveitar useUnsavedChanges, guardas internas de descarte e AbortController
   com verificação da seleção antes de aplicar respostas. Sem polling necessário.
-- [ ] GREEN: teste focado, `rtk npm --prefix web test`,
+- [x] GREEN: teste focado, `rtk npm --prefix web test`,
   `rtk npm --prefix web run build`; todos exit 0.
-- [ ] Revisar diff e commit `feat: manage immutable editing profiles in local UI`.
+- [x] Revisar diff e commit `feat: manage immutable editing profiles in local UI`.
 
 ### Task 4: Browser/API reais, reload e telas estreitas
 
@@ -149,7 +149,7 @@ rascunho e submissão congelada; não usa worker nem status de campanha.
 Importar fakes de suporte para dependências da fixture; nunca construir provider
 real. Consultar profiles pela app.state.queries e snapshots pelos paths da spec.
 
-- [ ] Escrever `test_profiles_create_version_and_reload`: criar plain v1,
+- [x] Escrever `test_profiles_create_version_and_reload`: criar plain v1,
   mudar fonte/cor/música/framing em v2, verificar ambas via API e comparar bytes
   de profile.json v1 antes/depois; reload mantém conteúdo v2, nenhum Job novo
   e provider.events inalterado. Referências sintéticas são somente dados do profile.
@@ -160,40 +160,40 @@ real. Consultar profiles pela app.state.queries e snapshots pelos paths da spec.
   `test_profiles_narrow_width` parametrizado [320,390]: assert
   document.documentElement.scrollWidth <= window.innerWidth; labels/teclado
   acessíveis, texto longo de ID/nome/path não alarga viewport.
-- [ ] RED: `rtk uv run python -m pytest tests/test_web_profiles_e2e.py -q`.
+- [x] RED: `rtk uv run python -m pytest tests/test_web_profiles_e2e.py -q`.
   Se os fluxos funcionarem de primeira, não inventar falha; registrar integração
   GREEN e manter evidência RED→GREEN das tarefas anteriores. Correções novas
   exigem teste falhando pelo problema observado antes do patch.
-- [ ] Corrigir apenas comportamento demonstrado, sem retries/timeouts genéricos;
+- [x] Corrigir apenas comportamento demonstrado, sem retries/timeouts genéricos;
   preservar teste real de overflow e validações de persistência.
-- [ ] GREEN: mesmo comando; `rtk uv run python scripts/verify.py fast --pytest tests/test_web_profiles_e2e.py tests/test_api_actions_http.py tests/test_api_queries.py`.
-- [ ] Revisar diff e commit `test: verify profile UI persistence and recovery`.
+- [x] GREEN: mesmo comando; `rtk uv run python scripts/verify.py fast --pytest tests/test_web_profiles_e2e.py tests/test_api_actions_http.py tests/test_api_queries.py`.
+- [x] Revisar diff e commit `test: verify profile UI persistence and recovery`.
 
 ### Task 5: Gate completo, revisão e documentação de entrega
 
 **Files:** README.md, docs/PROJECT-MEMORY.md, docs/GOAL-ROADMAP.md,
 docs/PRD-MVP-MASS-VIDEO-AUTOMATION.md, spec/plano e documento de evidência acima.
 
-- [ ] Rodar `rtk uv run python scripts/verify.py full`; exigir todos os steps PASS
+- [x] Rodar `rtk uv run python scripts/verify.py full`; exigir todos os steps PASS
   e registrar contagens reais frontend/Python e skips, sem aproveitar evidência antiga.
-- [ ] Revisão independente única da branch completa conforme AGENTS.md e método
+- [x] Revisão independente única da branch completa conforme AGENTS.md e método
   escolhido; foco nos cinco casos acima, paridade de contratos, perda de dados,
   semântica unknown e fronteiras de assets. Corrigir findings relevantes com
   regressão RED→GREEN, commits pequenos e gate completo repetido após mudanças.
-- [ ] Documentar somente D4B.3a entregue, caminho operacional, versões imutáveis,
+- [x] Documentar somente D4B.3a entregue, caminho operacional, versões imutáveis,
   referência técnica path/hash e limite validate_assets=False. Variantes/preview
   D4B.3b/c e renderer D5 continuam PLANNED; nenhum PROVIDER_VERIFIED novo.
   Atualizar status/spec e checkboxes para refletir a execução real.
-- [ ] Revisar diff por secrets/mídia/paths privados/escopo; `rtk git diff --check`;
+- [x] Revisar diff por secrets/mídia/paths privados/escopo; `rtk git diff --check`;
   commit `docs: record local editing profile UI verification`.
-- [ ] Handoff com evidência e próximo recorte. Não mergear/push sem pedido do usuário.
+- [x] Handoff com evidência e próximo recorte. Não mergear/push sem pedido do usuário.
 
 ## Execução e self-review
 
 Nativa previamente escolhida pelo usuário no projeto; recomendada também aqui:
 três tarefas funcionais sequenciais, dependentes dos mesmos contratos, seguidas
 de integração e uma revisão independente final. Confirmar que a preferência
-continua antes da implementação. Usar executing-plans e using-git-worktrees
+continua antes da implementação (confirmada em 2026-10-07). Usar executing-plans e using-git-worktrees
 na execução, criando/reutilizando checkout isolado com spec e plano incluídos;
 não trabalhar a implementação em main nem apagar scratch de outros Goals.
 
@@ -201,5 +201,7 @@ Self-review: campos/contratos → Tasks 1/2; navegação/versões/unknown/rascun
 Task 3; API/persistência/reload/responsividade → Task 4; docs/gate/revisão → Task 5.
 Os cinco Review Focus têm testes nomeados nas tarefas proprietárias. Interfaces
 consumidas coincidem com as produzidas; nenhuma capability de variants/preview
-ou validação de mídia foi adicionada à publicação. Plano aguardando revisão
-do usuário; nenhuma tarefa de implementação executada.
+ou validação de mídia foi adicionada à publicação. Plano aprovado em 2026-10-07;
+Tasks 1–5 concluídas com TDD/commits, integração, revisão independente e gate final
+19/19: 275 frontend e 1.800 Python / 25 skips. Handoff sem merge/push.
+Evidência: `docs/superpowers/2026-10-07-d4b3a-verification.md`.

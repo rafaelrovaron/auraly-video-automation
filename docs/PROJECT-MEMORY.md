@@ -6,7 +6,27 @@
 Este documento guarda decisões duráveis e fatos verificados. O estado entregue aparece separado
 do produto planejado para impedir que roadmap seja confundido com capacidade existente.
 
-## Entrega atual: D4B.2b.2 — HeyGen Operations UI (2026-10-05)
+## Entrega atual: D4B.3a — Profiles UI (2026-10-07)
+
+`IMPLEMENTED`, `LOCAL_VERIFIED` na branch `feat/d4b3a-profiles`.
+Gate final Windows pós-correções: 19/19, 275 frontend e 1.800 Python / 25 skips
+(602,27 s). Revisão independente: nenhum Critical, três Important corrigidos
+com regressões RED→GREEN; browser Back específico adiado como Minor.
+Cinco moderate transitivos preexistentes permanecem; audits no limiar high passam.
+Sem merge/push ou Actions desta branch. Evidência em
+`docs/superpowers/2026-10-07-d4b3a-verification.md`.
+Design e plano aprovados, execução Nativa. UI global `#/profiles`, formulário
+completo, consulta readonly, criação e base + 1 imutável sobre quatro endpoints
+existentes. Sem backend/migration/dependência nova, worker, provider ou mídia.
+Fonte/música referenciadas por path relativo + SHA-256 explícito; publicação
+continua `validate_assets=False`, não aprova disponibilidade ou uso dos assets.
+Unknown congela payload e exige GET exato; nenhuma repetição automática do POST.
+Rascunhos em memória com confirmação de descarte; seleção antiga não troca dados atuais.
+Browser/API/arquivos reais de teste: seis testes passaram, incluindo conflito,
+resposta perdida, reload, teclado e viewport 320/390; zero provider/Jobs novos.
+D4B.3b/c (overrides/variants/preview) e D5 continuam planejados. Flow pausado.
+
+## Histórico: D4B.2b.2 — HeyGen Operations UI (2026-10-05)
 
 Branch `codex/d4b2b2`, execução Nativa do design/plano aprovados. `IMPLEMENTED`,
 `LOCAL_VERIFIED` pré-revisão em 2026-10-05: gate Windows 19/19, 214 frontend e
@@ -59,7 +79,7 @@ reuso/reload sem nova mutação; dispatch ambíguo reconciliado por ID exato sem
 create. Resposta POST persistida perdida não reenvia. Viewport 390×844 sem overflow,
 sem novo CSS. Download sintético 1080p separado para preservar QC e seed 720p.
 
-D4B.3 (profiles/variants/preview) e D5 (renderer) continuam planejados. Flow permanece
+D4B.3 (profiles/variants/preview) e D5 (renderer) estavam planejados neste checkpoint. Flow permanece
 pausado e não bloqueante. Esta entrega local não amplia o `PROVIDER_VERIFIED` D2C.
 
 ### Histórico D4B.2b.1 — Voice Master UI (2026-10-04)

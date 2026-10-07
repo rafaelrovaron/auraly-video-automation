@@ -64,11 +64,14 @@ entrega.
   220 frontend e 1.793 Python / 25 skips. CI pendente. Evidência no PROJECT-MEMORY;
   sem novo canário ou uso de créditos.
 
+D4B.3a — gestão de profiles pela UI está `IMPLEMENTED`, `LOCAL_VERIFIED`
+nesta branch; veja o fluxo operacional abaixo. Isso não entrega overrides/variants ou preview.
+
 ### Não entregue ainda
 
 - render final com headline, captions, música e framing configuráveis;
 - renderização das variações A/B já planejadas, reutilizando voz, imagem e HeyGen;
-- configuração editorial, profiles e variants pela interface (D4B.3);
+- overrides e variants pela interface (D4B.3b);
 - preview aproximado e fluxo end-to-end operável pela interface.
 
 ### Google Flow: preservado, mas pausado
@@ -364,7 +367,30 @@ confirmação; timestamps de polling não. Unknown preserva intenção/draft e b
 repost; inspecionar Job conhecido não prova autoria de uma resposta perdida.
 Nada inicia ao abrir/recarregar, nem há retry automático de POST ou autenticação na UI.
 
-O próximo slice é **D4B.3 — profiles, variantes A/B e preview aproximado**.
+### Profiles de edição pela UI — D4B.3a
+
+`IMPLEMENTED`, `LOCAL_VERIFIED` nesta branch: gate final 19/19, 275 testes frontend
+e 1.800 Python / 25 skips. Revisão independente concluída e achados importantes corrigidos.
+Sem merge/push ou Actions desta branch ainda.
+Abra **Profiles de edição** na navegação global (`#/profiles`). Use **Novo profile**
+para criar a versão 1; selecione uma versão publicada e **Criar nova versão**
+para editar sua cópia e publicar base + 1. Versões anteriores não são alteradas.
+O formulário cobre output, headline, legendas, música e enquadramento; opções
+avançadas ficam recolhidas. Salvar exige ação explícita e confirmação via API.
+
+Fontes/música usam caminho relativo ao project root e SHA-256 conhecido. Não há
+upload ou catálogo neste slice. Publicar um profile valida seus metadados, não
+a existência dos arquivos: disponibilidade/hash/tipo são verificados na preparação
+da edição. Música ainda exige aceitação por edição; nenhum timing é inventado.
+Profile não contém texto de headline de campanha nem source MP4.
+
+Resultado desconhecido oferece **Consultar versão enviada**, sem reenviar POST.
+Só ausência consultada permite tentativa explícita do mesmo payload, com outra
+consulta prévia. Conteúdo conflitante não é sobrescrito ou renumerado. Rascunhos
+ficam em memória, com aviso antes de descartar; não sobrevivem a reload.
+Versões publicadas podem ser consultadas novamente após reload.
+
+O próximo slice é **D4B.3b — overrides e variantes A/B**; D4B.3c adicionará preview aproximado.
 D5 adicionará o renderer. Sem timeline CapCut ou preview frame-perfect.
 Revisão visual final do vídeo do canário continua humana; configurar um manifest não aprova o vídeo.
 

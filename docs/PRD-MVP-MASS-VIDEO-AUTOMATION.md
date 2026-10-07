@@ -19,6 +19,15 @@ genérico e não terá timeline estilo CapCut ou preview frame-perfect.
 
 ### 2.1 Capacidade entregue
 
+Checkpoint D4B.3a (2026-10-07): profiles pela UI global `#/profiles` implementados,
+`IMPLEMENTED`, `LOCAL_VERIFIED`: gate pós-revisão 19/19, 275 frontend e
+1.800 Python / 25 skips; sem merge/push ou Actions desta branch. Criar, consultar readonly e publicar
+base + 1 por formulário; versões imutáveis e consulta explícita de resposta perdida.
+Fonte/música por path relativo/SHA-256, sem upload/catálogo. Profile salvo não valida
+disponibilidade de mídia nem aceita seu uso; o serviço de edição faz a validação
+posterior. Sem novas dependências, migrations, Jobs ou chamadas pagas.
+Overrides/variants D4B.3b, preview D4B.3c e renderer D5 continuam planejados.
+
 - Campaign, CopyMaster e SceneVariant persistentes;
 - Jobs locais retomáveis e auditáveis;
 - Voice Master via ElevenLabs API;
@@ -54,7 +63,7 @@ genérico e não terá timeline estilo CapCut ou preview frame-perfect.
   watch folder, upload, auto-start ou provider. `IMPLEMENTED`, `LOCAL_VERIFIED`:
   gate final Windows 19/19, 96 testes frontend e 1.757 Python / 25 skips; CI deste slice pendente,
   evidência histórica no PROJECT-MEMORY;
-  edição/preview D4B.3 e renderer D5 continuam não entregues.
+  nesse checkpoint, edição/preview D4B.3 e renderer D5 ainda não estavam entregues.
 - D4B.2b.1: Voice Master pela UI local, com seleção explícita de copy, budget inicial
   transacional sem overwrite, autorização de geração separada, import MP3/WAV relativo
   ao projeto e review após escuta externa. Jobs diretos e wrappers/filhos são acompanhados

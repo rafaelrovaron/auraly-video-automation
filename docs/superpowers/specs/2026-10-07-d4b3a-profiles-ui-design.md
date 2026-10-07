@@ -1,7 +1,10 @@
 # D4B.3a — Profiles de edição pela UI local
 
 Status: especificação aprovada pelo usuário em 2026-10-07.
-Implementação aguarda revisão do plano e confirmação do método de execução.
+Plano e execução Nativa aprovados em 2026-10-07; implementação concluída,
+`IMPLEMENTED`, `LOCAL_VERIFIED`: gate final 19/19, revisão independente concluída,
+três Important corrigidos com regressões; browser Back específico adiado como Minor.
+Evidência: `docs/superpowers/2026-10-07-d4b3a-verification.md`.
 
 ## Resultado pretendido
 

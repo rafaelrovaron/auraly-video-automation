@@ -65,7 +65,9 @@ D4B.1 Local Campaign Panel                    LOCAL_VERIFIED
 D4B.2a Campaign/Copy & Manual Image Import    LOCAL_VERIFIED
 D4B.2b.1 Voice Master Forms                  IMPLEMENTED, LOCAL_VERIFIED
 D4B.2b.2 HeyGen Forms                        IMPLEMENTED, LOCAL_VERIFIED
-D4B.3 Editing UI & Approximate Preview        PLANNED
+D4B.3a Profiles UI                           IMPLEMENTED, LOCAL_VERIFIED
+D4B.3b Overrides & Headline Variants UI       PLANNED
+D4B.3c Approximate Preview                   PLANNED
 D5A Deterministic Renderer
 D5B Render QC, Review & Delivery
 D6  End-to-End Personal Pilot
@@ -433,7 +435,9 @@ fechamento 2026-10-07: gate completo pós-revisão 19/19, UI 220/220 e Python
 1.793/25 skips. Dois high de dependências resolvidos com patches transitivos
 autorizados, sem upgrade do HyperFrames; cinco moderate permanecem. Actions pendentes.
 Evidência no PROJECT-MEMORY, sem nova chamada paga.
-D4B.3 permanece `PLANNED` e é o próximo slice; D5 ainda não tem renderer.
+D4B.3a está `IMPLEMENTED`, `LOCAL_VERIFIED`: gate pós-revisão 19/19,
+275 frontend e 1.800 Python / 25 skips. Sem merge/push ou Actions desta branch.
+D4B.3b (overrides/variantes) é o próximo slice; preview D4B.3c e renderer D5 planejados.
 
 Gate final D4B.2a Windows de 2026-10-04: 19/19 etapas; 96 testes frontend e 1.757 Python
 aprovados / 25 skips (472,17 s). Browser/proxy/API/worker reais cobrem import, review e
@@ -459,7 +463,10 @@ CI Linux/Windows pendente de publicação. Nenhuma chamada paga.
   reconciliação de Job blocked com binding confirmado e metadados de MP4 por GET.
   Defaults fixos 9:16/1080p/MP4, concurrency 2, polling 10→60/1800s. Sem auto-start,
   POST retry, player, OAuth na UI, media serving ou mudança no engine.
-- D4B.3: profiles, overrides, variantes A/B e preview aproximado.
+- D4B.3a: UI global de profiles, criação/consulta/base + 1 imutável; formulário
+  completo via API existente e recuperação de resultado incerto por GET, sem repost automático.
+  Assets por path/hash explícito, sem validação de mídia na publicação ou worker.
+- D4B.3b/c: overrides, variantes A/B e preview aproximado ainda planejados.
 
 D4B.1 usa dois processos locais (API 8000 e Vite 5173); distribuição estática/launcher
 fica para depois. Worker 404 fora do escopo significa desconhecido; start/stop não
