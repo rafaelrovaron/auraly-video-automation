@@ -1,11 +1,11 @@
-import { useRef, useState } from 'react';
-import { editProfile, type EditProfile, type TextStyle } from './profileApi';
+import { useId, useState } from 'react';
+import { editProfile, newProfile, type EditProfile, type TextStyle } from './profileApi';
 
 type Props={initial:EditProfile; creating:boolean; readOnly:boolean; disabled:boolean;
   onSubmit:(profile:EditProfile)=>void; onDirtyChange:(dirty:boolean)=>void};
 export function ProfileForm({initial,creating,readOnly,disabled,onSubmit,onDirtyChange}:Props) {
   const [error,setError]=useState('');
-  const alert=useRef<HTMLParagraphElement>(null);
+  const errorId=useId();
   const value=(section:keyof EditProfile['defaults'],key:string):unknown =>
     (initial.defaults[section] as unknown as Record<string,unknown>)[key];
   function input(section:keyof EditProfile['defaults'],key:string,label:string,type='text',nullable=false) {
@@ -70,16 +70,45 @@ export function ProfileForm({initial,creating,readOnly,disabled,onSubmit,onDirty
     }
     const h=profile.defaults.headline,m=profile.defaults.music;
     if(!editProfile(profile)||(h.endSec!==null&&h.endSec<=h.startSec)||(m.trimEndSec!==null&&m.trimEndSec<=m.trimStartSec)) {
-      setError('Revise os campos: números, limites, intervalos, margens e referências de assets completas.');
-      requestAnimationFrame(()=>alert.current?.focus()); return;
+      const invalid=new Set<string>(),baseline=newProfile('plain','Profile',initial.createdAt);
+      // Reuse the contract validator for scalar/ref errors; check related fields together below.
+      for(const s of ['headline','captions'] as const)
+        Object.assign(baseline.defaults[s],{safeTop:0,safeBottom:0,safeLeft:0,safeRight:0});
+      for(const key of ['profileId','name'] as const)
+        if(!editProfile({...baseline,[key]:profile[key]}))invalid.add(key);
+      for(const section of Object.keys(profile.defaults) as (keyof EditProfile['defaults'])[]) {
+        const values=profile.defaults[section] as unknown as Record<string,unknown>;
+        for(const [key,current] of Object.entries(values)) {
+          const probe=structuredClone(baseline);
+          (probe.defaults[section] as unknown as Record<string,unknown>)[key]=current;
+          if(!editProfile(probe))invalid.add(`${section}.${key}${key==='font'||key==='asset'?'.path':''}`);
+        }
+      }
+      for(const s of ['headline','captions'] as const) {
+        const t=profile.defaults[s];
+        if(t.safeTop+t.safeBottom>=1)invalid.add(`${s}.safeTop`);
+        if(t.safeLeft+t.safeRight>=1)invalid.add(`${s}.safeRight`);
+      }
+      if(h.endSec!==null&&h.endSec<=h.startSec)invalid.add('headline.endSec');
+      if(m.trimEndSec!==null&&m.trimEndSec<=m.trimStartSec)invalid.add('music.trimEndSec');
+      const controls=Array.from(form.querySelectorAll<HTMLInputElement|HTMLSelectElement>('input,select'));
+      controls.forEach(c=>{c.removeAttribute('aria-invalid');c.removeAttribute('aria-describedby');});
+      const field=controls.find(c=>invalid.has(c.name));
+      const label=field?.labels?.[0];
+      const title=label?Array.from(label.childNodes).filter(n=>n.nodeType===3).map(n=>n.textContent).join('').trim():'Configuração';
+      setError(`${title}: revise o valor, limites, intervalo ou referência completa.`);
+      if(field){field.setAttribute('aria-invalid','true');field.setAttribute('aria-describedby',errorId);
+        const details=field.closest('details');if(details)details.open=true;
+        requestAnimationFrame(()=>field.focus());}return;
     }
+    form.querySelectorAll('[aria-invalid]').forEach(c=>{c.removeAttribute('aria-invalid');c.removeAttribute('aria-describedby');});
     setError(''); onSubmit(profile);
   }
   return <form aria-label="Configuração do profile" noValidate onChange={()=>onDirtyChange(true)}
     onSubmit={e=>{e.preventDefault();submit(e.currentTarget);}}>
     <p>Profile salvo não confirma disponibilidade de fontes ou música. Os arquivos serão verificados ao preparar a edição.</p>
     <p>Música exige aceitação por edição; timing das legendas não é definido neste profile.</p>
-    {error&&<p role="alert" tabIndex={-1} ref={alert}>{error}</p>}
+    {error&&<p role="alert" id={errorId}>{error}</p>}
     <fieldset disabled={readOnly||disabled}><legend>Identidade</legend>
       <label>ID do profile<input name="profileId" defaultValue={initial.profileId} readOnly={!creating} required/></label>
       <label>Nome do profile<input name="name" defaultValue={initial.name} required/></label>

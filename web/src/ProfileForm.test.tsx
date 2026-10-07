@@ -37,3 +37,14 @@ it.each([['Headline · X (0–1)','1.1'],['Headline · Margem esquerda (0–1)',
   const {onSubmit}=form(); fill(label,value); save(); expect(onSubmit).not.toHaveBeenCalled();
 });
 it('readonly_cannot_submit',()=>{const {onSubmit}=form(true); save(); expect(onSubmit).not.toHaveBeenCalled();});
+it('opens_advanced_section_and_focuses_first_invalid_field',async()=>{
+  const {onSubmit}=form(); fill('Headline · Peso (100–900)','999'); save();
+  const field=screen.getByLabelText('Headline · Peso (100–900)');
+  await new Promise(resolve=>requestAnimationFrame(resolve));
+  expect(document.activeElement).toBe(field);
+  expect(field.closest('details')?.open).toBe(true);
+  expect(screen.getByRole('alert').textContent).toContain('Headline · Peso (100–900)');
+  expect(onSubmit).not.toHaveBeenCalled();
+  fill('Headline · Peso (100–900)','700');save();
+  expect(onSubmit).toHaveBeenCalled();expect(field.hasAttribute('aria-invalid')).toBe(false);
+});

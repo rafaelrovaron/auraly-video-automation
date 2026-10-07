@@ -18,6 +18,11 @@ it.each([
   (v: any) => { v.profile.version = 1.5; },
   (v: any) => { v.profile.createdAt = '2026-10-07'; },
   (v: any) => { v.profile.defaults.headline.safeLeft = 0.95; },
+  (v: any) => { v.profile.defaults.headline.anchor = ['top']; },
+  (v: any) => { v.profile.defaults.captions.anchor = ['bottom']; },
+  (v: any) => { v.profile.defaults.headline.fitPolicy = ['wrap']; },
+  (v: any) => { v.profile.defaults.captions.fitPolicy = ['error']; },
+  (v: any) => { v.profile.defaults.framing.fit = ['cover']; },
   (v: any) => { v.profile.defaults.headline.font = { path: 'fonts/a.ttf' }; },
   ...['https://a/font', '../a.ttf', 'C:/a.ttf', 'fonts\\a.ttf', 'fonts/CON.ttf'].map(path =>
     (v: any) => { v.profile.defaults.headline.font = { path, sha256: 'a'.repeat(64) }; }),

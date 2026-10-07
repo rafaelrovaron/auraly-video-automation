@@ -62,7 +62,8 @@ function style(v: Record<string,unknown>): boolean {
     && ['shadowOffsetX','shadowOffsetY'].every(k=>number(v[k]))
     && ['x','y','safeTop','safeRight','safeBottom','safeLeft'].every(k=>fraction(v[k]))
     && Number(v.safeTop)+Number(v.safeBottom)<1 && Number(v.safeLeft)+Number(v.safeRight)<1
-    && ['top','center','bottom'].includes(String(v.anchor)) && ['wrap','shrink','error'].includes(String(v.fitPolicy));
+    && typeof v.anchor==='string' && ['top','center','bottom'].includes(v.anchor)
+    && typeof v.fitPolicy==='string' && ['wrap','shrink','error'].includes(v.fitPolicy);
 }
 export function editProfile(v: unknown): v is EditProfile {
   if (!keys(v,['schemaVersion','profileId','name','version','createdAt','defaults']) || v.schemaVersion!=='1.0'
@@ -81,7 +82,7 @@ export function editProfile(v: unknown): v is EditProfile {
     && number(m.volumeDb) && number(m.duckUnderVoiceDb)
     && ['trimStartSec','fadeInSec','fadeOutSec'].every(k=>number(m[k]) && m[k]>=0)
     && (m.trimEndSec===null || positive(m.trimEndSec))
-    && ['cover','contain'].includes(String(f.fit)) && fraction(f.x) && fraction(f.y)
+    && typeof f.fit==='string' && ['cover','contain'].includes(f.fit) && fraction(f.x) && fraction(f.y)
     && ['scale','zoomStart','zoomEnd'].every(k=>number(f[k]) && f[k]>=1 && f[k]<=1.25);
 }
 export function profileView(v: unknown): v is ProfileView {

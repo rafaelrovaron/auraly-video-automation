@@ -121,3 +121,19 @@ it('creates_new_profile_without_campaign',async()=>{
   await screen.findByText('Versão publicada e confirmada.');
   expect(s.posts).toEqual([root]);expect(s.stored.get('organic/1')?.profile.version).toBe(1);
 });
+it('divergent_confirmation_get_keeps_frozen_submission',async()=>{
+  let posts=0;
+  vi.stubGlobal('fetch',async(path:string,opts:RequestInit)=>{
+    if(path===root&&opts.method==='GET')return Response.json({items:[profileFixture()]});
+    if(opts.method==='POST'){posts++;return Response.json({profile:JSON.parse(opts.body as string),profileHash:'b'.repeat(64)},{status:201});}
+    const v=profileFixture();
+    if(path.endsWith('/plain/2')){v.profile.version=2;v.profile.name='Different persisted content';}
+    return Response.json(v);
+  });
+  render(<ProfilePanel/>);await version();
+  await screen.findByText(/A versão existente tem conteúdo diferente/);
+  expect(screen.queryByText('Versão publicada e confirmada.')).toBeNull();
+  expect((screen.getByLabelText('Nome do profile') as HTMLInputElement).value).toBe('Changed');
+  expect((screen.getByRole('button',{name:'Salvar versão'}) as HTMLButtonElement).disabled).toBe(true);
+  expect(posts).toBe(1);
+});

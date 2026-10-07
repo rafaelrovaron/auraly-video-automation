@@ -64,7 +64,10 @@ export function ProfilePanel() {
       await publishProfile(profile,baseVersion);
       acknowledged=true;
       const c=new AbortController();detailRequest.current=c;
-      confirmed(await getProfile(profile.profileId,profile.version,c.signal));
+      const v=await getProfile(profile.profileId,profile.version,c.signal);
+      if(!alive.current)return;
+      if(sameProfileContent(v.profile,profile))confirmed(v);
+      else{setSubmission({profile,baseVersion,state:'conflict'});setError('A versão existente tem conteúdo diferente. Não será sobrescrita.');}
     }catch(e){
       if(!alive.current)return;
       setError(message(e));setDirty(true);
