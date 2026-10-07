@@ -187,8 +187,9 @@ def test_lost_heygen_response_does_not_repost(panel_servers: PanelServers, panel
     assert panel_page.get_by_text('Operação:', exact=False).count() == 0
 
 
-def test_heygen_panel_narrow_width(panel_servers: PanelServers, panel_page: Page) -> None:
-    panel_page.set_viewport_size({'width': 390, 'height': 844})
+@pytest.mark.parametrize('width', [320, 390])
+def test_heygen_panel_narrow_width(panel_servers: PanelServers, panel_page: Page, width: int) -> None:
+    panel_page.set_viewport_size({'width': width, 'height': 844})
     panel_page.goto(panel_servers.ui_url + '#/campaigns/campaign-one')
     expect(panel_page.get_by_role('button', name='Preparar assets HeyGen', exact=True)).to_be_enabled()
     assert panel_page.evaluate('document.documentElement.scrollWidth <= window.innerWidth'), panel_page.evaluate(
