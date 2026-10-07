@@ -427,8 +427,11 @@ negócio.
 **Status:** D4B.1 e D4B.2a `IMPLEMENTED`, `LOCAL_VERIFIED`;
 D4B.2b.1 Voice Master `IMPLEMENTED`, `LOCAL_VERIFIED`: gate pós-revisão Windows
 19/19, 130 frontend e 1.789 Python / 25 skips; evidência no PROJECT-MEMORY.
-D4B.2b.2 HeyGen `IMPLEMENTED`, `LOCAL_VERIFIED`: gate Windows 19/19, 214 frontend e
-1.793 Python / 25 skips; revisão independente/Actions deste slice ainda pendentes.
+D4B.2b.2 HeyGen `IMPLEMENTED`, `LOCAL_VERIFIED` pré-revisão: gate Windows 19/19,
+214 frontend e 1.793 Python / 25 skips. Revisão concluída e três Important corrigidos;
+fechamento 2026-10-07: gate completo pós-revisão 19/19, UI 220/220 e Python
+1.793/25 skips. Dois high de dependências resolvidos com patches transitivos
+autorizados, sem upgrade do HyperFrames; cinco moderate permanecem. Actions pendentes.
 Evidência no PROJECT-MEMORY, sem nova chamada paga.
 D4B.3 permanece `PLANNED` e é o próximo slice; D5 ainda não tem renderer.
 

@@ -1,6 +1,6 @@
 # Auraly Mass Video Pipeline — Memória do Projeto
 
-**Atualizado em:** 2026-10-05
+**Atualizado em:** 2026-10-07
 **Decisão vigente:** MVP delivery-first para uso local e pessoal
 
 Este documento guarda decisões duráveis e fatos verificados. O estado entregue aparece separado
@@ -9,11 +9,35 @@ do produto planejado para impedir que roadmap seja confundido com capacidade exi
 ## Entrega atual: D4B.2b.2 — HeyGen Operations UI (2026-10-05)
 
 Branch `codex/d4b2b2`, execução Nativa do design/plano aprovados. `IMPLEMENTED`,
-`LOCAL_VERIFIED`: gate completo Windows 19/19, 214 frontend e 1.793 Python aprovados /
-25 skips (pytest: 582,02 s). Revisão independente pendente; sem merge/push,
-Actions desta branch ou chamadas pagas nesta etapa.
+`LOCAL_VERIFIED` pré-revisão em 2026-10-05: gate Windows 19/19, 214 frontend e
+1.793 Python aprovados / 25 skips (pytest: 582,02 s). Revisão independente concluída
+em 2026-10-07: três Important reproduzidos e corrigidos em uma rodada RED→GREEN;
+nenhum Critical/Minor, sem re-review. Fechamento pós-revisão `LOCAL_VERIFIED`:
+gate Windows 19/19, 220 frontend e 1.793 Python / 25 skips (569,68 s).
+Bloqueio transitório da auditoria resolvido com os patches autorizados abaixo;
+sem merge/push, Actions desta branch ou chamada paga.
+
+Checkpoint pós-revisão (2026-10-07): bloqueio após GET inválido preservando plano e
+confirmação; resultado de submit só adotado com Job filho de campanha/tipo/cena
+compatíveis, ausência temporária aguarda leitura sem repost; reconciliação exige
+read IDs posteriores e estados/contexto compatíveis, não apenas IDs já conhecidos.
+Gate final UI 4/4, 220/220 testes, build/tipos/audit limpos. Python completo:
+1.793 aprovados / 25 skips (576,80 s), incluindo browser; Ruff/mypy/schemas passaram.
+`verify.py full` parou na etapa 18/19: audit de produção raiz reporta dois high
+em `sharp@0.35.4` e `source-map-js@1.2.1`, além de cinco moderate transitivos.
+Advisories: [sharp](https://github.com/advisories/GHSA-wq5f-xc86-pv6w) e
+[source-map-js](https://github.com/advisories/GHSA-68fv-2mgg-jv7q).
+Após aprovação explícita, lockfile atualizado para `sharp@0.35.5` (incluindo seus
+binários/libvips) e `source-map-js@1.2.2`, dentro dos ranges existentes. Comparação
+semântica confirmou que só essa família mudou; HyperFrames 0.7.104 e package.json
+intactos. Reinstalação locked e smoke PNG nativo passaram. Gate completo repetido:
+19/19, 220 frontend e 1.793 Python / 25 skips (569,68 s), Ruff/mypy/build/schemas
+e audit no threshold original aprovados. Permanecem cinco alertas moderate na cadeia
+sprintf-js/roarr/global-agent/onnxruntime-node/HyperFrames; não foram suprimidos nem
+motivaram upgrade forçado. Esta evidência local não prova Linux/Actions ou provider.
 Reusa React/FastAPI/SQLite, MCP OAuth e workers existentes, sem contratos backend,
-migrations, dependências ou mudança no engine.
+migrations, novas dependências diretas ou mudança no engine; apenas os patches
+transitivos autorizados acima.
 
 - preparação all-scenes: wrapper `local_operations` → Job `heygen.asset.upload`
   (`heygen_assets`); reuso sem filho não é novo upload;

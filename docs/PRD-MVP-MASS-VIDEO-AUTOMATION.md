@@ -72,8 +72,11 @@ genérico e não terá timeline estilo CapCut ou preview frame-perfect.
   explícito, sem ID exige prova backend de no-dispatch. Recovery Job preserva histórico.
   Metadados/hash/probe/caminho relativo ao work root, escuta/visualização externas;
   guards de contexto, snapshots stale, drafts independentes e unknown sem repost.
-  `IMPLEMENTED`, `LOCAL_VERIFIED`: gate Windows 19/19, 214 frontend e 1.793 Python /
-  25 skips; revisão independente/CI deste slice pendentes. Evidência no PROJECT-MEMORY;
+  `IMPLEMENTED`, `LOCAL_VERIFIED` pré-revisão: gate Windows 19/19, 214 frontend e
+  1.793 Python / 25 skips. Revisão concluída, três Important corrigidos; checkpoint
+  2026-10-07: gate completo pós-revisão 19/19, UI 220/220 e Python 1.793/25 skips.
+  Dois high de dependências resolvidos com patches autorizados, HyperFrames intacto;
+  cinco moderate permanecem. CI pendente. Evidência no PROJECT-MEMORY;
   sem novo canário ou créditos.
 
 ### 2.2 Capacidade alvo deste PRD

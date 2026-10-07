@@ -60,7 +60,8 @@ entrega.
   deste slice registrada no PROJECT-MEMORY; sem nova chamada paga.
 - D4B.2b.2 `IMPLEMENTED`, `LOCAL_VERIFIED`: preparação de assets, plano/autorizações
   HeyGen, reservas, reconciliação e metadados dos MP4s pela UI local. Gate 19/19;
-  revisão independente/CI deste slice pendentes, evidência no PROJECT-MEMORY;
+  revisão independente concluída e três achados corrigidos; gate pós-revisão 19/19,
+  220 frontend e 1.793 Python / 25 skips. CI pendente. Evidência no PROJECT-MEMORY;
   sem novo canário ou uso de créditos.
 
 ### Não entregue ainda
