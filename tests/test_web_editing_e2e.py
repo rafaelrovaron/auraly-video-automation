@@ -117,7 +117,8 @@ def test_lost_save_response_never_reposts(panel_servers: PanelServers, panel_pag
     posts: list[str] = []
 
     def lose(route: Route) -> None:
-        if route.request.method == 'POST' and route.request.post_data_json['persist']:
+        body = route.request.post_data_json
+        if route.request.method == 'POST' and isinstance(body, dict) and body['persist']:
             posts.append(route.request.url)
             assert route.fetch().status == 202
             route.fulfill(status=503, json={'error': {'code': 'storage_unavailable'}})
