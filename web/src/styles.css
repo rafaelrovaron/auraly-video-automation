@@ -22,6 +22,8 @@ dl { display: grid; grid-template-columns: minmax(100px, 180px) minmax(0, 1fr); 
 .worker-controls { padding: 1rem; border: 1px solid #62748b; border-radius: .6rem; margin-bottom: 1rem; }
 .worker-controls select { display: block; margin-top: .5rem; max-width: 100%; }
 .heygen-panel select { display: block; width: 100%; max-width: 100%; }
+.profile-panel select { display: block; width: 100%; max-width: 100%; }
+.profile-panel label, .profile-panel legend, .profile-panel summary { overflow-wrap: anywhere; }
 .actions { display: flex; gap: .6rem; flex-wrap: wrap; margin-top: 1rem; }
 .confirmation { border-left: 3px solid #d5b967; padding: 0 1rem; }
 .confirmation button { margin: 0 .5rem .5rem 0; }

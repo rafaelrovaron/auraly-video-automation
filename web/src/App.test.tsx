@@ -2,6 +2,15 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { expect, it, vi } from 'vitest';
 import { App, parseRoute } from './App';
 
+it('opens global profiles without a campaign',async()=>{
+  window.location.hash='#/profiles';
+  vi.stubGlobal('fetch',async()=>Response.json({items:[]}));
+  render(<App/>);
+  expect(await screen.findByRole('heading',{name:'Profiles de edição'})).toBeTruthy();
+  expect(parseRoute('#/profiles')).toEqual({page:'profiles'});
+  expect(parseRoute('#/profiles/extra')).toEqual({page:'invalid'});
+});
+
 export const campaign = {
   campaignId: 'campaign-one', character: 'susan-smith', storedStatus: 'draft', sceneCount: 1,
   createdAt: '2026-10-03T00:00:00Z', updatedAt: '2026-10-03T00:00:00Z', operationalStatus: 'needs_input',
