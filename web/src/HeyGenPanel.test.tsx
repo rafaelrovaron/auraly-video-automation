@@ -124,9 +124,10 @@ const planResult = {operation: 'heygen_video_plan', newCount: 1, reusedCount: 0,
 const reservation = {renderId: 'render-one', campaignId: 'campaign-one', sceneVariantId: 'scene-one', imageCandidateId: 'image-one',
   voiceMasterId: 'voice-one', jobId: 'video-job', status: 'planned', remoteVideoId: null, source: null, errorCode: null,
   manualBinding: false, imageSha256: 'a'.repeat(64), audioSha256: 'b'.repeat(64), createdAt: time, updatedAt: time};
-function fakePlanApi(result: unknown = planResult) {
+function fakePlanApi(result: unknown = planResult, publishJob = true) {
   const api = fakeApi({submit: async (_path, body) => {
     const jobId = body.operation === 'heygen_video_plan' ? 'plan-job' : 'submit-job';
+    if (body.operation === 'heygen_video_submit' && publishJob) api.data['/jobs'] = {items: [{...child, jobId: 'video-job', jobType: 'heygen.video.generate', sceneVariantId: 'scene-one'}]};
     api.setWrapper({jobId, campaignId: 'campaign-one', operation: body.operation, status: 'completed', errorCode: null,
       result: body.operation === 'heygen_video_plan' ? result : {operation: 'heygen_video_submit', renders: [reservation]}});
     return Response.json({jobId, campaignId: 'campaign-one', operation: body.operation});
@@ -143,6 +144,19 @@ function confirmPaid() {
   fireEvent.change(screen.getByLabelText('Responsável pela geração HeyGen'), {target: {value: 'tester'}});
   fireEvent.click(screen.getByLabelText(/Autorizo a geração paga/));
 }
+it('test_invalid_later_plan_read_blocks_paid_submit_and_preserves_confirmation', async () => {
+  const api = fakePlanApi(); await planBatch(); confirmPaid();
+  api.setWrapper({jobId: 'wrong-job', campaignId: 'campaign-one', operation: 'heygen_video_plan', status: 'completed', errorCode: null, result: planResult});
+  fireEvent(document, new Event('visibilitychange'));
+  await screen.findByText(/Leitura da operação indisponível/);
+  expect((submitButton() as HTMLButtonElement).disabled).toBe(true);
+  expect((screen.getByLabelText(/Autorizo a geração paga/) as HTMLInputElement).checked).toBe(true);
+  expect(screen.getByText(/Novos: 1/)).toBeTruthy();
+  api.setWrapper({jobId: 'plan-job', campaignId: 'campaign-one', operation: 'heygen_video_plan', status: 'completed', errorCode: null, result: planResult});
+  fireEvent(document, new Event('visibilitychange'));
+  await waitFor(() => expect((submitButton() as HTMLButtonElement).disabled).toBe(false));
+  expect(api.calls).toHaveLength(1);
+});
 it('test_plan_never_authorizes_generation', async () => {
   const api = fakePlanApi(); await planBatch();
   expect((submitButton() as HTMLButtonElement).disabled).toBe(true); expect(api.calls).toHaveLength(1);
@@ -157,6 +171,26 @@ it('test_submit_uses_confirmed_plan_config_and_separate_request_id', async () =>
   expect(api.calls[1].body).toEqual({...api.calls[0].body, operation: 'heygen_video_submit', approvedBy: 'tester', requestId: expect.any(String)});
   expect(api.calls[1].body.requestId).not.toBe(api.calls[0].body.requestId);
   expect(api.calls.some(call => call.path.endsWith('/worker/start'))).toBe(false);
+});
+it.each(['type', 'scene'])('test_submit_rejects_contradictory_child_job (%s)', async mismatch => {
+  const api = fakePlanApi(planResult, false);
+  api.data['/jobs'] = {items: [{...child, jobId: 'video-job', jobType: mismatch === 'type' ? 'heygen.asset.upload' : 'heygen.video.generate',
+    sceneVariantId: mismatch === 'scene' ? 'foreign' : 'scene-one'}]};
+  await planBatch(); confirmPaid(); fireEvent.click(submitButton());
+  await screen.findByText(/Leitura da operação indisponível/);
+  expect(screen.queryByText(/Reservas aceitas/)).toBeNull();
+  expect(screen.getByText(/Novos: 1/)).toBeTruthy();
+  expect((screen.getByLabelText(/Autorizo a geração paga/) as HTMLInputElement).checked).toBe(true);
+  expect((submitButton() as HTMLButtonElement).disabled).toBe(true);
+});
+it('test_submit_waits_for_observed_child_before_adopting_reservations', async () => {
+  const api = fakePlanApi(planResult, false); await planBatch(); confirmPaid(); fireEvent.click(submitButton());
+  await screen.findByText(/Operação: submit-job/);
+  expect(screen.queryByText(/Reservas aceitas/)).toBeNull();
+  expect((submitButton() as HTMLButtonElement).disabled).toBe(true);
+  api.data['/jobs'] = {items: [{...child, jobId: 'video-job', jobType: 'heygen.video.generate', sceneVariantId: 'scene-one'}]};
+  fireEvent.click(screen.getByRole('button', {name: 'Atualizar'}));
+  expect(await screen.findByText(/Reservas aceitas/)).toBeTruthy(); expect(api.calls).toHaveLength(2);
 });
 it('test_historical_reservations_are_not_free_budget', async () => {
   fakePlanApi(); await planBatch(); expect(screen.getByText(/Reservas históricas: 2/)).toBeTruthy();
@@ -234,6 +268,14 @@ function fakeReconcileApi(known = false, returned?: unknown) {
 }
 const reconcileButton = () => screen.getByRole('button', {name: 'Reconciliar render HeyGen'});
 async function selectReconcile() {await openPanel(); fireEvent.change(screen.getByLabelText('Render para reconciliação'), {target: {value: 'render-one'}});}
+it('test_invalid_later_reconcile_read_blocks_another_command', async () => {
+  const api = fakeReconcileApi(); await selectReconcile(); fireEvent.click(reconcileButton());
+  await screen.findByText(/Job retornado: recovery-job/);
+  api.setWrapper(Response.json({}, {status: 503})); fireEvent(document, new Event('visibilitychange'));
+  await screen.findByText(/Leitura da reconciliação indisponível/);
+  expect((reconcileButton() as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.click(reconcileButton()); expect(api.calls).toHaveLength(1);
+});
 it('test_known_video_id_cannot_be_replaced', async () => {
   const api = fakeReconcileApi(true); await selectReconcile();
   const input = screen.getByLabelText('ID exato do vídeo HeyGen') as HTMLInputElement;
@@ -259,6 +301,25 @@ it('test_no_id_reconciliation_does_not_assume_no_dispatch', async () => {
 it('test_reconciliation_observes_recovery_job_without_start', async () => {
   fakeReconcileApi(); await selectReconcile(); fireEvent.click(reconcileButton());
   expect(await screen.findByText(/Job retornado: recovery-job/)).toBeTruthy(); expect(screen.getByText(/Retomada ainda não comprovada/)).toBeTruthy();
+});
+it('test_same_job_recovery_requires_new_reads_and_resumed_states', async () => {
+  const api = fakeReconcileApi(false, reservation); await selectReconcile(); fireEvent.click(reconcileButton());
+  await screen.findByText(/Job retornado: video-job/);
+  await act(async () => {});
+  expect(screen.queryByText(/Retomada comprovada/)).toBeNull();
+  expect(screen.getByText(/Retomada ainda não comprovada/)).toBeTruthy();
+  api.data['/heygen/renders'] = {items: [reservation]};
+  api.data['/jobs'] = {items: [{...child, jobId: 'video-job', jobType: 'heygen.video.generate', sceneVariantId: 'scene-one'}]};
+  fireEvent.click(screen.getByRole('button', {name: 'Atualizar'}));
+  expect(await screen.findByText(/Retomada comprovada/)).toBeTruthy();
+  api.data['/heygen/renders'] = {items: [{...reservation, status: 'processing', remoteVideoId: 'video-after-resume'}]};
+  fireEvent.click(screen.getByRole('button', {name: 'Atualizar'}));
+  await screen.findByText(/video-after-resume/);
+  expect(screen.getByText(/Retomada comprovada/)).toBeTruthy();
+  api.data['/jobs'] = {items: [{...child, jobId: 'video-job', jobType: 'heygen.video.generate', status: 'blocked', sceneVariantId: 'scene-one'}]};
+  fireEvent.click(screen.getByRole('button', {name: 'Atualizar'}));
+  expect(await screen.findByText(/Retomada ainda não comprovada/)).toBeTruthy();
+  expect(api.calls).toHaveLength(1);
 });
 it('test_acceptance_preserves_other_drafts', async () => {
   fakeReconcileApi(); await selectReconcile();

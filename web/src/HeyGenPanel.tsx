@@ -21,6 +21,7 @@ function HeyGenForms({campaignId, detail, status, images, voices, jobs, renders}
   const [submitted, setSubmitted] = useState<HeyGenSubmitResult | null>(null);
   const [inspect, setInspect] = useState(''), [inspectKind, setInspectKind] = useState<HeyGenOperationKind>('heygen_assets');
   const handled = useRef(new Set<string>());
+  const childRefreshRequested = useRef(new Set<string>());
   const alive = useRef(true), lock = useRef(false);
   useEffect(() => {alive.current = true; return () => {alive.current = false;};}, []);
   useUnsavedChanges(busy || unknown || !!cap || !!actor || paid);
@@ -54,11 +55,19 @@ function HeyGenForms({campaignId, detail, status, images, voices, jobs, renders}
         && (value.result?.operation !== 'heygen_video_submit' || value.result.renders.every(render => render.campaignId === campaignId
           && sceneIds.includes(render.sceneVariantId) && images.data?.items.some(scene => scene.sceneVariantId === render.sceneVariantId
             && scene.items.some(image => image.imageCandidateId === render.imageCandidateId))
-          && voices.data?.items.some(voice => voice.voiceMasterId === render.voiceMasterId))))
+          && voices.data?.items.some(voice => voice.voiceMasterId === render.voiceMasterId)
+          && jobs.data?.items.every(job => job.jobId !== render.jobId || (job.campaignId === campaignId
+            && job.jobType === 'heygen.video.generate' && (job.sceneVariantId === null || job.sceneVariantId === render.sceneVariantId))))))
       : Promise.resolve(null), wrapper ? 2000 : null);
   useEffect(() => {
     const value = operation.data;
     if (!operation.error && value?.status === 'completed' && value.result && !handled.current.has(value.jobId)) {
+      if (value.result.operation === 'heygen_video_submit' && (jobs.error || !value.result.renders.every(render => jobs.data?.items.some(job =>
+        job.jobId === render.jobId && job.campaignId === campaignId && job.jobType === 'heygen.video.generate'
+        && (job.sceneVariantId === null || job.sceneVariantId === render.sceneVariantId))))) {
+        if (!childRefreshRequested.current.has(value.jobId)) {childRefreshRequested.current.add(value.jobId); jobs.refresh();}
+        return;
+      }
       handled.current.add(value.jobId);
       if (value.result.operation === 'heygen_assets') setAssets({...value.result, wrapperId: value.jobId});
       if (value.result.operation === 'heygen_video_plan' && wrapper?.basis === current.current.material && current.current.fresh
@@ -66,10 +75,11 @@ function HeyGenForms({campaignId, detail, status, images, voices, jobs, renders}
       if (value.result.operation === 'heygen_video_submit') {setSubmitted(value.result); setPaid(false); setPlan(null); renders.refresh();}
       jobs.refresh();
     }
-  }, [operation.data, operation.error, wrapper, jobs.refresh, renders.refresh]);
+  }, [operation.data, operation.error, wrapper, jobs.data, jobs.error, campaignId, jobs.refresh, renders.refresh]);
   const child = assets?.jobId && jobs.data?.items.find(job => job.jobId === assets.jobId && job.campaignId === campaignId && job.jobType === 'heygen.asset.upload');
   const awaiting = !!wrapper && (!operation.data || ['queued', 'running', 'retry_scheduled'].includes(operation.data.status));
-  const actionBlocked = blocked || awaiting;
+  const submissionPending = operation.data?.result?.operation === 'heygen_video_submit' && !handled.current.has(operation.data.jobId);
+  const actionBlocked = blocked || awaiting || !!operation.error || submissionPending;
   async function command(kind: 'heygen_assets' | 'heygen_video_plan' | 'heygen_video_submit') {
     if (lock.current || actionBlocked || (kind !== 'heygen_assets' && !validCap)
       || (kind === 'heygen_video_submit' && (!planUsable || !paid || !actor.trim() || plan!.reservedCount + plan!.newCount > capNumber))) return;
@@ -113,6 +123,7 @@ function HeyGenForms({campaignId, detail, status, images, voices, jobs, renders}
       onClick={() => void command('heygen_video_submit')}>Enfileirar geração HeyGen</button>
     {submitted && <div><p>Reservas aceitas; não significa MP4 concluído. Inicie heygen_videos explicitamente para os Jobs de vídeo da campanha.</p>
       {submitted.renders.map(render => <p key={render.renderId}>Reserva: {render.renderId} · Job: {render.jobId}</p>)}</div>}
+    {submissionPending && <p>Jobs de vídeo ainda não comprovados por leitura atual; submissão preservada sem reenvio.</p>}
     <p role="status">{notice}</p>{requestId && <p>Intenção: {requestId}</p>}
     {wrapper && <p>Operação: {wrapper.jobId} · {operation.data?.status ?? 'Aguardando leitura'}</p>}
     {operation.error && <p role="alert">Leitura da operação indisponível; fatos anteriores preservados.</p>}
@@ -143,7 +154,7 @@ function HeyGenReconcileForm({campaignId, jobs, renders}: Pick<HeyGenPanelProps,
   const [busy, setBusy] = useState(false), [unknown, setUnknown] = useState(false), [notice, setNotice] = useState('');
   const [intentId, setIntentId] = useState('');
   const [wrapper, setWrapper] = useState<{jobId: string; expected: HeyGenRenderView} | null>(null);
-  const [accepted, setAccepted] = useState<{renderId: string; jobId: string} | null>(null);
+  const [accepted, setAccepted] = useState<{renderId: string; jobId: string; expected: HeyGenRenderView; rendersReadId: number; jobsReadId: number} | null>(null);
   const alive = useRef(true), lock = useRef(false), handled = useRef(new Set<string>());
   useEffect(() => {alive.current = true; return () => {alive.current = false;};}, []);
   useUnsavedChanges(!!selected || !!video || binding || busy || unknown);
@@ -165,12 +176,13 @@ function HeyGenReconcileForm({campaignId, jobs, renders}: Pick<HeyGenPanelProps,
   useEffect(() => {
     const value = operation.data;
     if (!operation.error && value?.status === 'completed' && value.result?.operation === 'heygen_reconcile' && !handled.current.has(value.jobId)) {
-      handled.current.add(value.jobId); setAccepted({renderId: value.result.render.renderId, jobId: value.result.render.jobId});
-      setNotice('Reconciliação recebida; consulte o render e o Job atual.'); renders.refresh(); jobs.refresh();
+      handled.current.add(value.jobId); setAccepted({renderId: value.result.render.renderId, jobId: value.result.render.jobId,
+        expected: value.result.render, rendersReadId: renders.refresh(), jobsReadId: jobs.refresh()});
+      setNotice('Reconciliação recebida; consulte o render e o Job atual.');
     }
   }, [operation.data, operation.error, renders.refresh, jobs.refresh]);
   const awaiting = !!wrapper && (!operation.data || ['queued', 'running', 'retry_scheduled'].includes(operation.data.status));
-  const blocked = !fresh || !render || busy || unknown || awaiting || (!!exactId && !render.remoteVideoId && !binding);
+  const blocked = !fresh || !render || busy || unknown || awaiting || !!operation.error || (!!exactId && !render.remoteVideoId && !binding);
   async function reconcile() {
     if (lock.current || blocked || !render) return;
     lock.current = true; setBusy(true); setNotice('');
@@ -187,8 +199,17 @@ function HeyGenReconcileForm({campaignId, jobs, renders}: Pick<HeyGenPanelProps,
       const failure = error instanceof ApiError ? error : new ApiError('command_unknown'); setUnknown(failure.code === 'command_unknown'); setNotice(failure.message);
     } finally {if (alive.current) {jobs.refresh(); setBusy(false); lock.current = false;}}
   }
-  const recovered = accepted && fresh && renders.data?.items.some(render => render.renderId === accepted.renderId && render.jobId === accepted.jobId)
-    && jobs.data?.items.some(job => job.jobId === accepted.jobId && job.campaignId === campaignId && job.jobType === 'heygen.video.generate');
+  const recovered = accepted && fresh && !operation.error
+    && (renders.lastSuccessReadId ?? 0) >= accepted.rendersReadId && (jobs.lastSuccessReadId ?? 0) >= accepted.jobsReadId
+    && renders.data?.items.some(render => render.renderId === accepted.renderId && render.jobId === accepted.jobId
+      && render.campaignId === campaignId && render.sceneVariantId === accepted.expected.sceneVariantId
+      && render.imageCandidateId === accepted.expected.imageCandidateId && render.voiceMasterId === accepted.expected.voiceMasterId
+      && render.imageSha256 === accepted.expected.imageSha256 && render.audioSha256 === accepted.expected.audioSha256
+      && (!accepted.expected.remoteVideoId || render.remoteVideoId === accepted.expected.remoteVideoId)
+      && ['planned', 'submitting', 'processing', 'download_pending', 'ready'].includes(render.status))
+    && jobs.data?.items.some(job => job.jobId === accepted.jobId && job.campaignId === campaignId && job.jobType === 'heygen.video.generate'
+      && (job.sceneVariantId === null || job.sceneVariantId === accepted.expected.sceneVariantId)
+      && ['queued', 'running', 'retry_scheduled', 'completed'].includes(job.status));
   return <div><h4>Reconciliação</h4><p>Selecione explicitamente um render cujo Job esteja blocked. Não há resume ou start automático.</p>
     <label>Render para reconciliação <select value={selected} disabled={busy || unknown || awaiting} onChange={event => {setSelected(event.target.value); setVideo(''); setBinding(false);}}>
       <option value="">Selecione um render</option>{candidates.map(render => <option key={render.renderId} value={render.renderId}>{render.renderId}</option>)}
