@@ -1,7 +1,7 @@
 # D4B.3a — Profiles de edição pela UI local
 
-Status: recorte autorizado em 2026-10-07; especificação aguardando revisão
-do usuário. Sem implementação autorizada por este documento.
+Status: especificação aprovada pelo usuário em 2026-10-07.
+Implementação aguarda revisão do plano e confirmação do método de execução.
 
 ## Resultado pretendido
 
