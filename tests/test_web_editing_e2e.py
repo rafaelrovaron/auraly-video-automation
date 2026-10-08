@@ -65,14 +65,42 @@ def upstream(servers: PanelServers) -> tuple[list[tuple[Path, str]], list[tuple[
     return files, rows
 
 
+def preview_headline(servers: PanelServers, panel: Locator) -> None:
+    font = servers.settings.project_root / 'preview-font.ttf'
+    tags = [b'cmap', b'head', b'hhea', b'hmtx', b'maxp', b'name']
+    font.write_bytes(struct.pack('>IHHHH', 0x10000, len(tags), 0, 0, 0)
+                    + b''.join(struct.pack('>4sIII', tag, 0, 108 + index, 1)
+                               for index, tag in enumerate(tags)) + b'\0' * len(tags))
+    group = panel.get_by_role('group', name='Vídeo · Overrides', exact=True)
+    group.get_by_text('Vídeo · Opções avançadas', exact=True).click()
+    group.get_by_text('Headline', exact=True).click()
+    group.get_by_label('Vídeo · Headline · enabled · Modo', exact=True).select_option('replace')
+    group.get_by_label('Vídeo · Headline · enabled', exact=True).check()
+    group.get_by_label('Vídeo · Headline · font · Modo', exact=True).select_option('replace')
+    group.get_by_label('Vídeo · Headline · font · Caminho', exact=True).fill('preview-font.ttf')
+    group.get_by_label('Vídeo · Headline · font · SHA-256', exact=True).fill(file_sha(font))
+
+
 def test_three_headlines_validate_save_reload(panel_servers: PanelServers, panel_page: Page) -> None:
     before = upstream(panel_servers)
     panel = draft(panel_servers, panel_page)
+    requests: list[tuple[str, str]] = []
+    panel_page.on('request', lambda request: requests.append((request.method, request.url)))
+    preview_headline(panel_servers, panel)
+    preview = panel.get_by_role('region', name='Preview da edição', exact=True)
+    image = preview.get_by_alt_text('Frame do MP4 selecionado')
+    expect(image).to_be_visible()
+    expect(image).to_have_js_property('naturalWidth', 405)
+    expect(image).to_have_js_property('naturalHeight', 720)
     for key in ['a', 'b', 'c']:
         if key != 'a':
             panel.get_by_role('button', name='Adicionar variante', exact=True).click()
         panel.get_by_label(f'Variante {key} · Headline · Texto · Modo', exact=True).select_option('replace')
         panel.get_by_label(f'Variante {key} · Headline · Texto', exact=True).fill(key.upper())
+        panel.get_by_label('Variante no preview', exact=True).select_option(label=f'{key} · {key.upper()}')
+        expect(preview.get_by_label('Headline no preview')).to_have_text(key.upper())
+    assert not [method for method, _ in requests if method == 'POST']
+    assert len([url for _, url in requests if '/poster/' in url]) <= 1
     validate(panel_page, panel)
     assert not list(panel_servers.settings.work_root.rglob('plan.json'))
     assert not list(panel_servers.settings.work_root.rglob('manifest.json'))
@@ -86,6 +114,43 @@ def test_three_headlines_validate_save_reload(panel_servers: PanelServers, panel
     expect(panel.get_by_text('Saída planejada: ' + plan['outputs'][0]['filename'] + '. Nenhum MP4 final foi renderizado.', exact=True)).to_be_visible()
     assert upstream(panel_servers) == before
     assert panel_servers.provider.events == []
+
+
+def test_preview_frame_failure_and_readonly_keep_draft(panel_servers: PanelServers, panel_page: Page) -> None:
+    panel_page.route('**/poster/**', lambda route: route.fulfill(status=503, content_type='application/json', body='{}'))
+    panel = draft(panel_servers, panel_page)
+    preview = panel.get_by_role('region', name='Preview da edição', exact=True)
+    expect(preview.get_by_text(re.compile('^Frame indisponível'))).to_be_visible()
+    validate(panel_page, panel)
+    save(panel_page, panel)
+    plan = json.loads(next(panel_servers.settings.work_root.rglob('plan.json')).read_text(encoding='utf-8'))
+    panel.get_by_label('Headline base', exact=True).fill('Rascunho preservado')
+    panel.get_by_label('Consultar plano salvo', exact=True).select_option(f"{plan['videoId']}/{plan['planHash']}")
+    expect(panel.get_by_label('Origem do preview', exact=True).locator('option[value="stored"]')).to_have_count(1)
+    panel.get_by_label('Origem do preview', exact=True).select_option('stored')
+    expect(preview.get_by_text('Plano salvo · consulta readonly', exact=True)).to_be_visible()
+    expect(panel.get_by_label('Headline base', exact=True)).to_have_value('Rascunho preservado')
+    panel.get_by_label('Origem do preview', exact=True).select_option('draft')
+    expect(panel.get_by_role('button', name='Salvar plano', exact=True)).to_be_disabled()
+    assert panel_servers.provider.events == []
+
+
+@pytest.mark.parametrize('width', [320, 390])
+def test_preview_narrow_width_and_long_text(panel_servers: PanelServers, panel_page: Page, width: int) -> None:
+    panel_page.set_viewport_size({'width': width, 'height': 900})
+    panel = draft(panel_servers, panel_page)
+    preview_headline(panel_servers, panel)
+    panel.get_by_label('Headline base', exact=True).fill('Long headline for testing wrapping and overflow ' * 30)
+    preview = panel.get_by_role('region', name='Preview da edição', exact=True)
+    expect(preview.get_by_text(re.compile('overflow aproximado'))).to_be_visible()
+    expect(preview.get_by_alt_text('Frame do MP4 selecionado')).to_be_visible()
+    assert panel_page.evaluate('document.documentElement.scrollWidth <= innerWidth')
+    preview.get_by_role('button', name='Recarregar frame').focus()
+    panel_page.keyboard.press('Enter')
+    expect(preview.get_by_alt_text('Frame do MP4 selecionado')).to_be_visible()
+    screenshot = Path(__file__).resolve().parents[1] / '.superpowers' / 'sdd' / '2026-10-08-d4b3c-approximate-preview' / f'preview-{width}.png'
+    screenshot.parent.mkdir(parents=True, exist_ok=True)
+    preview.screenshot(path=str(screenshot))
 
 
 def test_caption_timing_missing_is_pending(panel_servers: PanelServers, panel_page: Page) -> None:

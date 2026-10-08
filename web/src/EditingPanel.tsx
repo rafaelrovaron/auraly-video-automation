@@ -10,6 +10,7 @@ import type {OverrideDraft,OverrideHints} from './EditOverridesForm';
 import {editAsset,editBatchRequest,editIdentifier,getEditOperation,getEditPlan,listEditPlans,planMatchesRequest,samePlan,submitEditPlan} from './editingApi';
 import type {EditBatchPlan,EditBatchRequest,EditOverrides,PlanSummary} from './editingApi';
 import {useUnsavedChanges} from './useUnsavedChanges';
+import {EditPreview,previewSettings} from './EditPreview';
 
 type Props={campaignId:string;renders:RemoteState<Items<HeyGenRenderView>>};
 type Variant={row:number;key:string;label:string;draft:OverrideDraft};
@@ -37,6 +38,7 @@ function EditorialFlow({campaignId,renders}:Props){
   const [dirty,setDirty]=useState(false),[validated,setValidated]=useState<Validated|null>(null),[submission,setSubmission]=useState<Submission|null>(null);
   const [unknown,setUnknown]=useState(false),[notice,setNotice]=useState<string|null>(null),[error,setError]=useState<string|null>(null),[saved,setSaved]=useState<EditBatchPlan|null>(null);
   const [view,setView]=useState<EditBatchPlan|null>(null),[viewLoading,setViewLoading]=useState(false);
+  const [previewOrigin,setPreviewOrigin]=useState('draft'),[previewRow,setPreviewRow]=useState(1),[previewKey,setPreviewKey]=useState('a');
   const alive=useRef(true),generation=useRef(0),listGeneration=useRef(0),profileGeneration=useRef(0),viewGeneration=useRef(0),nextRow=useRef(2);
   const lock=useRef(false),sent=useRef<Submission|null>(null),timer=useRef<ReturnType<typeof setTimeout>|undefined>(undefined),queryController=useRef<AbortController|null>(null);
   const form=useRef<HTMLFormElement>(null),errorId=useId();const clearUnsaved=useUnsavedChanges(dirty);
@@ -52,7 +54,7 @@ function EditorialFlow({campaignId,renders}:Props){
   };
   useEffect(()=>{alive.current=true;void refresh();return()=>{alive.current=false;generation.current++;clearTimeout(timer.current);queryController.current?.abort();};},[]);
   const clearErrors=()=>{setError(null);form.current?.querySelectorAll('[aria-invalid]').forEach(el=>{el.removeAttribute('aria-invalid');el.removeAttribute('aria-describedby');});};
-  const change=()=>{setDirty(true);setValidated(null);setSaved(null);setNotice(null);clearErrors();};
+  const change=()=>{setDirty(true);setValidated(null);setSaved(null);setNotice(null);setPreviewOrigin('draft');clearErrors();};
   const discard=()=>!dirty||window.confirm('Há um rascunho não salvo. Descartar alterações?');
   const resetDraft=()=>{setHeadline('');setMaxOutputs('3');setCampaign(newOverrideDraft());setVideo(newOverrideDraft());setVariants([initialVariant()]);nextRow.current=2;
     setMusicAccepted(false);setTimingPath('');setTimingHash('');setValidated(null);setSaved(null);setDirty(false);clearUnsaved();clearErrors();setNotice(null);};
@@ -150,6 +152,13 @@ function EditorialFlow({campaignId,renders}:Props){
   const cHints=hints?inherited(hints,campaign):null,vHints=cHints?inherited(cHints,video):null;
   const overrideChange=(update:()=>void,field:string)=>{change();update();if(field==='music.asset')setMusicAccepted(false);};
   const canSave=!!validated&&!busy&&!renders.error&&!!selectedRender&&planMatchesRequest(validated.plan,validated.request,selectedRender);
+  const previewPlan=previewOrigin==='stored'?view:previewOrigin==='saved'?saved:previewOrigin==='validated'?validated?.plan:null;
+  const previewVariant=variants.find(v=>v.row===previewRow)??variants[0];
+  const previewOutput=previewPlan?.outputs.find(o=>o.key===previewKey)??previewPlan?.outputs[0];
+  const visual=previewPlan&&previewOutput?previewOutput.manifest:hints?previewSettings(hints,campaign,video,previewVariant.draft):null;
+  const previewSource=previewPlan?{campaignId:previewPlan.campaignId,renderId:previewPlan.renderId,sha256:previewPlan.source.sha256}:
+    selectedRender?.source?{campaignId,renderId:selectedRender.renderId,sha256:selectedRender.source.sha256}:null;
+  const sample=previewPlan?(previewPlan.captionInput.cues[0]?.text??previewPlan.captionInput.text.split(/\s+/).slice(0,12).join(' ')):'Texto demonstrativo de legenda';
   return <div>
     <button type="button" onClick={()=>{void refresh();}}>Atualizar edição</button> · <a href="#/profiles">Gerenciar profiles de edição</a>
     <p>Um MP4 por plano. Não gera voz, imagem ou HeyGen. Validação e publicação usam Jobs locais, sem render final.</p>
@@ -188,6 +197,13 @@ function EditorialFlow({campaignId,renders}:Props){
       <button disabled={busy||profileLoading||!!renders.error} type="submit">Validar plano</button>
       <button disabled={!canSave} type="button" onClick={()=>{void submit(true);}}>Salvar plano</button>
     </form>
+    <label>Origem do preview<select aria-label="Origem do preview" value={previewPlan?previewOrigin:'draft'} onChange={e=>setPreviewOrigin(e.target.value)}>
+      <option value="draft">Rascunho atual</option>{validated&&<option value="validated">Plano validado</option>}{saved&&<option value="saved">Plano salvo</option>}{view&&<option value="stored">Plano consultado · readonly</option>}
+    </select></label>
+    <label>Variante no preview<select aria-label="Variante no preview" value={previewPlan?previewOutput?.key:String(previewVariant.row)} onChange={e=>previewPlan?setPreviewKey(e.target.value):setPreviewRow(Number(e.target.value))}>
+      {previewPlan?previewPlan.outputs.map(o=><option key={o.key} value={o.key}>{o.key} · {o.label}</option>):variants.map(v=><option key={v.row} value={String(v.row)}>{v.key} · {v.label}</option>)}
+    </select></label>
+    <EditPreview source={previewSource} settings={visual} captionText={sample} mode={previewPlan?(previewOrigin==='validated'?'validated':'saved'):'draft'} timingMissing={!!previewPlan&&previewOutput?.captionState==='timing_missing'}/>
     {error&&<p role="alert" id={errorId}>{error}</p>}{notice&&<p role="status">{notice}</p>}
     {submission?.jobId&&<><p>Job editorial: {submission.jobId}</p><button onClick={()=>{void inspectSent();}}>Consultar operação editorial</button></>}
     {busy&&unknown&&<>{submission?.persist&&!submission.jobId&&<button onClick={()=>{void inspectSent();}}>Consultar plano enviado</button>}

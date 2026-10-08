@@ -42,6 +42,37 @@ async function draft(){
 }
 const validate=()=>fireEvent.click(screen.getByRole('button',{name:'Validar plano'}));
 const save=()=>screen.getByRole('button',{name:'Salvar plano'});
+it('preview_selection_does_not_mutate_editorial_request',async()=>{
+  const s=server();render(<EditingPanel campaignId="campaign-one" renders={renders}/>);await draft();
+  fireEvent.change(screen.getByLabelText('Variante a · Headline · enabled · Modo'),{target:{value:'replace'}});
+  fireEvent.click(screen.getByLabelText('Variante a · Headline · enabled'));
+  fireEvent.click(screen.getByRole('button',{name:'Adicionar variante'}));
+  fireEvent.change(screen.getByLabelText('Variante b · Headline · enabled · Modo'),{target:{value:'replace'}});
+  fireEvent.click(screen.getByLabelText('Variante b · Headline · enabled'));
+  fireEvent.change(screen.getByLabelText('Variante b · Headline · Texto · Modo'),{target:{value:'replace'}});
+  fireEvent.change(screen.getByLabelText('Variante b · Headline · Texto'),{target:{value:'B'}});
+  const preview=within(screen.getByRole('region',{name:'Preview da edição'}));
+  expect(preview.getByText('Base')).toBeTruthy();
+  fireEvent.change(screen.getByLabelText('Variante no preview'),{target:{value:'2'}});
+  expect(preview.getByText('B')).toBeTruthy();expect(s.posts).toEqual([]);
+  fireEvent.change(screen.getByLabelText('Key da variante b'),{target:{value:'renamed'}});
+  expect(preview.getByText('B')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button',{name:'Remover variante renamed'}));
+  expect(preview.getByText('Base')).toBeTruthy();expect(s.posts).toEqual([]);
+});
+it('readonly_preview_uses_exact_plan_without_overwriting_draft',async()=>{
+  const s=server();render(<EditingPanel campaignId="campaign-one" renders={renders}/>);await draft();
+  validate();await screen.findByText('Plano validado. Nenhum arquivo de edição publicado.');
+  fireEvent.click(save());await screen.findByText('Plano salvo e confirmado. Não é um vídeo renderizado.');
+  fireEvent.change(screen.getByLabelText('Headline base'),{target:{value:'New draft'}});
+  fireEvent.change(screen.getByLabelText('Consultar plano salvo'),{target:{value:`${s.saved[0].videoId}/${s.saved[0].planHash}`}});
+  await waitFor(()=>expect(screen.getByLabelText('Origem do preview').querySelector('option[value="stored"]')).not.toBeNull());
+  fireEvent.change(screen.getByLabelText('Origem do preview'),{target:{value:'stored'}});
+  expect(within(screen.getByRole('region',{name:'Preview da edição'})).getByText('Plano salvo · consulta readonly')).toBeTruthy();
+  expect((screen.getByLabelText('Headline base') as HTMLInputElement).value).toBe('New draft');
+  fireEvent.change(screen.getByLabelText('Origem do preview'),{target:{value:'draft'}});
+  expect(save().hasAttribute('disabled')).toBe(true);expect(s.posts).toHaveLength(2);
+});
 it('one_mp4_three_headlines',async()=>{
   const s=server();render(<EditingPanel campaignId="campaign-one" renders={renders}/>);await draft();
   for(const key of ['a','b','c']){
