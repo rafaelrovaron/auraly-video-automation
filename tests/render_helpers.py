@@ -13,7 +13,7 @@ from tests.editing_batch_helpers import batch_data, batch_inputs
 from tests.editing_helpers import file_sha, profile_data
 
 
-def make_render_plan(project_root: Path) -> EditBatchPlan:
+def make_render_plan(project_root: Path, *, pattern: bool = False) -> EditBatchPlan:
     project_root.mkdir(parents=True, exist_ok=True)
     font = project_root / "font.ttf"
     choices = (Path("C:/Windows/Fonts/arial.ttf"),
@@ -25,7 +25,10 @@ def make_render_plan(project_root: Path) -> EditBatchPlan:
     source = project_root / "source.mp4"
     subprocess.run([
         "ffmpeg", "-nostdin", "-v", "error", "-f", "lavfi", "-i",
-        "color=c=black:s=320x180:r=30:d=2", "-f", "lavfi", "-i",
+        ("color=c=black:s=320x180:r=30:d=2" + (
+            ",drawbox=x=0:y=0:w=160:h=90:c=red:t=fill,drawbox=x=160:y=0:w=160:h=90:c=green:t=fill,"
+            "drawbox=x=0:y=90:w=160:h=90:c=blue:t=fill,drawbox=x=160:y=90:w=160:h=90:c=white:t=fill"
+            if pattern else "")), "-f", "lavfi", "-i",
         "sine=frequency=440:sample_rate=48000:duration=2", "-c:v", "libx264",
         "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", str(source),
     ], capture_output=True, check=True, timeout=30)
