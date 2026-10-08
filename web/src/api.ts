@@ -19,15 +19,19 @@ export type RenderSummary = { renderId: string; sceneVariantId: string; imageCan
 export type JobSummary = { jobId: string; jobType: string; campaignId: string | null; sceneVariantId: string | null; status: string; attemptCount: number; maxAttempts: number;
   retrySafety: string; queuedAt: string; startedAt: string | null; completedAt: string | null; nextRetryAt: string | null; lastErrorCode: string | null };
 export type OperationView = { jobId: string; campaignId: string; operation: string; status: string; result: Record<string, unknown> | null; errorCode: string | null };
-export type WorkerKind = 'local_operations' | 'voice_generate' | 'voice_import' | 'heygen_assets' | 'heygen_videos';
+export type WorkerKind = 'local_operations' | 'voice_generate' | 'voice_import' | 'heygen_assets' | 'heygen_videos' | 'editing_render';
 export type WorkerState = { state: 'idle' | 'running' | 'stopping'; campaignId: string | null; kind: WorkerKind | null; errorCode: string | null };
 export type WorkerObservation = { scope: 'known'; value: WorkerState } | { scope: 'unassociated' };
 
+export function workerState(body: unknown): body is WorkerState {
+  return hasFields(body, [], [], ['campaignId', 'kind', 'errorCode'])
+    && ['idle', 'running', 'stopping'].includes(String(body.state))
+    && (body.kind === null || ['local_operations', 'voice_generate', 'voice_import', 'heygen_assets', 'heygen_videos', 'editing_render'].includes(String(body.kind)));
+}
+
 export async function readWorker(id: string, signal: AbortSignal): Promise<WorkerObservation> {
   try {
-    const value = await read<WorkerState>(campaignPath(id, '/worker'), signal, body => hasFields(body, [], [], ['campaignId', 'kind', 'errorCode'])
-      && ['idle', 'running', 'stopping'].includes(String(body.state))
-      && (body.campaignId === null || typeof body.campaignId === 'string'));
+    const value = await read<WorkerState>(campaignPath(id, '/worker'), signal, workerState);
     return { scope: 'known', value };
   } catch (error) {
     if (error instanceof ApiError && error.status === 404 && error.code === 'not_found') return { scope: 'unassociated' };
