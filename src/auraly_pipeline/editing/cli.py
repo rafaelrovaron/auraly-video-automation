@@ -18,6 +18,8 @@ from auraly_pipeline.editing.batch_service import EditBatchService
 from auraly_pipeline.editing.domain import EditManifestV2, EditProfile, EditResolveRequest, EditingError, validation_field
 from auraly_pipeline.editing.resolver import verify_manifest_hash
 from auraly_pipeline.editing.service import EditingService
+from auraly_pipeline.editing.render_domain import RenderBatchResult, RenderError, RenderOutputResult, RenderReceipt, RenderRuntime
+from auraly_pipeline.editing.render_service import RenderService
 
 
 ProjectRoot = Annotated[Path | None, typer.Option("--project-root")]
@@ -37,7 +39,8 @@ def _errors() -> Iterator[None]:
     except ValidationError as exc:
         field = validation_field(exc, extra_models=(CaptionInput, CaptionTimingCue,
             CaptionTimingInput, CopyRef, EditBatchPlan, EditBatchRequest,
-            EditPlannedOutput, EditVariant, ResolvedCaptionCue))
+            EditPlannedOutput, EditVariant, ResolvedCaptionCue, RenderBatchResult,
+            RenderError, RenderOutputResult, RenderReceipt, RenderRuntime))
         typer.echo(f"{field}: invalid field", err=True)
         raise typer.Exit(1) from None
     except (OSError, ValueError):
@@ -58,8 +61,23 @@ def _load(path: Path) -> object:
 
 
 def register_editing_commands(app: typer.Typer) -> None:
-    edit = typer.Typer(help="Resolve local editing profiles and manifests (no render).", no_args_is_help=True)
+    edit = typer.Typer(help="Resolve editing plans and render local vertical masters.", no_args_is_help=True)
     app.add_typer(edit, name="edit")
+
+    @edit.command("render")
+    def render(campaign_id: Annotated[str, typer.Option("--campaign-id")],
+               video_id: Annotated[str, typer.Option("--video-id")],
+               plan_hash: Annotated[str, typer.Option("--plan-hash")],
+               project_root: ProjectRoot = None, work_root: WorkRoot = None,
+               dry_run: Annotated[bool, typer.Option("--dry-run")] = False) -> None:
+        """Render a saved plan locally; dry-run checks inputs without measuring fit."""
+        with _errors():
+            roots = _service(project_root, work_root)
+            result = RenderService(project_root=roots.project_root, work_root=roots.work_root).render(
+                campaign_id, video_id, plan_hash, dry_run=dry_run)
+            typer.echo(result.model_dump_json(by_alias=True))
+            if result.has_failures:
+                raise typer.Exit(1)
 
     @edit.command("plan")
     def plan(request: RequestFile, database: Annotated[Path, typer.Option("--database")],
