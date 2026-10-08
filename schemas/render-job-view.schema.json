@@ -1,0 +1,242 @@
+{
+  "$defs": {
+    "JobStatus": {
+      "enum": [
+        "queued",
+        "running",
+        "completed",
+        "failed",
+        "blocked",
+        "retry_scheduled",
+        "cancelled"
+      ],
+      "title": "JobStatus",
+      "type": "string"
+    },
+    "RenderBatchResult": {
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Schemaversion",
+          "type": "string"
+        },
+        "planHash": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Planhash",
+          "type": "string"
+        },
+        "dryRun": {
+          "title": "Dryrun",
+          "type": "boolean"
+        },
+        "outputs": {
+          "items": {
+            "$ref": "#/$defs/RenderOutputResult"
+          },
+          "title": "Outputs",
+          "type": "array"
+        },
+        "hasFailures": {
+          "readOnly": true,
+          "title": "Hasfailures",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "planHash",
+        "dryRun",
+        "outputs",
+        "hasFailures"
+      ],
+      "title": "RenderBatchResult",
+      "type": "object"
+    },
+    "RenderError": {
+      "additionalProperties": false,
+      "properties": {
+        "field": {
+          "title": "Field",
+          "type": "string"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        }
+      },
+      "required": [
+        "field",
+        "message"
+      ],
+      "title": "RenderError",
+      "type": "object"
+    },
+    "RenderOutputResult": {
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+          "title": "Key",
+          "type": "string"
+        },
+        "outputVariantId": {
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+          "title": "Outputvariantid",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "rendered",
+            "reused",
+            "failed",
+            "planned"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "renderKey": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Renderkey",
+          "type": "string"
+        },
+        "fitMeasured": {
+          "default": false,
+          "title": "Fitmeasured",
+          "type": "boolean"
+        },
+        "path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Path"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RenderError"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "key",
+        "outputVariantId",
+        "status",
+        "renderKey"
+      ],
+      "title": "RenderOutputResult",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Schemaversion",
+      "type": "string"
+    },
+    "campaignId": {
+      "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+      "title": "Campaignid",
+      "type": "string"
+    },
+    "videoId": {
+      "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+      "title": "Videoid",
+      "type": "string"
+    },
+    "planHash": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Planhash",
+      "type": "string"
+    },
+    "executionId": {
+      "format": "uuid",
+      "title": "Executionid",
+      "type": "string"
+    },
+    "jobId": {
+      "maxLength": 120,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9_-]+$",
+      "title": "Jobid",
+      "type": "string"
+    },
+    "status": {
+      "$ref": "#/$defs/JobStatus"
+    },
+    "result": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/RenderBatchResult"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "renderStatus": {
+      "anyOf": [
+        {
+          "enum": [
+            "succeeded",
+            "partial_failure",
+            "failed"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Renderstatus"
+    },
+    "errorCode": {
+      "anyOf": [
+        {
+          "enum": [
+            "invalid_request",
+            "not_found",
+            "artifact_invalid",
+            "storage_unavailable",
+            "internal_error",
+            "method_not_allowed",
+            "operation_conflict",
+            "operation_not_allowed"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Errorcode"
+    }
+  },
+  "required": [
+    "campaignId",
+    "videoId",
+    "planHash",
+    "executionId",
+    "jobId",
+    "status"
+  ],
+  "title": "RenderJobView",
+  "type": "object",
+  "$id": "https://auraly.local/schemas/render-job-view.schema.json"
+}

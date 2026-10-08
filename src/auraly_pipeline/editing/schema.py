@@ -35,6 +35,24 @@ def export_render_schemas(output_dir: Path) -> tuple[Path, ...]:
     return tuple(paths)
 
 
+def export_render_job_schemas(output_dir: Path) -> tuple[Path, ...]:
+    from auraly_pipeline.api.render_contracts import RenderJobSubmission, RenderJobView
+    from auraly_pipeline.editing.render_job_domain import RenderJobRequest
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    paths = []
+    for model, name, mode in ((RenderJobRequest, "request", "validation"),
+                              (RenderJobSubmission, "submission", "serialization"),
+                              (RenderJobView, "view", "serialization")):
+        path = output_dir / f"render-job-{name}.schema.json"
+        schema = model.model_json_schema(by_alias=True, mode=mode)  # type: ignore[arg-type]
+        schema["$id"] = f"https://auraly.local/schemas/{path.name}"
+        path.write_text(json.dumps(schema, indent=2) + "\n", encoding="utf-8")
+        paths.append(path)
+    return tuple(paths)
+
+
 if __name__ == "__main__":
     export_editing_schemas(Path("schemas"))
     export_render_schemas(Path("schemas"))
+    export_render_job_schemas(Path("schemas"))

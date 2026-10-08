@@ -1,0 +1,48 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Schemaversion",
+      "type": "string"
+    },
+    "campaignId": {
+      "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+      "title": "Campaignid",
+      "type": "string"
+    },
+    "videoId": {
+      "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+      "title": "Videoid",
+      "type": "string"
+    },
+    "planHash": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Planhash",
+      "type": "string"
+    },
+    "executionId": {
+      "format": "uuid",
+      "title": "Executionid",
+      "type": "string"
+    },
+    "jobId": {
+      "maxLength": 120,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9_-]+$",
+      "title": "Jobid",
+      "type": "string"
+    }
+  },
+  "required": [
+    "campaignId",
+    "videoId",
+    "planHash",
+    "executionId",
+    "jobId"
+  ],
+  "title": "RenderJobSubmission",
+  "type": "object",
+  "$id": "https://auraly.local/schemas/render-job-submission.schema.json"
+}
