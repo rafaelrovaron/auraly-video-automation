@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 import asyncio
+import re
 from typing import Annotated, Any, cast
 
 from fastapi import Depends, FastAPI, Path, Request
@@ -108,7 +109,14 @@ def create_app(settings: ApiSettings) -> FastAPI:
     @app.middleware("http")
     async def query_boundary(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
         if request.query_params:
-            return error_response("invalid_request")
+            allowed: set[str] = set()
+            if request.method == "GET":
+                if re.fullmatch(r"/api/v1/campaigns/[^/]+/editing/renders", request.url.path):
+                    allowed = {"videoId", "planHash"}
+                elif re.fullmatch(r"/api/v1/campaigns/[^/]+/editing/renders/[^/]+/outputs/[^/]+/media", request.url.path):
+                    allowed = {"download"}
+            if any(key not in allowed or len(request.query_params.getlist(key)) != 1 for key in request.query_params):
+                return error_response("invalid_request")
         if request.method == "POST":
             origins = request.headers.getlist("origin")
             expected_origin = f"{request.url.scheme}://{request.url.netloc}"
@@ -193,4 +201,6 @@ def create_app(settings: ApiSettings) -> FastAPI:
 
     from auraly_pipeline.api.action_routes import register_action_routes
     register_action_routes(app)
+    from auraly_pipeline.api.render_routes import register_render_routes
+    register_render_routes(app)
     return app
