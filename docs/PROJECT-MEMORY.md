@@ -8,8 +8,13 @@ do produto planejado para impedir que roadmap seja confundido com capacidade exi
 
 ## Entrega atual: D5A.1 — Renderer local (2026-10-08)
 
-Implementado na branch `feat/d5a1-renderer`, código `7f82932`; gate final e
-revisão independente em andamento, sem merge/push ou Actions desta branch.
+`IMPLEMENTED`, `LOCAL_VERIFIED` (Windows) na branch `feat/d5a1-renderer`,
+código corrigido `f08fbdd`; gate final sobre `7f0b7e6`: 19/19, 350 frontend,
+1.877 Python / 27 skips (pytest 721,38 s). Ruff/mypy/build/schemas aprovados;
+cinco moderate transitivos preexistentes permanecem no audit abaixo do limiar high.
+Revisão independente: zero Critical, três Important corrigidos com RED→GREEN
+em um passe, zero Minor; suite focada 54 passed / 1 skip. Sem merge/push ou
+Actions desta branch. Linux local indisponível (WSL não instalado); CI pendente.
 Evidência: `docs/superpowers/2026-10-08-d5a1-verification.md`.
 
 CLI `edit render` consome o EditBatchPlan salvo e processa variantes em ordem.

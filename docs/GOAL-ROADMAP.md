@@ -68,7 +68,7 @@ D4B.2b.2 HeyGen Forms                        IMPLEMENTED, LOCAL_VERIFIED
 D4B.3a Profiles UI                           IMPLEMENTED, LOCAL_VERIFIED
 D4B.3b Overrides & Headline Variants UI       IMPLEMENTED, LOCAL_VERIFIED
 D4B.3c Approximate Preview                   IMPLEMENTED, LOCAL_VERIFIED
-D5A.1 Local Renderer                         IMPLEMENTED (gate final pendente)
+D5A.1 Local Renderer                         IMPLEMENTED, LOCAL_VERIFIED (Windows)
 D5A.2 Render Jobs/API/UI                      PLANNED
 D5B Render QC, Review & Delivery
 D6  End-to-End Personal Pilot
@@ -529,7 +529,9 @@ Permitir que Rafael gerencie a pipeline sem editar JSON ou usar múltiplos coman
 
 ## D5A — Deterministic Renderer
 
-**Status:** D5A.1 implementado, gate final pendente; D5A.2 `PLANNED`.
+**Status:** D5A.1 `IMPLEMENTED`, `LOCAL_VERIFIED` (Windows), gate final 19/19,
+350 frontend e 1.877 Python / 27 skips. Revisão e correções concluídas;
+merge/push e Actions Linux/Windows pendentes. D5A.2 `PLANNED`.
 
 ### D5A.1 — Renderer local / CLI
 

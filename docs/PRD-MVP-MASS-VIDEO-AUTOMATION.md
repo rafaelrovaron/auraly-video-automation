@@ -19,8 +19,10 @@ genérico e não terá timeline estilo CapCut ou preview frame-perfect.
 
 ### 2.1 Capacidade entregue
 
-Checkpoint D5A.1 (2026-10-08): renderer local implementado na branch
-`feat/d5a1-renderer`; gate final/revisão/integração pendentes. CLI `edit render`
+Checkpoint D5A.1 (2026-10-08): renderer local `IMPLEMENTED`, `LOCAL_VERIFIED`
+(Windows) na branch `feat/d5a1-renderer`: gate final 19/19, 350 frontend,
+1.877 Python / 27 skips. Três Important da revisão corrigidos com RED→GREEN;
+merge/push e Actions Linux/Windows pendentes. CLI `edit render`
 consome plano salvo sem nova geração upstream. Masters fixos 1080×1920/30 FPS
 H.264/AAC/yuv420p/faststart, headline/captions com fonte local exata e fit real,
 música e framing. Captions exigem timing aceito em source_mp4, pesos 400/700,
