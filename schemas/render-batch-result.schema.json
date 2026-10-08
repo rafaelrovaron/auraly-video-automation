@@ -1,0 +1,122 @@
+{
+  "$defs": {
+    "RenderError": {
+      "additionalProperties": false,
+      "properties": {
+        "field": {
+          "title": "Field",
+          "type": "string"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        }
+      },
+      "required": [
+        "field",
+        "message"
+      ],
+      "title": "RenderError",
+      "type": "object"
+    },
+    "RenderOutputResult": {
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+          "title": "Key",
+          "type": "string"
+        },
+        "outputVariantId": {
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+          "title": "Outputvariantid",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "rendered",
+            "reused",
+            "failed",
+            "planned"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "renderKey": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Renderkey",
+          "type": "string"
+        },
+        "fitMeasured": {
+          "default": false,
+          "title": "Fitmeasured",
+          "type": "boolean"
+        },
+        "path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Path"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RenderError"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "key",
+        "outputVariantId",
+        "status",
+        "renderKey"
+      ],
+      "title": "RenderOutputResult",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Schemaversion",
+      "type": "string"
+    },
+    "planHash": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Planhash",
+      "type": "string"
+    },
+    "dryRun": {
+      "title": "Dryrun",
+      "type": "boolean"
+    },
+    "outputs": {
+      "items": {
+        "$ref": "#/$defs/RenderOutputResult"
+      },
+      "title": "Outputs",
+      "type": "array"
+    }
+  },
+  "required": [
+    "planHash",
+    "dryRun",
+    "outputs"
+  ],
+  "title": "RenderBatchResult",
+  "type": "object",
+  "$id": "https://auraly.local/schemas/render-batch-result.schema.json"
+}

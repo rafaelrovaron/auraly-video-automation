@@ -5,6 +5,7 @@ from pathlib import Path
 
 from auraly_pipeline.editing.domain import EditManifestV2, EditProfile, EditResolveRequest, EditingModel
 from auraly_pipeline.editing.batch_domain import EditBatchRequest, CaptionTimingInput, EditBatchPlan
+from auraly_pipeline.editing.render_domain import RenderReceipt, RenderBatchResult
 
 
 def export_editing_schemas(output_dir: Path) -> tuple[Path, ...]:
@@ -21,5 +22,19 @@ def export_editing_schemas(output_dir: Path) -> tuple[Path, ...]:
     return paths
 
 
+def export_render_schemas(output_dir: Path) -> tuple[Path, ...]:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    paths = []
+    for model, name in ((RenderReceipt, "render-receipt.schema.json"),
+                        (RenderBatchResult, "render-batch-result.schema.json")):
+        path = output_dir / name
+        schema = model.model_json_schema(by_alias=True, mode="validation")
+        schema["$id"] = f"https://auraly.local/schemas/{name}"
+        path.write_text(json.dumps(schema, indent=2) + "\n", encoding="utf-8")
+        paths.append(path)
+    return tuple(paths)
+
+
 if __name__ == "__main__":
     export_editing_schemas(Path("schemas"))
+    export_render_schemas(Path("schemas"))

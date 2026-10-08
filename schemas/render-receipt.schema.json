@@ -1,0 +1,279 @@
+{
+  "$defs": {
+    "AudioProbe": {
+      "additionalProperties": false,
+      "properties": {
+        "codec": {
+          "title": "Codec",
+          "type": "string"
+        },
+        "sampleRate": {
+          "exclusiveMinimum": 0,
+          "title": "Samplerate",
+          "type": "integer"
+        },
+        "channels": {
+          "exclusiveMinimum": 0,
+          "title": "Channels",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "codec",
+        "sampleRate",
+        "channels"
+      ],
+      "title": "AudioProbe",
+      "type": "object"
+    },
+    "MediaProbe": {
+      "additionalProperties": false,
+      "properties": {
+        "formatName": {
+          "title": "Formatname",
+          "type": "string"
+        },
+        "durationSec": {
+          "exclusiveMinimum": 0,
+          "title": "Durationsec",
+          "type": "number"
+        },
+        "sizeBytes": {
+          "minimum": 0,
+          "title": "Sizebytes",
+          "type": "integer"
+        },
+        "video": {
+          "$ref": "#/$defs/VideoProbe"
+        },
+        "audio": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AudioProbe"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "warnings": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Warnings",
+          "type": "array"
+        }
+      },
+      "required": [
+        "formatName",
+        "durationSec",
+        "sizeBytes",
+        "video"
+      ],
+      "title": "MediaProbe",
+      "type": "object"
+    },
+    "RenderRuntime": {
+      "additionalProperties": false,
+      "properties": {
+        "fingerprint": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Fingerprint",
+          "type": "string"
+        },
+        "ffmpegVersion": {
+          "title": "Ffmpegversion",
+          "type": "string"
+        },
+        "libassVersion": {
+          "title": "Libassversion",
+          "type": "string"
+        },
+        "encoding": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Encoding",
+          "type": "object"
+        }
+      },
+      "required": [
+        "fingerprint",
+        "ffmpegVersion",
+        "libassVersion",
+        "encoding"
+      ],
+      "title": "RenderRuntime",
+      "type": "object"
+    },
+    "VideoProbe": {
+      "additionalProperties": false,
+      "properties": {
+        "codec": {
+          "title": "Codec",
+          "type": "string"
+        },
+        "width": {
+          "exclusiveMinimum": 0,
+          "title": "Width",
+          "type": "integer"
+        },
+        "height": {
+          "exclusiveMinimum": 0,
+          "title": "Height",
+          "type": "integer"
+        },
+        "fps": {
+          "exclusiveMinimum": 0,
+          "title": "Fps",
+          "type": "number"
+        },
+        "nominalFps": {
+          "exclusiveMinimum": 0,
+          "title": "Nominalfps",
+          "type": "number"
+        },
+        "isVfr": {
+          "title": "Isvfr",
+          "type": "boolean"
+        },
+        "rotation": {
+          "default": 0,
+          "title": "Rotation",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "codec",
+        "width",
+        "height",
+        "fps",
+        "nominalFps",
+        "isVfr"
+      ],
+      "title": "VideoProbe",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Schemaversion",
+      "type": "string"
+    },
+    "rendererVersion": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Rendererversion",
+      "type": "string"
+    },
+    "campaignId": {
+      "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+      "title": "Campaignid",
+      "type": "string"
+    },
+    "videoId": {
+      "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+      "title": "Videoid",
+      "type": "string"
+    },
+    "outputVariantId": {
+      "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+      "title": "Outputvariantid",
+      "type": "string"
+    },
+    "planHash": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Planhash",
+      "type": "string"
+    },
+    "manifestHash": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Manifesthash",
+      "type": "string"
+    },
+    "outputHash": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Outputhash",
+      "type": "string"
+    },
+    "renderKey": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Renderkey",
+      "type": "string"
+    },
+    "runtime": {
+      "$ref": "#/$defs/RenderRuntime"
+    },
+    "inputs": {
+      "additionalProperties": {
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "propertyNames": {
+        "enum": [
+          "source",
+          "headlineFont",
+          "captionsFont",
+          "music",
+          "timing"
+        ]
+      },
+      "title": "Inputs",
+      "type": "object"
+    },
+    "mixPolicy": {
+      "enum": [
+        "source_copy",
+        "fixed_duck_mix"
+      ],
+      "title": "Mixpolicy",
+      "type": "string"
+    },
+    "path": {
+      "title": "Path",
+      "type": "string"
+    },
+    "sizeBytes": {
+      "exclusiveMinimum": 0,
+      "title": "Sizebytes",
+      "type": "integer"
+    },
+    "sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Sha256",
+      "type": "string"
+    },
+    "probe": {
+      "$ref": "#/$defs/MediaProbe"
+    },
+    "fullDecodePassed": {
+      "const": true,
+      "default": true,
+      "title": "Fulldecodepassed",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "campaignId",
+    "videoId",
+    "outputVariantId",
+    "planHash",
+    "manifestHash",
+    "outputHash",
+    "renderKey",
+    "runtime",
+    "inputs",
+    "mixPolicy",
+    "path",
+    "sizeBytes",
+    "sha256",
+    "probe"
+  ],
+  "title": "RenderReceipt",
+  "type": "object",
+  "$id": "https://auraly.local/schemas/render-receipt.schema.json"
+}
