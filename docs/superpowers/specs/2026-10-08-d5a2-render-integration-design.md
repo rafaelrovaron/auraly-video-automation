@@ -1,7 +1,7 @@
 # D5A.2 — Render Jobs, API e UI local
 
 Data: 2026-10-08.
-Status: escopo conversacional aprovado; este design aguarda revisão do usuário.
+Status: escopo e este design aprovados pelo usuário em 2026-10-08.
 Implementação não iniciada. Não substitui o plano de implementação.
 
 ## 1. Intenção e base entregue
