@@ -1,7 +1,7 @@
 # D5A.2 — Evidência de implementação e verificação
 
 Data: 2026-10-08. Branch `feat/d5a2-render-integration`. Base produção `501d312`.
-Design/plano aprovados; execução Native autorizada. Sem merge/push desta etapa.
+Design/plano aprovados; execução Native autorizada. Merge/push autorizados em 2026-10-08.
 
 ## Estado
 
@@ -99,3 +99,14 @@ hardening adversarial concorrente (risco: armazenamento pessoal continua sendo c
 CI histórico: Linux/Windows D5A.1 aprovado em `501d312`,
 [run 37792802719](https://github.com/rafaelrovaron/auraly-video-automation/actions/runs/37792802719).
 Não confundir essa evidência com Actions D5A.2 ainda não publicados.
+
+## Integração autorizada
+
+Merge local por fast-forward de `main` `501d312` → `38257de`, sem conflitos.
+Gate completo fresco na cópia principal após merge: exit 0, 19/19;
+378 frontend em 22 arquivos (29,11 s), 1.924 Python / 27 skips (821,87 s),
+tipagem/build/schemas sem drift aprovados. Avisos opcionais e cinco moderadas
+preexistentes HyperFrames permanecem os mesmos, sem upgrade breaking.
+Actions desta integração ainda pendentes; não alegar CI_VERIFIED antes do resultado.
+Worktree preservado por conter scratch de outra etapa: não remover arquivos alheios
+para realizar cleanup de branch. Nenhuma alteração em AGENTS.md ou sources/.

@@ -11,7 +11,7 @@ entrega.
 
 ### Entregue hoje
 
-- D5A.2 `IMPLEMENTED`, `LOCAL_VERIFIED` (Windows) na branch `feat/d5a2-render-integration`:
+- D5A.2 `IMPLEMENTED`, `LOCAL_VERIFIED` (Windows), integrado em `main` por fast-forward `38257de`:
   gate 19/19, 378 frontend, 1.924 Python / 27 skips; código `8a34ffc`.
   Render de planos salvos pela UI, Job `editing.render`, worker dedicado
   `editing_render`, consulta persistida e masters por variante para abrir/baixar.
@@ -19,6 +19,7 @@ entrega.
   masters sem nova codificação. Falhas parciais ficam visíveis. Sem provider pago,
   migration ou dependência nova; QC/review/delivery editorial permanece D5B.
   [Evidência D5A.2](docs/superpowers/2026-10-08-d5a2-verification.md).
+  Gate pós-merge repetido: 19/19, mesmas contagens; Actions desta integração ainda pendentes.
 - D5A.1 `IMPLEMENTED`, `LOCAL_VERIFIED` (Windows): renderer local sequencial
   FFmpeg/ASS e CLI `edit render` integrado em `main` no código `8be3fab`. Gate pós-merge 19/19,
   350 frontend e 1.877 Python / 27 skips; três achados da revisão corrigidos

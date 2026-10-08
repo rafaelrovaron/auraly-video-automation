@@ -535,7 +535,8 @@ integrado em `main` no código `8be3fab`, gate pós-merge repetido com sucesso;
 Correções CI até `501d312`, Actions Linux/Windows aprovados no run `37792802719`.
 D5A.2 `IMPLEMENTED`, `LOCAL_VERIFIED` (Windows), código `8a34ffc`, na branch
 `feat/d5a2-render-integration`: gate 19/19, 378 frontend, 1.924 Python / 27 skips;
-merge/push e Actions desta etapa ainda pendentes.
+merge/push autorizados, integrado em `main` por fast-forward `38257de`;
+gate pós-merge 19/19 com mesmas contagens. Actions desta integração ainda pendentes.
 
 ### D5A.1 — Renderer local / CLI
 

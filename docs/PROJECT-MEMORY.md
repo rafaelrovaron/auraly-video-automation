@@ -36,8 +36,11 @@ nenhum request novo é criado automaticamente. Failed exibe diagnóstico local p
 E2E local real gerou/baixou três masters distintos, validou full decode/probe,
 recarregou e reaproveitou três outputs preservando recibos, upstream, budget e copy.
 Nenhuma chamada externa paga; não amplia PROVIDER_VERIFIED. D5B QC/review/delivery
-continua `PLANNED`; Flow permanece pausado/não bloqueante. Sem merge/push autorizado
-para esta etapa; Actions D5A.2 ainda não executados.
+continua `PLANNED`; Flow permanece pausado/não bloqueante. Merge e push autorizados
+em 2026-10-08: fast-forward de `main` `501d312` → `38257de`.
+Gate fresco pós-merge 19/19, exit 0; 378 frontend, 1.924 Python / 27 skips
+(pytest 821,87 s). Actions desta integração ainda pendentes.
+Worktree preservado por conter temporários de outra etapa; nenhum arquivo alheio removido.
 Evidência: `docs/superpowers/2026-10-08-d5a2-verification.md`.
 
 ## Histórico: D5A.1 — Renderer local (2026-10-08)
