@@ -16,6 +16,8 @@ from tests.api_helpers import create_api_fixture
 from tests.test_api_operations import commands, request
 from tests.test_campaign_domain import valid_campaign_data
 from tests.test_api_heygen_actions import heygen_fixture, run_operation, video_request
+from tests.test_render_job_domain import request_data, result_data
+from auraly_pipeline.editing.render_domain import RenderBatchResult
 
 
 def runner(service: Any) -> Any:
@@ -26,6 +28,68 @@ def runner(service: Any) -> Any:
 def enqueue(service: Any, name: str, campaign: str = "campaign-one") -> Any:
     return service.submit_operation(request(operation="image_prepare", campaignId=campaign,
                                              outputPath=name))
+
+
+def enqueue_render(service: Any, key: str) -> Any:
+    return service.jobs.submit_job(JobSubmit(campaign_id="campaign-one", job_type="editing.render",
+        input=request_data(), idempotency_key=key, max_attempts=1, retry_safety=RetrySafety.MANUAL_ONLY))
+
+
+def test_render_worker_leaves_provider_and_other_campaign_jobs_queued(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    service = commands(create_api_fixture(tmp_path))
+    monkeypatch.setattr(service.renderer, "render", lambda *a, **k: RenderBatchResult.model_validate(result_data()))
+    selected = enqueue_render(service, "render-selected")
+    untouched = enqueue(service, "other-local")
+    data = valid_campaign_data()
+    data["campaignId"] = "campaign-two"
+    service.campaigns.create_campaign(CampaignCreate.model_validate(data))
+    other = service.jobs.submit_job(JobSubmit(campaign_id="campaign-two", job_type="editing.render",
+        input={**request_data(), "campaignId": "campaign-two"}, idempotency_key="render-other",
+        retry_safety=RetrySafety.MANUAL_ONLY, max_attempts=1))
+    voice = service.jobs.submit_job(JobSubmit(campaign_id="campaign-one", job_type="voice.import",
+        input={"voiceMasterId": "never-run"}, idempotency_key="render-voice", retry_safety=RetrySafety.MANUAL_ONLY))
+    local = runner(service)
+    try:
+        local.start("campaign-one", "editing_render")
+        local._future.result(timeout=10)
+        assert service.jobs.get_job(selected.job_id).status == "completed"
+        assert all(service.jobs.get_job(j.job_id).status == "queued" for j in (untouched, other, voice))
+    finally:
+        local.shutdown()
+
+
+def test_render_stop_keeps_active_job_and_heartbeat(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    service = commands(create_api_fixture(tmp_path))
+    first, second = enqueue_render(service, "render-first"), enqueue_render(service, "render-second")
+    entered, release, heartbeat = Event(), Event(), Event()
+    renew, work = service.jobs.renew_lease, service.jobs.worker_once
+    def render(*a: Any, **k: Any) -> RenderBatchResult:
+        entered.set()
+        assert release.wait(10)
+        return RenderBatchResult.model_validate(result_data())
+    def observe(*a: Any, **k: Any) -> Any:
+        value = renew(*a, **k)
+        heartbeat.set()
+        return value
+    def short(*a: Any, **k: Any) -> Any:
+        return work(*a, lease_seconds=2, heartbeat_interval_seconds=.1, **k)
+    monkeypatch.setattr(service.renderer, "render", render)
+    monkeypatch.setattr(service.jobs, "renew_lease", observe)
+    monkeypatch.setattr(service.jobs, "worker_once", short)
+    local = runner(service)
+    try:
+        local.start("campaign-one", "editing_render")
+        assert entered.wait(10)
+        with pytest.raises(QueryError, match="running"):
+            local.start("campaign-one", "editing_render")
+        assert local.stop("campaign-one").state == "stopping"
+        assert heartbeat.wait(10)
+        assert service.jobs.get_job(first.job_id).status == "running"
+    finally:
+        release.set()
+        local.shutdown()
+    assert service.jobs.get_job(first.job_id).status == "completed"
+    assert service.jobs.get_job(second.job_id).status == "queued"
 
 
 def test_concurrent_starts_admit_one_and_stop_preserves_active_job(

@@ -29,6 +29,8 @@ from auraly_pipeline.campaigns.service import CampaignNotFoundError, CampaignSer
 from auraly_pipeline.campaigns.domain import CampaignCreate, CopyMasterCreate, CampaignBudgetSetup, CampaignBudgetView
 from auraly_pipeline.editing.batch_planner import verify_batch_plan
 from auraly_pipeline.editing.batch_service import EditBatchService
+from auraly_pipeline.editing.render_service import RenderService
+from auraly_pipeline.editing.render_handler import RenderJobHandler
 from auraly_pipeline.editing.domain import EditingError, EditingArtifactNotFoundError, EditProfile, relative_path
 from auraly_pipeline.editing.resolver import profile_hash
 from auraly_pipeline.editing.service import validate_editing_path, EditingService
@@ -73,10 +75,12 @@ class ApiCommands:
         self.editing = EditBatchService(
             project_root=settings.project_root, work_root=settings.work_root, database_path=settings.database,
         )
+        self.renderer = RenderService(project_root=settings.project_root, work_root=settings.work_root)
         self.jobs = JobService(
             engine, JobRepository(self._sessions),
             handlers={
                 LOCAL_OPERATION_JOB: ApiOperationHandler(self),
+                "editing.render": RenderJobHandler(self.renderer),
                 "voice.generate": VoiceGenerateHandler(
                     self._sessions, work_root=settings.work_root,
                     provider=speech_provider, transcriber=transcriber,

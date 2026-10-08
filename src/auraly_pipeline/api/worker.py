@@ -12,6 +12,7 @@ JOB_TYPES: dict[WorkerKind, str] = {
     "local_operations": "api.local.operation", "voice_generate": "voice.generate",
     "voice_import": "voice.import", "heygen_assets": "heygen.asset.upload",
     "heygen_videos": "heygen.video.generate",
+    "editing_render": "editing.render",
 }
 
 

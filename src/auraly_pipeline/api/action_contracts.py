@@ -271,7 +271,7 @@ class OperationView(OperationSubmission):
     error_code: ErrorCode | None = None
 
 
-WorkerKind = Literal["local_operations", "voice_generate", "voice_import", "heygen_assets", "heygen_videos"]
+WorkerKind = Literal["local_operations", "voice_generate", "voice_import", "heygen_assets", "heygen_videos", "editing_render"]
 
 
 class WorkerState(ContractModel):
