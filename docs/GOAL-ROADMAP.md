@@ -442,7 +442,7 @@ D4B.3b `IMPLEMENTED`, `LOCAL_VERIFIED`: gate Windows pós-correções 19/19,
 corrigidos e duas Minor adiadas. Sem merge/push ou Actions desta branch.
 Evidência em `docs/superpowers/2026-10-07-d4b3b-verification.md`.
 Checkpoint acima é anterior à integração D4B.3b em main `dd7203c`.
-D4B.3c `IMPLEMENTED`, `LOCAL_VERIFIED` na branch `feat/d4b3c-preview`;
+D4B.3c `IMPLEMENTED`, `LOCAL_VERIFIED`, integrado em `main` por fast-forward `fdfb3cb`;
 gate fresco Windows 19/19, 350 frontend e 1.823 Python / 26 skips. Gate final e decisões
 em `docs/superpowers/2026-10-08-d4b3c-verification.md`. Próximo slice: design
 incremental do renderer D5A; D5B QC/review/delivery continua posterior.

@@ -20,7 +20,7 @@ genérico e não terá timeline estilo CapCut ou preview frame-perfect.
 ### 2.1 Capacidade entregue
 
 Checkpoint D4B.3c (2026-10-08): preview aproximado `IMPLEMENTED`, `LOCAL_VERIFIED`
-na branch `feat/d4b3c-preview`, sem merge/push. Gate Windows 19/19,
+integrado em `main` por fast-forward `fdfb3cb`, com gate repetido após merge. Gate Windows 19/19,
 350 frontend e 1.823 Python / 26 skips; resultados finais em
 `docs/superpowers/2026-10-08-d4b3c-verification.md`. Frame do MP4 local e overlays
 CSS; rascunho não validado ou manifest confirmado, variantes explícitas e

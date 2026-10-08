@@ -11,10 +11,10 @@ entrega.
 
 ### Entregue hoje
 
-- D4B.3c `IMPLEMENTED`, `LOCAL_VERIFIED` na branch `feat/d4b3c-preview`:
+- D4B.3c `IMPLEMENTED`, `LOCAL_VERIFIED`, integrado em `main` por fast-forward `fdfb3cb`:
   gate Windows 19/19, 350 frontend e 1.823 Python / 26 skips; preview estático aproximado
   do MP4 selecionado, headline/legenda/framing e seleção de variante, sem render
-  ou regeneração. Sem merge/push desta etapa. Verificação final e limites registrados na
+  ou regeneração. Gate completo repetido em `main` com sucesso. Verificação final e limites registrados na
   [evidência D4B.3c](docs/superpowers/2026-10-08-d4b3c-verification.md).
 - contratos Pydantic e JSON Schema do `edit.json` legado;
 - parser de Copy Master que mantém a headline fora da narração;

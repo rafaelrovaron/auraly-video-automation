@@ -8,6 +8,11 @@ do produto planejado para impedir que roadmap seja confundido com capacidade exi
 
 ## Entrega atual: D4B.3c — Preview aproximado (2026-10-08)
 
+Integração autorizada pelo usuário: fast-forward de `main` `dd7203c` → `fdfb3cb`.
+Gate completo fresco na cópia principal após merge: 19/19, 350 frontend e
+1.823 Python / 26 skips (677,47 s), exit 0. Os checkpoints da branch abaixo
+preservam o histórico anterior à integração; Actions desta publicação pendentes.
+
 `IMPLEMENTED`, `LOCAL_VERIFIED` na branch `feat/d4b3c-preview`, código `b8164a5`;
 gate fresco Windows 19/19, 350 frontend e 1.823 Python / 26 skips (669,34 s).
 Ruff/mypy/build/schemas aprovados; cinco moderate transitivos preexistentes.

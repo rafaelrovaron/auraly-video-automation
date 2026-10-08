@@ -5,7 +5,8 @@
 Design, plano e execução Nativa aprovados em 2026-10-08. `IMPLEMENTED` na
 branch `feat/d4b3c-preview`, base main `dd7203c`. `LOCAL_VERIFIED`: gate fresco
 Windows pós-correções no código `b8164a5`, 19/19 etapas, exit0.
-Sem merge/push desta etapa ou novo `PROVIDER_VERIFIED`.
+Este checkpoint é anterior à integração; fechamento em `main` registrado abaixo.
+Sem novo `PROVIDER_VERIFIED`.
 
 Commits locais: design `f10bbcf`, plano `8ac5947`, poster `0616287`, preview
 `65477c9`, integração `d831740`, correções da revisão `dc81434` e ajuste de
@@ -100,6 +101,18 @@ captionInput do plano na inspeção; cobertura específica fica para próximo sl
 
 ## Próximo passo
 
-Decisão humana de integração; depois design incremental D5A para renderer
+Merge/push autorizados pelo usuário; depois design incremental D5A para renderer
 determinístico mínimo. D5B QC/review/delivery continua posterior. Flow pausado
 e não bloqueante. Preview não aprova mídia nem dispensa aprovação final.
+
+## Integração em main
+
+Em 2026-10-08, usuário autorizou merge e push. `main` e `origin/main` estavam
+em `dd7203c`; integração por fast-forward até `fdfb3cb`, sem conflitos.
+Gate completo fresco na cópia principal após merge: **19/19**, exit 0;
+350 frontend, 1.823 Python / 26 skips (677,47 s), Ruff/mypy/build e schemas
+aprovados. Cinco moderate transitivos preexistentes permanecem; sem upgrade.
+Commit de fechamento altera apenas documentação. Actions desta publicação
+ainda não certificam Linux/Windows; resultado remoto deve ser consultado separadamente.
+Worktree da feature preservado por conter scratch antigo não commitado,
+sem remoção forçada ou inclusão desses arquivos na publicação.
