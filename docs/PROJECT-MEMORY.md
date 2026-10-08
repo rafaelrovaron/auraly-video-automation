@@ -1,12 +1,39 @@
 # Auraly Mass Video Pipeline — Memória do Projeto
 
-**Atualizado em:** 2026-10-07
+**Atualizado em:** 2026-10-08
 **Decisão vigente:** MVP delivery-first para uso local e pessoal
 
 Este documento guarda decisões duráveis e fatos verificados. O estado entregue aparece separado
 do produto planejado para impedir que roadmap seja confundido com capacidade existente.
 
-## Entrega atual: D4B.3b — Overrides e variantes UI (2026-10-07)
+## Entrega atual: D4B.3c — Preview aproximado (2026-10-08)
+
+`IMPLEMENTED`, `LOCAL_VERIFIED` na branch `feat/d4b3c-preview`, código `b8164a5`;
+gate fresco Windows 19/19, 350 frontend e 1.823 Python / 26 skips (669,34 s).
+Ruff/mypy/build/schemas aprovados; cinco moderate transitivos preexistentes.
+Revisão independente: nenhum Critical, dois Important corrigidos com RED→GREEN
+em uma rodada; cobertura específica de caption readonly adiada como Minor.
+Um gate anterior passou nos testes mas parou em tipagem do teste novo; ajuste
+mínimo e repetição completa passaram. Sem merge/push desta etapa.
+Evidência, revisão independente, decisões e estado do gate final em
+`docs/superpowers/2026-10-08-d4b3c-verification.md`.
+
+GET local PNG em memória limitado a 720 px por eixo/4 MiB/10 s, validando
+campanha, ready, path confiável e hash real do MP4. Sem arquivo de poster,
+Job, cache persistente, migration ou dependência nova. Frame ligado à identidade
+campanha/render/hash, com abort/cleanup; overlays não disparam POST ou novo GET.
+Rascunho visual usa as três camadas existentes sem duplicar planner/hash.
+Plano validado/salvo usa manifest e captionInput exatos; consulta readonly
+preserva draft, validação e worker existentes. Fonte fallback e limites
+estáticos explícitos; avisos de overflow/safe zones fora do canvas, proporção
+preservada dentro de 360 × 640 px. Sem player/timeline/render ou chamada paga.
+D5 renderer é o próximo recorte ainda planejado; Flow permanece pausado.
+
+D4B.3b e correção mínima do teste CI foram integrados em main `dd7203c`.
+Actions Windows passou; Linux foi cancelado na preparação antes dos testes.
+O texto abaixo preserva o checkpoint anterior à integração, não o estado atual.
+
+## Histórico: D4B.3b — Overrides e variantes UI (2026-10-07)
 
 `IMPLEMENTED`, `LOCAL_VERIFIED` na branch `feat/d4b3b-editing`, base `12823be`.
 Gate fresco Windows após revisão/correções no código `e33d9df`: 19/19 etapas,

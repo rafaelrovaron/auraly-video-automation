@@ -11,6 +11,11 @@ entrega.
 
 ### Entregue hoje
 
+- D4B.3c `IMPLEMENTED`, `LOCAL_VERIFIED` na branch `feat/d4b3c-preview`:
+  gate Windows 19/19, 350 frontend e 1.823 Python / 26 skips; preview estático aproximado
+  do MP4 selecionado, headline/legenda/framing e seleção de variante, sem render
+  ou regeneração. Sem merge/push desta etapa. Verificação final e limites registrados na
+  [evidência D4B.3c](docs/superpowers/2026-10-08-d4b3c-verification.md).
 - contratos Pydantic e JSON Schema do `edit.json` legado;
 - parser de Copy Master que mantém a headline fora da narração;
 - inspeção de mídia por `ffprobe`, ingestão não destrutiva e base de conhecimento local;
@@ -424,7 +429,16 @@ reenvia POST, e um arquivo existente não prova autoria do POST sem Job confirma
 Abandonar acompanhamento não cancela o Job no backend.
 
 Um plano reutiliza MP4/WAV/imagem/profile, não regenera assets nem renderiza vídeo.
-D4B.3c adicionará preview aproximado; D5 continua responsável pelo render final.
+D4B.3c mostra um frame do MP4 com overlays aproximados, em Rascunho, Plano validado
+ou Plano salvo readonly. Escolha a origem e a variante no preview; o rascunho não
+habilita Salvar e a consulta não sobrescreve seus campos. A/B troca texto sem
+regenerar voz, imagem ou HeyGen. O frame é buscado por campanha/render/hash,
+apenas ao trocar a fonte ou usar Recarregar frame; falha mantém fundo neutro avisado.
+Fonte de sistema é fallback; caption de rascunho é demonstrativa, enquanto planos
+usam a primeira cue ou as primeiras doze palavras do captionInput armazenado.
+Avisos de overflow/safe zones permanecem fora do canvas; preview cabe em até
+360 × 640 px preservando a proporção configurada. Não simula shrink/error,
+highlight, zoomEnd, timing ou áudio. D5 continua responsável pelo render final.
 Sem timeline CapCut ou preview frame-perfect.
 Revisão visual final do vídeo do canário continua humana; configurar um manifest não aprova o vídeo.
 

@@ -1,6 +1,6 @@
 # Auraly Delivery-First Goal Roadmap
 
-**Roadmap vigente:** 2026-10-07
+**Roadmap vigente:** 2026-10-08
 
 Este documento é a ordem operacional dos próximos Goals. O PRD define o produto; este roadmap
 define como chegar a ele sem transformar cada Goal em um projeto grande demais.
@@ -67,7 +67,7 @@ D4B.2b.1 Voice Master Forms                  IMPLEMENTED, LOCAL_VERIFIED
 D4B.2b.2 HeyGen Forms                        IMPLEMENTED, LOCAL_VERIFIED
 D4B.3a Profiles UI                           IMPLEMENTED, LOCAL_VERIFIED
 D4B.3b Overrides & Headline Variants UI       IMPLEMENTED, LOCAL_VERIFIED
-D4B.3c Approximate Preview                   PLANNED
+D4B.3c Approximate Preview                   IMPLEMENTED, LOCAL_VERIFIED
 D5A Deterministic Renderer
 D5B Render QC, Review & Delivery
 D6  End-to-End Personal Pilot
@@ -441,7 +441,11 @@ D4B.3b `IMPLEMENTED`, `LOCAL_VERIFIED`: gate Windows pós-correções 19/19,
 341 frontend e 1.807 Python / 25 skips; revisão independente, três Important
 corrigidos e duas Minor adiadas. Sem merge/push ou Actions desta branch.
 Evidência em `docs/superpowers/2026-10-07-d4b3b-verification.md`.
-Próximo slice: D4B.3c preview aproximado; renderer D5 continua planejado.
+Checkpoint acima é anterior à integração D4B.3b em main `dd7203c`.
+D4B.3c `IMPLEMENTED`, `LOCAL_VERIFIED` na branch `feat/d4b3c-preview`;
+gate fresco Windows 19/19, 350 frontend e 1.823 Python / 26 skips. Gate final e decisões
+em `docs/superpowers/2026-10-08-d4b3c-verification.md`. Próximo slice: design
+incremental do renderer D5A; D5B QC/review/delivery continua posterior.
 
 Gate final D4B.2a Windows de 2026-10-04: 19/19 etapas; 96 testes frontend e 1.757 Python
 aprovados / 25 skips (472,17 s). Browser/proxy/API/worker reais cobrem import, review e
@@ -475,7 +479,10 @@ CI Linux/Windows pendente de publicação. Nenhuma chamada paga.
   worker manual, revalidação do mesmo plano e GET exato; unknown sem repost,
   draft em memória e guardas de descarte/Back. Timing ausente fica pendente,
   música exige aceite e assets usam path/hash. Sem novas gerações ou render.
-- D4B.3c: preview aproximado ainda planejado, sem timeline/frame-perfect.
+- D4B.3c: preview estático com frame local e overlays CSS, rascunho/manifest
+  confirmado, variante explícita e consulta readonly. Fonte fallback, avisos
+  de overflow/safe zones e canvas limitado preservando proporção; sem timeline,
+  frame-perfect, áudio, render, regeneration ou novas chamadas de provider.
 
 D4B.1 usa dois processos locais (API 8000 e Vite 5173); distribuição estática/launcher
 fica para depois. Worker 404 fora do escopo significa desconhecido; start/stop não

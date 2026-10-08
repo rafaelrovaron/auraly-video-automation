@@ -10,6 +10,11 @@
 
 **Spec:** `docs/superpowers/specs/2026-10-08-d4b3c-approximate-preview-design.md` (aprovada em 2026-10-08).
 
+**Execução concluída:** três tarefas entregues, revisão independente e uma rodada
+de correções RED→GREEN; gate Windows 19/19 no código `b8164a5`. A checklist abaixo
+preserva o plano original; resultados e desvios reais estão na evidência
+`docs/superpowers/2026-10-08-d4b3c-verification.md`. Merge/push não realizados.
+
 ## Global Constraints
 
 - Primeiro frame decodificável; PNG proporcional de no máximo 720 px por eixo; timeout 10 s e saída limitada a 4 MiB. Encerrar subprocess ao ultrapassar limite.
@@ -18,7 +23,7 @@
 - Fonte de sistema com fallback sinalizado; sem player, timeline, sincronização, mixagem ou render. AGENTS.md e sources/ intocados.
 - **Preview aproximado — render final é a referência.** Rascunho não valida plano nem habilita Save.
 - GET somente por troca de identidade ou Recarregar frame; nenhum POST automático por edição.
-- Execução recomendada: Nativa, três tarefas dependentes e uma revisão independente final. Plano ainda aguarda revisão do usuário.
+- Execução Nativa aprovada em 2026-10-08: três tarefas dependentes e uma revisão independente final.
 
 ## Review Focus
 
@@ -164,8 +169,8 @@ Não acessar copy atual, restaurar request de plano ou acrescentar campos persis
 
 ## Handoff
 
-Revisar este plano antes de executar. Preferência anterior do projeto: Nativa;
-recomendação preservada para este recorte. Implementação só após aprovação do
-plano. Merge/push dependem de autorização no fechamento; não estão implícitos
+Plano aprovado e executado pela abordagem Nativa. Evidência final em
+`docs/superpowers/2026-10-08-d4b3c-verification.md`.
+Merge/push dependem de autorização no fechamento; não estão implícitos
 na aprovação do design. O cancelamento do Actions Linux anterior continua
 pendência de evidência remota, não justificativa para mudar CI nesta etapa.

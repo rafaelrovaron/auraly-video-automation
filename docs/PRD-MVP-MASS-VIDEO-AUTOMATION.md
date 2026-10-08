@@ -19,6 +19,17 @@ genérico e não terá timeline estilo CapCut ou preview frame-perfect.
 
 ### 2.1 Capacidade entregue
 
+Checkpoint D4B.3c (2026-10-08): preview aproximado `IMPLEMENTED`, `LOCAL_VERIFIED`
+na branch `feat/d4b3c-preview`, sem merge/push. Gate Windows 19/19,
+350 frontend e 1.823 Python / 26 skips; resultados finais em
+`docs/superpowers/2026-10-08-d4b3c-verification.md`. Frame do MP4 local e overlays
+CSS; rascunho não validado ou manifest confirmado, variantes explícitas e
+consulta readonly preservando o draft. Caption do plano usa seu captionInput,
+não a copy corrente. Fonte de sistema fallback, safe zones/overflow avisados
+fora do canvas; proporção preservada em viewport limitado. Sem player/timeline,
+sincronização, áudio, fit exato, renderer ou chamadas pagas. D5 continua planejado.
+D4B.3b já integrado em main `dd7203c`; checkpoints abaixo são históricos.
+
 Checkpoint D4B.3a (2026-10-07): profiles pela UI global `#/profiles` implementados,
 `IMPLEMENTED`, `LOCAL_VERIFIED`: gate pós-revisão 19/19, 275 frontend e
 1.800 Python / 25 skips; fechamento anterior à integração `f3ac38a` em main. Criar, consultar readonly e publicar
@@ -28,7 +39,7 @@ disponibilidade de mídia nem aceita seu uso; o serviço de edição faz a valid
 posterior. Sem novas dependências, migrations, Jobs ou chamadas pagas.
 O checkpoint acima não entrega overrides, preview ou render; consultar o estado D4B.3b abaixo.
 
-Checkpoint atual D4B.3b (2026-10-07): `IMPLEMENTED`, `LOCAL_VERIFIED` na branch
+Checkpoint histórico D4B.3b (2026-10-07): `IMPLEMENTED`, `LOCAL_VERIFIED` na branch
 `feat/d4b3b-editing`, sem merge/push ou Actions. Gate Windows pós-correções 19/19,
 341 frontend e 1.807 Python / 25 skips. Painel de campanha para um MP4 ready e
 profile exato, overrides em três camadas e variantes explícitas de headline.
@@ -38,7 +49,8 @@ pendente quando ausente; assets path/hash e aceite separado de música.
 Draft em memória, descarte confirmado e unknown sem repost. Não regenera
 voz/imagem/HeyGen, não entrega preview/render ou novo PROVIDER_VERIFIED.
 Revisão independente e correções concluídas; duas Minor registradas na evidência
-`docs/superpowers/2026-10-07-d4b3b-verification.md`. D4B.3c/D5 seguem planejados.
+`docs/superpowers/2026-10-07-d4b3b-verification.md`. D5 segue planejado;
+D4B.3c entregue separadamente no checkpoint acima.
 
 - Campaign, CopyMaster e SceneVariant persistentes;
 - Jobs locais retomáveis e auditáveis;

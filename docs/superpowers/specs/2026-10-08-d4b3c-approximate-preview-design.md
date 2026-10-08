@@ -1,7 +1,8 @@
 # D4B.3c — Preview aproximado simples
 
 Status: abordagem e spec aprovadas pelo usuário em 2026-10-08.
-Plano em preparação; implementação ainda não iniciada.
+Plano e execução Nativa aprovados; implementação na branch `feat/d4b3c-preview`.
+Estado final e revisão: `docs/superpowers/2026-10-08-d4b3c-verification.md`.
 Base entregue: D4B.3b em main, `dd7203c`. O gate local passou 19/19 etapas;
 Actions Windows passou. Actions Linux foi cancelado durante preparação do
 ambiente, antes dos testes: não há confirmação Linux dessa correção.
