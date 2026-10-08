@@ -52,7 +52,8 @@ it('shows partial outcomes, safe media links and explicit new execution',async()
   expect(screen.queryByText(/private-path-secret/)).toBeNull();expect(screen.getByText(/Podem ser reaproveitados/)).toBeTruthy();
   vi.mocked(crypto.randomUUID).mockReturnValue('44444444-4444-4444-8444-444444444444');
   vi.mocked(submitRender).mockResolvedValue({...body,executionId:'44444444-4444-4444-8444-444444444444',jobId:'55555555-5555-4555-8555-555555555555'});
-  fireEvent.click(screen.getByRole('button',{name:'Nova execução'}));await waitFor(()=>expect(submitRender).toHaveBeenCalledTimes(2));
+  fireEvent.click(screen.getByRole('button',{name:'Nova execução'}));expect(screen.queryByText('Falha parcial')).toBeNull();
+  await waitFor(()=>expect(submitRender).toHaveBeenCalledTimes(2));
   expect(vi.mocked(submitRender).mock.calls[1][0]).toMatchObject({...body,executionId:'44444444-4444-4444-8444-444444444444'});
 });
 it('reload lists persisted runs and abandoning observation never cancels',async()=>{

@@ -56,7 +56,7 @@ function RenderFlow({campaignId,plan}:Props){
     if(!plan||plan.campaignId!==campaignId||lock.current||pending||(job&&active(job)))return;
     lock.current=true;setSending(true);setNotice(null);setWorkerUnknown(false);
     const request:RenderJobRequest={schemaVersion:'1.0',campaignId,videoId:plan.videoId,planHash:plan.planHash,executionId:crypto.randomUUID()};
-    setPending(request);
+    setPending(request);setJob(null);
     try{const accepted=await submitRender(request);if(!alive.current)return;
       setPending(null);setJob({...accepted,status:'queued',result:null,renderStatus:null,errorCode:null});setMonitor(true);
       await start();
@@ -73,7 +73,7 @@ function RenderFlow({campaignId,plan}:Props){
     <button disabled={!plan||plan.campaignId!==campaignId||sending||!!pending||!!job&&active(job)} onClick={()=>{void submit();}}>{job&&!active(job)?'Nova execução':'Renderizar'}</button>
     <p>Podem ser reaproveitados masters válidos já existentes; nova execução não garante nova codificação.</p>
     <button disabled={!plan||listing} onClick={()=>{void inspect();}}>Consultar execuções</button>
-    <label>Execução de render<select value={job?.jobId??''} disabled={sending||!!pending} onChange={e=>choose(e.target.value)}>
+    <label>Execução de render<select aria-label="Execução de render" value={job?.jobId??''} disabled={sending||!!pending} onChange={e=>choose(e.target.value)}>
       <option value="">Selecione</option>{runs.map(v=><option key={v.jobId} value={v.jobId}>{v.jobId} · {statusLabel(v.status)}</option>)}
     </select></label>
     {pending&&<p>Execução enviada: {pending.executionId}. Consulte antes de decidir outra ação; nenhum reenvio automático.</p>}

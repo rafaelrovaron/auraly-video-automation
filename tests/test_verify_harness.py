@@ -681,6 +681,14 @@ def test_windows_ci_installs_chromium_before_focused_verification() -> None:
     assert "secrets" not in str(job).lower()
 
 
+def test_windows_ci_includes_editorial_render_integration() -> None:
+    commands = workflow_commands(load_verify_workflow()["jobs"]["windows-focused"])
+    targets = next(c for c in commands if "scripts/verify.py fast" in c).split()[6:]
+    for target in ("tests/test_render_job_domain.py", "tests/test_render_handler.py", "tests/test_render_job_commands.py",
+                   "tests/test_api_render_http.py", "tests/test_api_render_media.py", "tests/test_api_worker.py", "tests/test_web_render_e2e.py"):
+        assert targets.count(target) == 1
+
+
 def test_windows_ci_preserves_targets_and_includes_goal_4b_once() -> None:
     workflow = load_verify_workflow()
     job = workflow["jobs"]["windows-focused"]
