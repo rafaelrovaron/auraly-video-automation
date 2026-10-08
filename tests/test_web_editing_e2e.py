@@ -153,6 +153,40 @@ def test_preview_narrow_width_and_long_text(panel_servers: PanelServers, panel_p
     preview.screenshot(path=str(screenshot))
 
 
+@pytest.mark.parametrize(('output_width', 'output_height'), [(16, 1024), (1024, 16)])
+def test_preview_safe_zones_and_extreme_ratios(panel_servers: PanelServers, panel_page: Page,
+                                             output_width: int, output_height: int) -> None:
+    panel = draft(panel_servers, panel_page)
+    preview_headline(panel_servers, panel)
+    group = panel.get_by_role('group', name='Vídeo · Overrides', exact=True)
+    preview = panel.get_by_role('region', name='Preview da edição', exact=True)
+    warning = preview.get_by_text(re.compile('Headline no preview: overflow aproximado'))
+    for field, value in [('anchor', 'top'), ('y', '1')]:
+        group.get_by_label(f'Vídeo · Headline · {field} · Modo', exact=True).select_option('replace')
+        control = group.get_by_label(f'Vídeo · Headline · {field}', exact=True)
+        if field == 'anchor':
+            control.select_option(value)
+        else:
+            control.fill(value)
+    expect(warning).to_be_visible()
+    group.get_by_label('Vídeo · Headline · y', exact=True).fill('0.5')
+    expect(warning).to_have_count(0)
+    group.get_by_label('Vídeo · Headline · safeTop · Modo', exact=True).select_option('replace')
+    group.get_by_label('Vídeo · Headline · safeTop', exact=True).fill('0.8')
+    expect(warning).to_be_visible()
+    group.get_by_text('Output', exact=True).click()
+    for field, value in [('width', output_width), ('height', output_height)]:
+        group.get_by_label(f'Vídeo · Output · {field} · Modo', exact=True).select_option('replace')
+        group.get_by_label(f'Vídeo · Output · {field}', exact=True).fill(str(value))
+    viewport = preview.locator('.preview-viewport')
+    box = viewport.bounding_box()
+    assert box is not None
+    assert box['height'] <= 641 and box['width'] <= 361
+    assert abs(box['width'] / box['height'] - output_width / output_height) < 0.01
+    expect(warning).to_be_visible()
+    assert panel_servers.provider.events == []
+
+
 def test_caption_timing_missing_is_pending(panel_servers: PanelServers, panel_page: Page) -> None:
     panel = draft(panel_servers, panel_page)
     font = panel_servers.settings.project_root / 'font.ttf'

@@ -14,13 +14,19 @@ export function previewSettings(base:OverrideHints,campaign:OverrideDraft,video:
   }
   return result;
 }
-function PreviewText({text,style,label}:{text:string;style:TextStyle;label:string}){
-  const element=useRef<HTMLDivElement>(null),[overflow,setOverflow]=useState(false);
+function PreviewText({text,style,label,onOverflow}:{text:string;style:TextStyle;label:string;onOverflow:(value:boolean)=>void}){
+  const element=useRef<HTMLDivElement>(null);
   useLayoutEffect(()=>{
-    const measure=()=>{const el=element.current;if(el)setOverflow(el.scrollHeight>style.maxLines*style.fontSizePx*style.lineHeight+1||el.scrollWidth>el.clientWidth+1);};
+    const measure=()=>{const el=element.current,canvas=el?.parentElement;
+      if(!el||!canvas){onOverflow(false);return;}
+      const box=el.getBoundingClientRect(),area=canvas.getBoundingClientRect();
+      onOverflow(el.scrollHeight>style.maxLines*style.fontSizePx*style.lineHeight+1||el.scrollWidth>el.clientWidth+1
+        ||box.top<area.top+area.height*style.safeTop-1||box.bottom>area.bottom-area.height*style.safeBottom+1
+        ||box.left<area.left+area.width*style.safeLeft-1||box.right>area.right-area.width*style.safeRight+1);
+    };
     measure();const observer=typeof ResizeObserver==='undefined'?null:new ResizeObserver(measure);if(element.current)observer?.observe(element.current);
     return()=>observer?.disconnect();
-  },[text,style]);
+  },[text,style,onOverflow]);
   if(!style.enabled)return null;
   const y=style.anchor==='top'?'0%':style.anchor==='bottom'?'-100%':'-50%';
   const width=Math.max(0,Math.min(style.x-style.safeLeft,1-style.safeRight-style.x)*2);
@@ -29,13 +35,13 @@ function PreviewText({text,style,label}:{text:string;style:TextStyle;label:strin
     WebkitTextStroke:style.strokeWidthPx?`${style.strokeWidthPx}px ${style.strokeColor}`:undefined,
     textShadow:style.shadowEnabled?`${style.shadowOffsetX}px ${style.shadowOffsetY}px 0 ${style.shadowColor}`:undefined,
     backgroundColor:style.backgroundEnabled?style.backgroundColor:undefined,padding:style.backgroundEnabled?style.backgroundPaddingPx:0};
-  return <><div ref={element} className="preview-text" aria-label={label} style={css}>{text}</div>
-    {overflow&&<span className="preview-overflow">{label}: overflow aproximado — conferir no render</span>}</>;
+  return <div ref={element} className="preview-text" aria-label={label} style={css}>{text}</div>;
 }
 export function EditPreview({source,settings,captionText,mode,timingMissing}:{source:PreviewSource|null;settings:OverrideHints|null;captionText:string;mode:'draft'|'validated'|'saved';timingMissing:boolean}){
   const identity=source?`${source.campaignId}/${source.renderId}/${source.sha256}`:'', [reload,setReload]=useState(0);
   const [frame,setFrame]=useState<{identity:string;url:string}|null>(null),[failed,setFailed]=useState(false),[loading,setLoading]=useState(false);
   const viewport=useRef<HTMLDivElement>(null),[width,setWidth]=useState(320);
+  const [headlineOverflow,setHeadlineOverflow]=useState(false),[captionOverflow,setCaptionOverflow]=useState(false);
   useEffect(()=>{
     setFrame(null);setFailed(false);setLoading(!!source);if(!source)return;
     const controller=new AbortController();let url:string|null=null,active=true;
@@ -63,13 +69,15 @@ export function EditPreview({source,settings,captionText,mode,timingMissing}:{so
       {settings.framing.zoomStart!==settings.framing.zoomEnd&&<p>Zoom estático: usando zoomStart, sem animar zoomEnd.</p>}
       {(settings.headline.fitPolicy!=='wrap'||settings.captions.fitPolicy!=='wrap')&&<p>Fit shrink/error não simulado; apenas wrap aproximado.</p>}
       {settings.captions.highlightEnabled&&<p>Highlight não simulado; sem animação por palavra.</p>}
-      <div ref={viewport} className="preview-viewport" style={{aspectRatio:`${settings.output.width}/${settings.output.height}`}}>
+      {headlineOverflow&&<p className="preview-overflow">Headline no preview: overflow aproximado — conferir no render</p>}
+      {captionOverflow&&<p className="preview-overflow">Legenda no preview: overflow aproximado — conferir no render</p>}
+      <div ref={viewport} className="preview-viewport" style={{width:`min(100%, ${Math.min(360,640*settings.output.width/settings.output.height)}px)`,aspectRatio:`${settings.output.width}/${settings.output.height}`}}>
         <div className="preview-canvas" style={{width:settings.output.width,height:settings.output.height,transform:`scale(${width/settings.output.width})`}}>
           {current&&<img alt="Frame do MP4 selecionado" src={current} onError={()=>{setFrame(null);setFailed(true);}} style={{objectFit:settings.framing.fit,
             objectPosition:`${settings.framing.x*100}% ${settings.framing.y*100}%`,transform:`scale(${settings.framing.scale*settings.framing.zoomStart})`,
             transformOrigin:`${settings.framing.x*100}% ${settings.framing.y*100}%`}}/>}
-          <PreviewText label="Headline no preview" text={settings.headline.text} style={settings.headline}/>
-          <PreviewText label="Legenda no preview" text={captionText} style={settings.captions}/>
+          <PreviewText label="Headline no preview" text={settings.headline.text} style={settings.headline} onOverflow={setHeadlineOverflow}/>
+          <PreviewText label="Legenda no preview" text={captionText} style={settings.captions} onOverflow={setCaptionOverflow}/>
         </div>
       </div>
     </>}

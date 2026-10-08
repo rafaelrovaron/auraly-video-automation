@@ -6,6 +6,22 @@ import {newProfile} from './profileApi';
 
 const base=()=>({...newProfile('plain','Plain','2026-10-08T00:00:00Z').defaults,headline:{...newProfile('plain','Plain','2026-10-08T00:00:00Z').defaults.headline,enabled:true,text:'A'}});
 const source={campaignId:'campaign-one',renderId:'render-one',sha256:'a'.repeat(64)};
+it('warns_outside_canvas_when_text_crosses_vertical_safe_area',()=>{
+  const rect=vi.spyOn(HTMLElement.prototype,'getBoundingClientRect').mockImplementation(function(this:HTMLElement){
+    return {x:0,y:0,left:0,right:320,width:320,top:0,bottom:600,height:600,toJSON:()=>({})} as DOMRect;
+  });
+  const settings=base();settings.headline.y=1;settings.headline.anchor='top';
+  const ui=render(<EditPreview source={null} settings={settings} captionText="Sample" mode="draft" timingMissing={false}/>);
+  expect(screen.getByText(/Headline no preview: overflow aproximado/).closest('.preview-canvas')).toBeNull();
+  ui.unmount();rect.mockRestore();
+});
+it('bounds_extreme_ratio_preview_height_without_changing_logical_canvas',()=>{
+  const settings=base();settings.output.width=16;settings.output.height=1024;
+  const ui=render(<EditPreview source={null} settings={settings} captionText="Sample" mode="draft" timingMissing={false}/>);
+  const viewport=ui.container.querySelector('.preview-viewport') as HTMLElement;
+  expect(viewport.style.width).toBe('min(100%, 10px)');
+  expect((ui.container.querySelector('.preview-canvas') as HTMLElement).style.height).toBe('1024px');
+});
 const bytes=new Uint8Array([137,80,78,71,13,10,26,10,0,0,0,0,73,72,68,82,0,0,0,32,0,0,0,64]);
 function browser(){
   const create=vi.fn(()=>`blob:poster-${Math.random()}`),revoke=vi.fn();

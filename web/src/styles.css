@@ -4,7 +4,7 @@
 .preview-canvas { position: absolute; transform-origin: top left; background: #000; }
 .preview-canvas img { position: absolute; width: 100%; height: 100%; }
 .preview-text { position: absolute; text-align: center; white-space: pre-wrap; overflow-wrap: anywhere; }
-.preview-overflow { position: absolute; bottom: 0; left: 0; width: 100%; font: 36px system-ui; color: #ffb8a9; background: #000; }
+.preview-overflow { color: #ffb8a9; }
 * { box-sizing: border-box; }
 body { margin: 0; }
 header { border-bottom: 1px solid #354359; padding: 1.1rem max(1rem, calc((100vw - 1100px) / 2)); }
