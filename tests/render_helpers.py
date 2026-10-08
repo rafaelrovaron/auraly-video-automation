@@ -7,7 +7,7 @@ import subprocess
 from auraly_pipeline.editing.batch_domain import EditBatchPlan, EditBatchRequest
 from auraly_pipeline.editing.batch_planner import build_batch_plan, variant_requests
 from auraly_pipeline.editing.domain import EditProfile, SourceVideoRef
-from auraly_pipeline.editing.resolver import profile_hash, resolve_manifest
+from auraly_pipeline.editing.resolver import content_hash, profile_hash, resolve_manifest
 from auraly_pipeline.probe import probe_media
 from tests.editing_batch_helpers import batch_data, batch_inputs
 from tests.editing_helpers import file_sha, profile_data
@@ -50,3 +50,16 @@ def publish_test_plan(plan: EditBatchPlan, work_root: Path) -> None:
             / plan.video_id / plan.plan_hash / "plan.json")
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(plan.model_dump_json(by_alias=True), encoding="utf-8")
+
+
+def refresh_plan(plan: EditBatchPlan) -> None:
+    for output in plan.outputs:
+        m = output.manifest
+        m.manifest_hash = content_hash(m.model_dump(mode="json", by_alias=True, exclude={"manifest_hash"}))
+        output.manifest_hash = m.manifest_hash
+        output.output_hash = content_hash({"manifest": m.model_dump(mode="json", by_alias=True),
+            "captionInput": plan.caption_input.model_dump(mode="json", by_alias=True), "plannerVersion": "1.0"})
+        output.filename = f"{output.output_variant_id}-{output.output_hash}.mp4"
+        output.caption_state = ("disabled" if not m.captions.enabled else
+                                "timing_provided" if plan.caption_input.timing_status == "provided" else "timing_missing")
+    plan.plan_hash = content_hash(plan.model_dump(mode="json", by_alias=True, exclude={"plan_hash"}))

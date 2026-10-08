@@ -10,8 +10,8 @@ from typing import Literal, cast
 from PIL import Image
 import pytest
 
-from auraly_pipeline.editing.domain import AssetRef
-from auraly_pipeline.editing.render_media import encode_master, audio_filter
+from auraly_pipeline.editing.domain import AssetRef, EditingError
+from auraly_pipeline.editing.render_media import encode_master, audio_filter, check_master
 from auraly_pipeline.editing.render_runtime import detect_runtime, run_ffmpeg
 from tests.render_helpers import make_render_plan
 from tests.editing_helpers import file_sha
@@ -167,3 +167,29 @@ def test_limiter_no_auto_gain(tmp_path: Path) -> None:
         assert max(abs(v) for v in samples) <= .951
         if gain == 1:
             assert .12 < amplitude(samples, 440) < .13
+
+
+@pytest.mark.parametrize("case", ["corrupt", "no_audio", "rotation"])
+def test_invalid_media_is_rejected(tmp_path: Path, case: str) -> None:
+    plan = make_render_plan(tmp_path)
+    source = tmp_path / "source.mp4"
+    invalid = tmp_path / "invalid.mp4"
+    if case == "corrupt":
+        invalid.write_bytes(b"invalid media")
+        with pytest.raises(EditingError):
+            check_master(invalid, duration_sec=2, full_decode=True)
+        return
+    args = ["-v", "error", "-i", str(source), "-c", "copy"]
+    args += ["-an"] if case == "no_audio" else []
+    run_ffmpeg([*args, str(invalid)])
+    if case == "rotation":
+        # A real MP4 display matrix, independent of FFmpeg's rotate-tag support.
+        data = bytearray(invalid.read_bytes())
+        track = data.index(b"tkhd")
+        assert data[track + 4] == 0  # version-zero track header
+        struct.pack_into(">9i", data, track + 44, 0, 65536, 0, -65536, 0, 0, 0, 0, 1073741824)
+        invalid.write_bytes(data)
+    with pytest.raises(EditingError, match="source"):
+        encode_master(plan.outputs[0].manifest, source_path=invalid, music_path=None,
+                      ass_path=None, output_path=tmp_path / "out.mp4", runtime=detect_runtime())
+    assert not (tmp_path / "out.mp4").exists()

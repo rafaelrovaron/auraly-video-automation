@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 import subprocess
+from typing import Any
 
 import pytest
 from pydantic import ValidationError
@@ -74,6 +75,19 @@ def test_runtime_probes_real_local_ffmpeg() -> None:
     assert runtime.encoding["crf"] == "18"
     result = run_ffmpeg(["-f", "lavfi", "-i", "color=s=16x16:d=0.1", "-f", "null", "-"])
     assert result == b""
+
+
+def test_timeout_reaps_real_encoder(monkeypatch: pytest.MonkeyPatch) -> None:
+    original = subprocess.Popen
+    processes: list[subprocess.Popen[bytes]] = []
+    def capture(*args: Any, **kwargs: Any) -> subprocess.Popen[bytes]:
+        process = original(*args, **kwargs)
+        processes.append(process)
+        return process
+    monkeypatch.setattr(subprocess, "Popen", capture)
+    with pytest.raises(EditingError, match="timed out"):
+        run_ffmpeg(["-re", "-f", "lavfi", "-i", "color=s=16x16", "-f", "null", "-"], timeout_sec=.2)
+    assert len(processes) == 1 and processes[0].poll() is not None
 
 
 def test_render_schema_export_keeps_existing_editing_contract(tmp_path: Path) -> None:

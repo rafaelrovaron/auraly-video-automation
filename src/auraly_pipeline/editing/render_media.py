@@ -129,5 +129,7 @@ def encode_master(manifest: EditManifestV2, *, source_path: Path, music_path: Pa
                      str(output_path)])
         run_ffmpeg(args, cwd=output_path.parent)
         return check_master(output_path, duration_sec=source.duration_sec, full_decode=True)
+    except EditingError:
+        raise
     except (OSError, ValueError, KeyError, TypeError, ProbeError, subprocess.SubprocessError):
         raise EditingError("output", "local master encode failed safely") from None

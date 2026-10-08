@@ -40,6 +40,10 @@ def validate_editing_path(root: Path, path: Path) -> Path:
     return _safe_path(root, path)
 
 
+def publish_editing_json(root: Path, path: Path, payload: dict[str, Any]) -> None:
+    _publish(root, path, payload)
+
+
 def _read(root: Path, path: Path) -> dict[str, Any]:
     try:
         _safe_path(root, path)
@@ -89,6 +93,16 @@ class EditingService:
     def __init__(self, *, project_root: Path, work_root: Path) -> None:
         self.project_root = _safe_path(project_root, project_root)
         self.work_root = _safe_path(work_root, work_root)
+
+    def validate_asset(self, asset: AssetRef, field: str) -> Path:
+        return self._asset(asset, field)
+
+    def validate_font(self, asset: AssetRef, field: str) -> Path:
+        self._font(asset, field)
+        return self._asset(asset, field)
+
+    def audio_duration(self, asset: AssetRef) -> float:
+        return self._audio_duration(asset)
 
     def _profile_path(self, profile_id: str, version: int) -> Path:
         try:
