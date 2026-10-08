@@ -1,5 +1,21 @@
-import { expect, it } from 'vitest';
-import { heygenOperationView, heygenSubmission } from './heygenApi';
+import { expect, it, vi } from 'vitest';
+import { getRenderPoster, heygenOperationView, heygenSubmission } from './heygenApi';
+
+it('poster_returns_only_bounded_png',async()=>{
+  const bytes=new Uint8Array([137,80,78,71,13,10,26,10,0,0,0,0,73,72,68,82,0,0,0,32,0,0,0,64]);
+  const calls:Array<[string,RequestInit]>=[];
+  vi.stubGlobal('fetch',async(url:string,init:RequestInit)=>{calls.push([url,init]);return new Response(bytes,{headers:{'Content-Type':'image/png'}});});
+  const signal=new AbortController().signal;
+  expect((await getRenderPoster('campaign-one','render-one','a'.repeat(64),signal)).size).toBe(24);
+  expect(calls[0][0]).toBe('/api/v1/campaigns/campaign-one/heygen/renders/render-one/poster/'+'a'.repeat(64));
+  expect(calls[0][1]).toMatchObject({method:'GET',signal});
+  for(const response of [Response.json({secret:'private'}),new Response('',{headers:{'Content-Type':'image/png'}}),
+    new Response('bad png',{headers:{'Content-Type':'image/png'}}),new Response(new Uint8Array(4*1024*1024+1),{headers:{'Content-Type':'image/png'}}),
+    Response.json({secret:'private'},{status:503})]){
+    vi.stubGlobal('fetch',async()=>response);
+    await expect(getRenderPoster('campaign-one','render-one','a'.repeat(64),signal)).rejects.toThrow(/local|inválida/i);
+  }
+});
 
 const submission = {jobId: 'wrapper', campaignId: 'campaign', operation: 'heygen_assets'};
 const view = {...submission, status: 'completed', errorCode: null,

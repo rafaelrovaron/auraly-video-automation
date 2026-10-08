@@ -1,5 +1,18 @@
-import { object, renderSummary } from './api';
+import { ApiError, campaignPath, object, renderSummary } from './api';
 import type { RenderSummary } from './api';
+
+export async function getRenderPoster(campaignId:string,renderId:string,sha256:string,signal:AbortSignal):Promise<Blob>{
+  let response:Response;
+  try{response=await fetch(campaignPath(campaignId,`/heygen/renders/${encodeURIComponent(renderId)}/poster/${encodeURIComponent(sha256)}`),{method:'GET',signal,cache:'no-store'});}
+  catch(e){if(signal.aborted)throw e;throw new ApiError('connection_lost');}
+  if(!response.ok)throw new ApiError('storage_unavailable',response.status);
+  if(response.headers.get('content-type')?.split(';')[0]!=='image/png')throw new ApiError('invalid_response');
+  const blob=await response.blob();
+  if(blob.size<24||blob.size>4*1024*1024)throw new ApiError('invalid_response');
+  const head=new Uint8Array(await blob.slice(0,8).arrayBuffer());
+  if(![137,80,78,71,13,10,26,10].every((b,i)=>head[i]===b))throw new ApiError('invalid_response');
+  return blob;
+}
 
 export type HeyGenOperationKind = 'heygen_assets' | 'heygen_video_plan' | 'heygen_video_submit' | 'heygen_reconcile';
 export type HeyGenSubmission = {jobId: string; campaignId: string; operation: HeyGenOperationKind};

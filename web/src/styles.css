@@ -1,4 +1,10 @@
 :root { font-family: Inter, system-ui, sans-serif; color: #e9eef5; background: #101722; line-height: 1.55; }
+.edit-preview { min-width: 0; }
+.preview-viewport { position: relative; width: min(100%, 360px); background: #000; overflow: hidden; margin: 1rem auto; }
+.preview-canvas { position: absolute; transform-origin: top left; background: #000; }
+.preview-canvas img { position: absolute; width: 100%; height: 100%; }
+.preview-text { position: absolute; text-align: center; white-space: pre-wrap; overflow-wrap: anywhere; }
+.preview-overflow { position: absolute; bottom: 0; left: 0; width: 100%; font: 36px system-ui; color: #ffb8a9; background: #000; }
 * { box-sizing: border-box; }
 body { margin: 0; }
 header { border-bottom: 1px solid #354359; padding: 1.1rem max(1rem, calc((100vw - 1100px) / 2)); }
