@@ -6,7 +6,27 @@
 Este documento guarda decisões duráveis e fatos verificados. O estado entregue aparece separado
 do produto planejado para impedir que roadmap seja confundido com capacidade existente.
 
-## Entrega atual: D4B.3c — Preview aproximado (2026-10-08)
+## Entrega atual: D5A.1 — Renderer local (2026-10-08)
+
+Implementado na branch `feat/d5a1-renderer`, código `7f82932`; gate final e
+revisão independente em andamento, sem merge/push ou Actions desta branch.
+Evidência: `docs/superpowers/2026-10-08-d5a1-verification.md`.
+
+CLI `edit render` consome o EditBatchPlan salvo e processa variantes em ordem.
+Master fixo 1080×1920, 30 FPS, H.264/AAC/yuv420p/faststart, probe e full decode.
+Fonte local exata; texto ASS literal, fit e safe zones medidos por libass.
+Captions exigem timing existente/source_mp4; pesos 400/700, sem word highlight.
+Voz permanece no MP4 original: AAC copiado sem música; mix com ducking fixo,
+amix normalize=0 e limiter sem auto-gain. Nunca reinserir/trimar WAV nesta fase.
+
+Recibos imutáveis por outputHash/runtime, planHash como provenance do produtor;
+outro plano pode reutilizar o mesmo output sem modificar recibo. Rehash de inputs
+antes de publicar; falha de variante isolada, sem overwrite/adotar órfãos.
+Dry-run não grava nem mede fit. No Windows, work root usa caminhos longos nativos.
+Nenhum novo Job/API/UI/migration/provider/dependência. D5A.2 Jobs/UI e D5B
+QC/review/delivery permanecem PLANNED; Flow continua pausado/não bloqueante.
+
+## Histórico: D4B.3c — Preview aproximado (2026-10-08)
 
 Integração autorizada pelo usuário: fast-forward de `main` `dd7203c` → `fdfb3cb`.
 Gate completo fresco na cópia principal após merge: 19/19, 350 frontend e
@@ -32,7 +52,7 @@ Plano validado/salvo usa manifest e captionInput exatos; consulta readonly
 preserva draft, validação e worker existentes. Fonte fallback e limites
 estáticos explícitos; avisos de overflow/safe zones fora do canvas, proporção
 preservada dentro de 360 × 640 px. Sem player/timeline/render ou chamada paga.
-D5 renderer é o próximo recorte ainda planejado; Flow permanece pausado.
+Neste checkpoint, D5 renderer era o próximo recorte planejado; Flow permanece pausado.
 
 D4B.3b e correção mínima do teste CI foram integrados em main `dd7203c`.
 Actions Windows passou; Linux foi cancelado na preparação antes dos testes.

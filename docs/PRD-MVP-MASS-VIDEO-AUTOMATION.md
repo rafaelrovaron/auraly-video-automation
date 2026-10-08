@@ -19,6 +19,19 @@ genérico e não terá timeline estilo CapCut ou preview frame-perfect.
 
 ### 2.1 Capacidade entregue
 
+Checkpoint D5A.1 (2026-10-08): renderer local implementado na branch
+`feat/d5a1-renderer`; gate final/revisão/integração pendentes. CLI `edit render`
+consome plano salvo sem nova geração upstream. Masters fixos 1080×1920/30 FPS
+H.264/AAC/yuv420p/faststart, headline/captions com fonte local exata e fit real,
+música e framing. Captions exigem timing aceito em source_mp4, pesos 400/700,
+sem highlight por palavra. Sem música copia AAC; com música usa ducking fixo,
+voz ganho 1/amix normalize=0/limiter sem auto-gain. Voz vem do MP4, nunca do WAV.
+Recibo imutável por outputHash/runtime, planHash do produtor; reuso requer
+hash/probe/recibo íntegros. Falha isolada e reparo manual de órfãos, sem overwrite.
+Dry-run não grava nem mede fit. D5A.2 Jobs/API/UI e D5B QC/review/delivery
+continuam PLANNED; não significa D5A inteiro entregue ou novo PROVIDER_VERIFIED.
+Evidência: `docs/superpowers/2026-10-08-d5a1-verification.md`.
+
 Checkpoint D4B.3c (2026-10-08): preview aproximado `IMPLEMENTED`, `LOCAL_VERIFIED`
 integrado em `main` por fast-forward `fdfb3cb`, com gate repetido após merge. Gate Windows 19/19,
 350 frontend e 1.823 Python / 26 skips; resultados finais em
@@ -27,7 +40,7 @@ CSS; rascunho não validado ou manifest confirmado, variantes explícitas e
 consulta readonly preservando o draft. Caption do plano usa seu captionInput,
 não a copy corrente. Fonte de sistema fallback, safe zones/overflow avisados
 fora do canvas; proporção preservada em viewport limitado. Sem player/timeline,
-sincronização, áudio, fit exato, renderer ou chamadas pagas. D5 continua planejado.
+sincronização, áudio, fit exato, renderer ou chamadas pagas neste checkpoint histórico.
 D4B.3b já integrado em main `dd7203c`; checkpoints abaixo são históricos.
 
 Checkpoint D4B.3a (2026-10-07): profiles pela UI global `#/profiles` implementados,

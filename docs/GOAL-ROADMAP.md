@@ -68,7 +68,8 @@ D4B.2b.2 HeyGen Forms                        IMPLEMENTED, LOCAL_VERIFIED
 D4B.3a Profiles UI                           IMPLEMENTED, LOCAL_VERIFIED
 D4B.3b Overrides & Headline Variants UI       IMPLEMENTED, LOCAL_VERIFIED
 D4B.3c Approximate Preview                   IMPLEMENTED, LOCAL_VERIFIED
-D5A Deterministic Renderer
+D5A.1 Local Renderer                         IMPLEMENTED (gate final pendente)
+D5A.2 Render Jobs/API/UI                      PLANNED
 D5B Render QC, Review & Delivery
 D6  End-to-End Personal Pilot
 ```
@@ -528,7 +529,24 @@ Permitir que Rafael gerencie a pipeline sem editar JSON ou usar múltiplos coman
 
 ## D5A — Deterministic Renderer
 
-**Status:** `PLANNED`.
+**Status:** D5A.1 implementado, gate final pendente; D5A.2 `PLANNED`.
+
+### D5A.1 — Renderer local / CLI
+
+Plano salvo → variantes sequenciais → FFmpeg/ASS → master 1080×1920/30 FPS
+H.264/AAC/yuv420p/faststart + probe/full decode + recibo imutável.
+Texto literal/fonte local exata, fit/safe zones; captions com timing existente,
+pesos 400/700, highlight por palavra rejeitado. Voz do MP4, AAC copiado sem
+música; ducking fixo/limiter sem auto-gain quando mixada. Sem regenerar upstream.
+Identidade outputHash/runtime, planHash apenas como provenance do produtor.
+CLI `edit render` e dry-run sem writes/fit; órfãos exigem reparo manual.
+Evidência: `docs/superpowers/2026-10-08-d5a1-verification.md`.
+
+### D5A.2 — Próximo recorte, ainda planejado
+
+Integrar render com Jobs/API/UI existentes, sem timeline ou preview frame-perfect.
+Design/plano próprios após integrar D5A.1 e verificar Actions Windows/Linux.
+Não ampliar D5A.1 para QC/review/delivery D5B ou alinhamento automático.
 
 ### Objetivo
 

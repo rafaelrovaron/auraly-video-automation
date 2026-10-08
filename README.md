@@ -11,6 +11,12 @@ entrega.
 
 ### Entregue hoje
 
+- D5A.1: renderer local sequencial FFmpeg/ASS e CLI `edit render` implementados
+  na branch `feat/d5a1-renderer`; verificação final e integração ainda pendentes.
+  Consome plano salvo, gera masters 1080×1920/30 FPS H.264/AAC com headline,
+  captions com timing existente, música e framing. A/B reutiliza o MP4 original;
+  recibo por outputHash/runtime permite replay sem encode. Sem novos Jobs/API/UI.
+  [Evidência D5A.1](docs/superpowers/2026-10-08-d5a1-verification.md).
 - D4B.3c `IMPLEMENTED`, `LOCAL_VERIFIED`, integrado em `main` por fast-forward `fdfb3cb`:
   gate Windows 19/19, 350 frontend e 1.823 Python / 26 skips; preview estático aproximado
   do MP4 selecionado, headline/legenda/framing e seleção de variante, sem render
@@ -42,7 +48,7 @@ entrega.
   verificados com fixtures locais;
 - CLI JSON e harness de verificação para as capacidades acima.
 - D3A: profiles locais versionados, manifest v2, resolver tipado com hash/provenance,
-  persistência exclusiva e CLI `edit`, sem renderer ou chamadas de provider.
+  persistência exclusiva e CLI `edit`; neste checkpoint não havia renderer ou chamadas de provider.
 - D3B: planejamento A/B em lote, captions ligadas à copy/voz aprovadas, sidecar de timing
   validado quando fornecido e CLI `edit plan|plan-get`, sem gerar mídia.
 - D4A.1 implementado: API FastAPI de consultas locais, status factual por campanha,
@@ -77,9 +83,29 @@ Evidência: [verificação D4B.3b](docs/superpowers/2026-10-07-d4b3b-verificatio
 
 ### Não entregue ainda
 
-- render final com headline, captions, música e framing configuráveis;
-- renderização das variações A/B já planejadas, reutilizando voz, imagem e HeyGen;
-- preview aproximado e fluxo end-to-end operável pela interface.
+- D5A.2: disparar e acompanhar o render por Jobs/API/UI;
+- D5B: QC/review humano e entrega dos masters;
+- piloto end-to-end operável pela interface (o preview aproximado já foi entregue).
+
+### Render local de um plano salvo (D5A.1)
+
+```powershell
+uv run auraly edit render --campaign-id <campaign> --video-id <video> --plan-hash <hash> --project-root <project> --work-root <work>
+```
+
+`--dry-run` valida assets/suporte/reuso sem gravar arquivos ou medir fit.
+O comando retorna JSON; exit 1 indica erro global ou variante failed, sem interromper
+irmãs válidas. Texto literal com fonte local exata, pesos 400/700 e fit wrap/error/shrink;
+captions habilitadas exigem cues aceitos em `source_mp4`, sem highlight por palavra.
+Sem música, copia AAC; com música, aplica volumeDb + duckUnderVoiceDb fixo e limiter
+sem auto-gain, preservando a voz do MP4 (não reinsere WAV).
+
+Masters ficam sob `campaigns/<campaign>/editing/renders/<variant>/<renderKey>/`,
+com `render.json` publicado por último. Reuso exige hash/probe/recibo íntegros;
+planHash do recibo identifica o plano produtor, não precisa ser o plano consumidor.
+Órfão/corrupção nunca é sobrescrito ou adotado: reparar manualmente o artefato
+identificado, preservando backup se necessário, e executar novamente.
+Windows usa caminhos longos nativos; ferramentas legadas podem precisar de work root curto.
 
 ### Google Flow: preservado, mas pausado
 
