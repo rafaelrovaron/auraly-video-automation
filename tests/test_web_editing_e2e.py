@@ -175,9 +175,9 @@ def test_preview_safe_zones_and_extreme_ratios(panel_servers: PanelServers, pane
     group.get_by_label('Vídeo · Headline · safeTop', exact=True).fill('0.8')
     expect(warning).to_be_visible()
     group.get_by_text('Output', exact=True).click()
-    for field, value in [('width', output_width), ('height', output_height)]:
+    for field, dimension in [('width', output_width), ('height', output_height)]:
         group.get_by_label(f'Vídeo · Output · {field} · Modo', exact=True).select_option('replace')
-        group.get_by_label(f'Vídeo · Output · {field}', exact=True).fill(str(value))
+        group.get_by_label(f'Vídeo · Output · {field}', exact=True).fill(str(dimension))
     viewport = preview.locator('.preview-viewport')
     box = viewport.bounding_box()
     assert box is not None
