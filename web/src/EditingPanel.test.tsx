@@ -42,6 +42,14 @@ async function draft(){
 }
 const validate=()=>fireEvent.click(screen.getByRole('button',{name:'Validar plano'}));
 const save=()=>screen.getByRole('button',{name:'Salvar plano'});
+it('renders only confirmed saved plan, not validated or changed draft',async()=>{
+  const s=server();render(<EditingPanel campaignId="campaign-one" renders={renders}/>);await draft();
+  const button=()=>screen.getByRole('button',{name:'Renderizar'});
+  expect(button().hasAttribute('disabled')).toBe(true);validate();await screen.findByText(/Plano validado\./);expect(button().hasAttribute('disabled')).toBe(true);
+  fireEvent.click(save());await screen.findByText(/Plano salvo e confirmado/);expect(button().hasAttribute('disabled')).toBe(false);
+  fireEvent.change(screen.getByLabelText('Headline base'),{target:{value:'Different draft'}});
+  expect(button().hasAttribute('disabled')).toBe(false);expect(screen.getByRole('region',{name:'Render final'}).textContent).toContain(s.saved[0].planHash);
+});
 it('preview_selection_does_not_mutate_editorial_request',async()=>{
   const s=server();render(<EditingPanel campaignId="campaign-one" renders={renders}/>);await draft();
   fireEvent.change(screen.getByLabelText('Variante a · Headline · enabled · Modo'),{target:{value:'replace'}});

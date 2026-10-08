@@ -4,7 +4,7 @@ import { WorkerControls } from './WorkerControls';
 import type { WorkerControlsProps } from './WorkerControls';
 import type { WorkerKind, WorkerObservation } from './api';
 
-const kinds: WorkerKind[] = ['local_operations', 'voice_generate', 'voice_import', 'heygen_assets', 'heygen_videos'];
+const kinds: WorkerKind[] = ['local_operations', 'voice_generate', 'voice_import', 'heygen_assets', 'heygen_videos', 'editing_render'];
 function props(observation: WorkerObservation = { scope: 'known', value: { state: 'idle', campaignId: null, kind: null, errorCode: null } }): WorkerControlsProps {
   return { campaignId: 'campaign-one', worker: { data: observation, error: null, loading: false, lastSuccessAt: 1, lastSuccessReadId: 1, refresh: () => 2 }, connected: true, onRefresh: vi.fn() };
 }

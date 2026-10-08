@@ -11,6 +11,7 @@ import {editAsset,editBatchRequest,editIdentifier,getEditOperation,getEditPlan,l
 import type {EditBatchPlan,EditBatchRequest,EditOverrides,PlanSummary} from './editingApi';
 import {useUnsavedChanges} from './useUnsavedChanges';
 import {EditPreview,previewSettings} from './EditPreview';
+import {RenderPanel} from './RenderPanel';
 
 type Props={campaignId:string;renders:RemoteState<Items<HeyGenRenderView>>};
 type Variant={row:number;key:string;label:string;draft:OverrideDraft};
@@ -38,6 +39,7 @@ function EditorialFlow({campaignId,renders}:Props){
   const [dirty,setDirty]=useState(false),[validated,setValidated]=useState<Validated|null>(null),[submission,setSubmission]=useState<Submission|null>(null);
   const [unknown,setUnknown]=useState(false),[notice,setNotice]=useState<string|null>(null),[error,setError]=useState<string|null>(null),[saved,setSaved]=useState<EditBatchPlan|null>(null);
   const [view,setView]=useState<EditBatchPlan|null>(null),[viewLoading,setViewLoading]=useState(false);
+  const [renderPlan,setRenderPlan]=useState<EditBatchPlan|null>(null);
   const [previewOrigin,setPreviewOrigin]=useState('draft'),[previewRow,setPreviewRow]=useState(1),[previewKey,setPreviewKey]=useState('a');
   const alive=useRef(true),generation=useRef(0),listGeneration=useRef(0),profileGeneration=useRef(0),viewGeneration=useRef(0),nextRow=useRef(2);
   const lock=useRef(false),sent=useRef<Submission|null>(null),timer=useRef<ReturnType<typeof setTimeout>|undefined>(undefined),queryController=useRef<AbortController|null>(null);
@@ -57,6 +59,7 @@ function EditorialFlow({campaignId,renders}:Props){
   const change=()=>{setDirty(true);setValidated(null);setSaved(null);setNotice(null);setPreviewOrigin('draft');clearErrors();};
   const discard=()=>!dirty||window.confirm('Há um rascunho não salvo. Descartar alterações?');
   const resetDraft=()=>{setHeadline('');setMaxOutputs('3');setCampaign(newOverrideDraft());setVideo(newOverrideDraft());setVariants([initialVariant()]);nextRow.current=2;
+    setRenderPlan(null);setView(null);viewGeneration.current++;
     setMusicAccepted(false);setTimingPath('');setTimingHash('');setValidated(null);setSaved(null);setDirty(false);clearUnsaved();clearErrors();setNotice(null);};
   const chooseRender=(value:string)=>{if(busy||!discard())return;generation.current++;resetDraft();setRenderId(value);setVideoId(value);};
   const chooseProfile=async(value:string)=>{
@@ -113,7 +116,7 @@ function EditorialFlow({campaignId,renders}:Props){
       if(!s.plan||!samePlan(result.plan,s.plan))throw new ApiError('command_unknown');
       const confirmed=await getEditPlan(campaignId,s.request.videoId,result.plan.planHash,controller.signal);if(!isCurrent(s,token))return;
       if(!samePlan(confirmed,result.plan))throw new ApiError('command_unknown');
-      release();setSaved(confirmed);setDirty(false);clearUnsaved();setNotice('Plano salvo e confirmado. Não é um vídeo renderizado.');void refresh();
+      release();setSaved(confirmed);setRenderPlan(confirmed);setDirty(false);clearUnsaved();setNotice('Plano salvo e confirmado. Não é um vídeo renderizado.');void refresh();
     }catch{if(isCurrent(s,token))markUnknown();}
   };
   const submit=async(persist:boolean)=>{
@@ -139,8 +142,8 @@ function EditorialFlow({campaignId,renders}:Props){
   const abandon=()=>{if(!window.confirm('Abandonar acompanhamento? A operação pode continuar no backend; isto não cancela o Job.'))return;
     generation.current++;clearTimeout(timer.current);queryController.current?.abort();release();setValidated(null);setNotice(null);setDirty(true);};
   const inspect=async(key:string)=>{
-    const item=plans.find(p=>`${p.videoId}/${p.planHash}`===key);setView(null);const token=++viewGeneration.current;if(!item)return;setViewLoading(true);
-    try{const p=await getEditPlan(campaignId,item.videoId,item.planHash,new AbortController().signal);if(alive.current&&token===viewGeneration.current)setView(p);}
+    const item=plans.find(p=>`${p.videoId}/${p.planHash}`===key);setView(null);setRenderPlan(null);const token=++viewGeneration.current;if(!item)return;setViewLoading(true);
+    try{const p=await getEditPlan(campaignId,item.videoId,item.planHash,new AbortController().signal);if(alive.current&&token===viewGeneration.current){setView(p);setRenderPlan(p);}}
     catch(e){if(alive.current&&token===viewGeneration.current)setError((e instanceof ApiError?e:new ApiError('connection_lost')).message);}
     finally{if(alive.current&&token===viewGeneration.current)setViewLoading(false);}
   };
@@ -213,5 +216,6 @@ function EditorialFlow({campaignId,renders}:Props){
     <label>Consultar plano salvo<select aria-label="Consultar plano salvo" onChange={e=>{void inspect(e.target.value);}} defaultValue=""><option value="">Selecione</option>
       {plans.map(p=><option key={`${p.videoId}/${p.planHash}`} value={`${p.videoId}/${p.planHash}`}>{p.videoId} · {p.outputCount} saídas · {p.planHash}</option>)}</select></label>
     {viewLoading&&<p role="status">Consultando plano salvo…</p>}{view&&<PlanDetails plan={view}/>}
+    <RenderPanel campaignId={campaignId} plan={renderPlan}/>
   </div>;
 }

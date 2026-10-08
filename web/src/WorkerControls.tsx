@@ -6,6 +6,7 @@ export type WorkerControlsProps = { campaignId: string; worker: RemoteState<Work
 const kinds: [WorkerKind, string][] = [
   ['local_operations', 'Operações locais'], ['voice_generate', 'Gerar voz'], ['voice_import', 'Processar voz importada'],
   ['heygen_assets', 'Upload de assets HeyGen'], ['heygen_videos', 'Vídeos HeyGen'],
+  ['editing_render', 'Renderizar planos salvos'],
 ];
 
 export function WorkerControls({ campaignId, worker, connected, onRefresh }: WorkerControlsProps) {
