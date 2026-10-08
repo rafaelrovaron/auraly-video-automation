@@ -1,7 +1,7 @@
 # D4B.3c — Preview aproximado simples
 
-Status: abordagem conversacional aprovada em 2026-10-08. Esta spec aguarda
-revisão do usuário; implementação e plano ainda não iniciados.
+Status: abordagem e spec aprovadas pelo usuário em 2026-10-08.
+Plano em preparação; implementação ainda não iniciada.
 Base entregue: D4B.3b em main, `dd7203c`. O gate local passou 19/19 etapas;
 Actions Windows passou. Actions Linux foi cancelado durante preparação do
 ambiente, antes dos testes: não há confirmação Linux dessa correção.
