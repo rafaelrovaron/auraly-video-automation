@@ -1,5 +1,14 @@
 # D5A.1 — Verificação do renderer local
 
+## Integração em main
+
+Merge/push autorizados pelo usuário em 2026-10-08. Fast-forward local
+`42beda7` → `8be3fab`, sem conflitos ou alterações de produção adicionais.
+Gate completo fresco pós-merge na cópia principal: **19/19**, exit 0,
+350 frontend, **1.877 Python / 27 skips**, pytest 726,17 s.
+Atualização de integração somente documental; Actions Linux/Windows pendentes.
+O restante deste documento preserva o checkpoint anterior à integração.
+
 Data: 2026-10-08. Branch `feat/d5a1-renderer`, base de código `42beda7`,
 spec/plano aprovados `5299d85`/`52f0a9d`, código corrigido `f08fbdd`.
 Estado: `IMPLEMENTED`, `LOCAL_VERIFIED` no Windows. Gate final sobre `7f0b7e6`;

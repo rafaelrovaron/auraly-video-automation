@@ -12,9 +12,9 @@ entrega.
 ### Entregue hoje
 
 - D5A.1 `IMPLEMENTED`, `LOCAL_VERIFIED` (Windows): renderer local sequencial
-  FFmpeg/ASS e CLI `edit render` na branch `feat/d5a1-renderer`. Gate final 19/19,
+  FFmpeg/ASS e CLI `edit render` integrado em `main` no código `8be3fab`. Gate pós-merge 19/19,
   350 frontend e 1.877 Python / 27 skips; três achados da revisão corrigidos
-  com RED→GREEN. Merge/push e Actions Linux/Windows ainda pendentes.
+  com RED→GREEN. Actions Linux/Windows desta integração ainda pendentes.
   Consome plano salvo, gera masters 1080×1920/30 FPS H.264/AAC com headline,
   captions com timing existente, música e framing. A/B reutiliza o MP4 original;
   recibo por outputHash/runtime permite replay sem encode. Sem novos Jobs/API/UI.

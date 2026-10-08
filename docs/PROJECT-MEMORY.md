@@ -8,6 +8,11 @@ do produto planejado para impedir que roadmap seja confundido com capacidade exi
 
 ## Entrega atual: D5A.1 — Renderer local (2026-10-08)
 
+Integração autorizada pelo usuário: fast-forward de `main` `42beda7` → `8be3fab`.
+Gate completo fresco na cópia principal após merge: 19/19, 350 frontend,
+1.877 Python / 27 skips (pytest 726,17 s), exit 0. Checkpoint abaixo preserva
+o histórico da branch; Actions desta integração ainda pendentes.
+
 `IMPLEMENTED`, `LOCAL_VERIFIED` (Windows) na branch `feat/d5a1-renderer`,
 código corrigido `f08fbdd`; gate final sobre `7f0b7e6`: 19/19, 350 frontend,
 1.877 Python / 27 skips (pytest 721,38 s). Ruff/mypy/build/schemas aprovados;

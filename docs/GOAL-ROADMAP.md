@@ -531,7 +531,8 @@ Permitir que Rafael gerencie a pipeline sem editar JSON ou usar múltiplos coman
 
 **Status:** D5A.1 `IMPLEMENTED`, `LOCAL_VERIFIED` (Windows), gate final 19/19,
 350 frontend e 1.877 Python / 27 skips. Revisão e correções concluídas;
-merge/push e Actions Linux/Windows pendentes. D5A.2 `PLANNED`.
+integrado em `main` no código `8be3fab`, gate pós-merge repetido com sucesso;
+Actions Linux/Windows desta integração pendentes. D5A.2 `PLANNED`.
 
 ### D5A.1 — Renderer local / CLI
 
