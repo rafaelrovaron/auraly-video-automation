@@ -47,12 +47,16 @@ def test_all_spec_get_routes_and_openapi(tmp_path: Path, mp4: bytes) -> None:
         assert client.get("/api/v1/editing/profiles/plain/1").status_code == 200
         assert client.get("/docs").status_code == 200
         schema = client.get("/openapi.json").json()
-        assert sum("get" in path for path in schema["paths"].values()) == 16
-        for path in schema["paths"].values():
+        assert sum("get" in path for path in schema["paths"].values()) == 17
+        for name, path in schema["paths"].items():
             if "get" not in path:
                 continue
             assert "422" in path["get"]["responses"]
-            assert path["get"]["responses"]["200"]["content"]["application/json"]["schema"]
+            content = path['get']['responses']['200']['content']
+            if name.endswith('/poster/{sourceSha256}'):
+                assert content == {'image/png': {'schema': {'type': 'string', 'format': 'binary'}}}
+            else:
+                assert content["application/json"]["schema"]
 
 
 @pytest.mark.parametrize("path, status", [

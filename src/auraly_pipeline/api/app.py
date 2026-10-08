@@ -161,6 +161,12 @@ def create_app(settings: ApiSettings) -> FastAPI:
     def renders(campaignId: CampaignId, queries: Queries) -> Items[RenderSummary]:
         return Items(items=queries.list_renders(campaignId))
 
+    @app.get('/api/v1/campaigns/{campaignId}/heygen/renders/{renderId}/poster/{sourceSha256}',
+             response_class=Response, responses={200: {'content': {'image/png': {'schema': {'type': 'string', 'format': 'binary'}}}}})
+    def poster(campaignId: CampaignId, renderId: EditId, sourceSha256: PlanHash, queries: Queries) -> Response:
+        return Response(queries.get_render_poster(campaignId, renderId, sourceSha256),
+                        media_type='image/png', headers={'Cache-Control': 'no-store'})
+
     @app.get("/api/v1/campaigns/{campaignId}/jobs")
     def jobs(campaignId: CampaignId, queries: Queries) -> Items[JobSummary]:
         return Items(items=queries.list_jobs(campaignId))

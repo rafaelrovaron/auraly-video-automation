@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import hashlib
+
+from pydantic import ValidationError
+
 from sqlalchemy import Engine
 from sqlalchemy.orm import sessionmaker
 
@@ -12,9 +16,10 @@ from auraly_pipeline.campaigns.domain import Campaign, CampaignBudgetView, campa
 from auraly_pipeline.campaigns.service import CampaignNotFoundError, CampaignService
 from auraly_pipeline.editing.batch_domain import EditBatchPlan
 from auraly_pipeline.editing.batch_service import EditBatchService
-from auraly_pipeline.editing.domain import EditingArtifactNotFoundError, EditingError
+from auraly_pipeline.editing.domain import EditingArtifactNotFoundError, EditingError, relative_path
 from auraly_pipeline.editing.resolver import profile_hash
-from auraly_pipeline.editing.service import EditingService
+from auraly_pipeline.editing.service import EditingService, validate_editing_path
+from auraly_pipeline.api.poster import decode_poster
 from auraly_pipeline.heygen.video_repository import HeyGenVideoRepository
 from auraly_pipeline.images.service import ImageService
 from auraly_pipeline.jobs.repository import JobRepository
@@ -101,6 +106,31 @@ class ApiQueries:
             audio_sha256=render.item.audio_sha256, source=render.source, error_code=render.error_code,
             created_at=render.created_at, updated_at=render.updated_at,
         ) for render in sorted(self.renders.list_campaign(campaign_id), key=lambda item: item.render_id)]
+
+    def get_render_poster(self, campaign_id: str, render_id: str, source_sha256: str) -> bytes:
+        self.campaign(campaign_id)
+        try:
+            render = self.renders.get(render_id)
+        except ValidationError:
+            raise QueryError('artifact_invalid') from None
+        except ValueError:
+            raise QueryError('not_found') from None
+        if render.item.campaign_id != campaign_id:
+            raise QueryError('not_found')
+        source = render.source
+        if render.status != 'ready' or source is None or source.sha256 != source_sha256:
+            raise QueryError('artifact_invalid')
+        try:
+            root = self.editing.work_root
+            path = validate_editing_path(root, root / relative_path(source.path))
+            if not path.is_file() or path.stat().st_size != source.size_bytes:
+                raise QueryError('artifact_invalid')
+            with path.open('rb') as stream:
+                if hashlib.file_digest(stream, 'sha256').hexdigest() != source_sha256:
+                    raise QueryError('artifact_invalid')
+        except (OSError, ValueError):
+            raise QueryError('artifact_invalid') from None
+        return decode_poster(path)
 
     def list_jobs(self, campaign_id: str) -> list[JobSummary]:
         self.campaign(campaign_id)
