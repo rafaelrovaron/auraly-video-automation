@@ -93,3 +93,37 @@ it('uncertain worker start reads fresh state before offering another start',asyn
   await waitFor(()=>expect(screen.getByRole('button',{name:'Iniciar render pendente'}).hasAttribute('disabled')).toBe(false));
   expect(startRenderWorker).toHaveBeenCalledOnce();
 });
+it('unknown submission can be explicitly abandoned only after a successful consultation',async()=>{
+  vi.mocked(submitRender).mockRejectedValueOnce(new ApiError('command_unknown'));
+  vi.spyOn(window,'confirm').mockReturnValue(false);
+  render(<RenderPanel campaignId={plan.campaignId} plan={plan}/>);
+  fireEvent.click(screen.getByRole('button',{name:'Renderizar'}));await screen.findByText(/Resultado do comando desconhecido/);
+  const abandon=screen.getByRole('button',{name:'Abandonar acompanhamento do render'});
+  expect(abandon.hasAttribute('disabled')).toBe(true);
+  vi.mocked(listRenders).mockRejectedValueOnce(new ApiError('connection_lost'));
+  fireEvent.click(screen.getByRole('button',{name:'Consultar execuções'}));await screen.findByText(/Sem conexão/);
+  expect(abandon.hasAttribute('disabled')).toBe(true);
+  fireEvent.click(screen.getByRole('button',{name:'Consultar execuções'}));await screen.findByText(/Execução enviada ainda não encontrada/);
+  expect(abandon.hasAttribute('disabled')).toBe(false);
+  fireEvent.click(abandon);expect(screen.getByRole('button',{name:'Renderizar'}).hasAttribute('disabled')).toBe(true);
+  vi.mocked(window.confirm).mockReturnValue(true);fireEvent.click(abandon);
+  expect(screen.getByRole('button',{name:'Renderizar'}).hasAttribute('disabled')).toBe(false);
+  expect(submitRender).toHaveBeenCalledOnce();expect(startRenderWorker).not.toHaveBeenCalled();
+  vi.mocked(crypto.randomUUID).mockReturnValue('44444444-4444-4444-8444-444444444444');
+  vi.mocked(submitRender).mockResolvedValue({...body,executionId:'44444444-4444-4444-8444-444444444444',jobId});
+  fireEvent.click(screen.getByRole('button',{name:'Renderizar'}));
+  await waitFor(()=>expect(submitRender).toHaveBeenCalledTimes(2));
+  expect(vi.mocked(submitRender).mock.calls[1][0].executionId).toBe('44444444-4444-4444-8444-444444444444');
+});
+it.each([
+  ['captionInput','captionInput: accepted caption timing required','Timing de legendas ausente'],
+  ['text.fit','text.fit: text does not fit safe zones and maxLines','Texto não cabe'],
+  ['output','output: orphan render; manual artifact repair required','Master órfão'],
+  ['text.font','text.font: local font selection or glyph coverage failed','Confira a fonte local'],
+])('shows actionable safe reason for %s',async(field,message,expected)=>{
+  const result=structuredClone(completed);if(!result.result)throw new Error('fixture');
+  result.result.outputs[1].error={field,message};vi.mocked(getRender).mockResolvedValue(result);
+  render(<RenderPanel campaignId={plan.campaignId} plan={plan}/>);fireEvent.click(screen.getByRole('button',{name:'Renderizar'}));
+  await screen.findByText(new RegExp(expected));
+  expect(screen.getAllByRole('link',{name:'Abrir MP4'})).toHaveLength(1);
+});

@@ -2,10 +2,28 @@ import {useEffect,useRef,useState} from 'react';
 import {ApiError,readWorker,statusLabel} from './api';
 import type {EditBatchPlan} from './editingApi';
 import {getRender,listRenders,renderMediaUrl,startRenderWorker,submitRender} from './renderApi';
-import type {RenderJobRequest,RenderJobView} from './renderApi';
+import type {RenderJobRequest,RenderJobView,RenderOutput} from './renderApi';
 type Props={campaignId:string;plan:EditBatchPlan|null};
 const active=(v:RenderJobView)=>['queued','running','retry_scheduled'].includes(v.status);
 const safe=(e:unknown)=>e instanceof ApiError?e:new ApiError('connection_lost');
+function failure(error:RenderOutput['error']):string{
+  if(error?.field==='output'&&error.message==='output: orphan render; manual artifact repair required')return 'Master órfão: faça reparo manual do artefato antes de executar novamente; não será sobrescrito.';
+  if(error?.field==='output'&&error.message==='output: render receipt conflict; manual artifact repair required')return 'Recibo conflitante: faça reparo manual do artefato antes de executar novamente; não será sobrescrito.';
+  const messages:Record<string,string>={
+    captionInput:'Timing de legendas ausente ou não aceito: forneça timing válido ou desabilite captions em um novo plano.',
+    timingRef:'Confira o arquivo de timing e seu hash; salve um novo plano se a referência mudar.',
+    'text.fit':'Texto não cabe: ajuste texto, tamanho, safe zones ou maxLines em um novo plano.',
+    'text.font':'Confira a fonte local, seu hash e a cobertura dos caracteres.',
+    'headline.font':'Confira a fonte local da headline e seu hash.', 'captions.font':'Confira a fonte local das legendas e seu hash.',
+    'headline.fontWeight':'Use peso de fonte 400 ou 700 em um novo plano.', 'captions.fontWeight':'Use peso de fonte 400 ou 700 em um novo plano.',
+    'captions.highlightEnabled':'Highlight por palavra não é suportado; desabilite em um novo plano.',
+    'music.asset':'Confira a música local, seu hash e o aceite de uso.',
+    assets:'Inputs mudaram durante o render; confira os arquivos originais antes de executar novamente.',
+    output:'Falha no master: confira a integridade do MP4/recibo e o suporte do plano pelo renderer.',
+    runtime:'Confira FFmpeg/libass local e os filtros necessários antes de executar novamente.',
+  };
+  return error&&Object.hasOwn(messages,error.field)?messages[error.field]:'Variante falhou. Confira o plano e a integridade dos assets locais.';
+}
 export function RenderPanel(props:Props){
   return <RenderFlow key={`${props.campaignId}/${props.plan?.videoId}/${props.plan?.planHash}`} {...props}/>;
 }
@@ -13,6 +31,7 @@ function RenderFlow({campaignId,plan}:Props){
   const [runs,setRuns]=useState<RenderJobView[]>([]),[job,setJob]=useState<RenderJobView|null>(null);
   const [pending,setPending]=useState<RenderJobRequest|null>(null),[sending,setSending]=useState(false),[listing,setListing]=useState(false);
   const [notice,setNotice]=useState<string|null>(null),[workerUnknown,setWorkerUnknown]=useState(false),[monitor,setMonitor]=useState(true),[readId,setReadId]=useState(0);
+  const [pendingConsulted,setPendingConsulted]=useState(false);
   const alive=useRef(true),lock=useRef(false),listController=useRef<AbortController|null>(null),listVersion=useRef(0);
   const current=(v:RenderJobRequest)=>!!plan&&v.campaignId===campaignId&&v.videoId===plan.videoId&&v.planHash===plan.planHash;
   useEffect(()=>{alive.current=true;return()=>{alive.current=false;listController.current?.abort();};},[]);
@@ -23,7 +42,7 @@ function RenderFlow({campaignId,plan}:Props){
       if(!alive.current||token!==listVersion.current)return;setRuns(result.items);
       if(pending&&!job){const found=result.items.find(v=>current(v)&&v.executionId===pending.executionId);
         if(found){setJob(found);setPending(null);setMonitor(true);setNotice('Execução enviada encontrada pelo executionId.');}
-        else setNotice('Execução enviada ainda não encontrada. Nenhum POST será reenviado.');}}
+        else {setPendingConsulted(true);setNotice('Execução enviada ainda não encontrada. Nenhum POST será reenviado.');}}}
     catch(e){if(alive.current&&token===listVersion.current)setNotice(safe(e).message);}
     finally{if(alive.current&&token===listVersion.current)setListing(false);}
   };
@@ -56,7 +75,7 @@ function RenderFlow({campaignId,plan}:Props){
     if(!plan||plan.campaignId!==campaignId||lock.current||pending||(job&&active(job)))return;
     lock.current=true;setSending(true);setNotice(null);setWorkerUnknown(false);
     const request:RenderJobRequest={schemaVersion:'1.0',campaignId,videoId:plan.videoId,planHash:plan.planHash,executionId:crypto.randomUUID()};
-    setPending(request);setJob(null);
+    setPending(request);setPendingConsulted(false);setJob(null);
     try{const accepted=await submitRender(request);if(!alive.current)return;
       setPending(null);setJob({...accepted,status:'queued',result:null,renderStatus:null,errorCode:null});setMonitor(true);
       await start();
@@ -65,6 +84,11 @@ function RenderFlow({campaignId,plan}:Props){
     finally{if(alive.current){lock.current=false;setSending(false);}}
   };
   const choose=(id:string)=>{if(pending||sending)return;const chosen=runs.find(v=>v.jobId===id);setJob(chosen??null);setMonitor(true);setNotice(null);setWorkerUnknown(false);};
+  const abandon=()=>{
+    if(sending||pending&&!pendingConsulted)return;
+    if(pending&&!window.confirm('Abandonar envio desconhecido? Isto não cancela um Job que pode existir ou aparecer depois. Uma nova execução explícita pode duplicar trabalho.'))return;
+    setMonitor(false);setPending(null);setPendingConsulted(false);setNotice('Acompanhamento abandonado. Não cancela o Job no backend.');
+  };
   return <section aria-label="Render final">
     <h3>Render final</h3>
     {plan?<p>Plano salvo para render: {plan.videoId} · {plan.planHash}</p>:<p>Salve ou consulte um plano confirmado para renderizar.</p>}
@@ -77,15 +101,15 @@ function RenderFlow({campaignId,plan}:Props){
       <option value="">Selecione</option>{runs.map(v=><option key={v.jobId} value={v.jobId}>{v.jobId} · {statusLabel(v.status)}</option>)}
     </select></label>
     {pending&&<p>Execução enviada: {pending.executionId}. Consulte antes de decidir outra ação; nenhum reenvio automático.</p>}
+    {(pending||job&&monitor&&active(job))&&<button disabled={sending||!!pending&&!pendingConsulted} onClick={abandon}>Abandonar acompanhamento do render</button>}
     {job&&<><p>Job de render: {job.jobId} · {statusLabel(job.status)}</p>
       {job.status==='queued'&&<button disabled={sending||workerUnknown} onClick={()=>{void startPending();}}>Iniciar render pendente</button>}
       {workerUnknown&&<button disabled={sending} onClick={()=>{void reconcileWorker();}}>Consultar worker de render</button>}
       <button disabled={sending} onClick={()=>{setMonitor(true);setReadId(n=>n+1);}}>Consultar render</button>
-      {monitor&&active(job)&&<button onClick={()=>{setMonitor(false);setNotice('Acompanhamento abandonado. Não cancela o Job no backend.');}}>Abandonar acompanhamento do render</button>}
       {job.renderStatus&&<p role="status">{job.renderStatus==='succeeded'?'Render concluído':job.renderStatus==='partial_failure'?'Falha parcial':'Todas as variantes falharam'}</p>}
       {job.errorCode&&<p role="status">{new ApiError(job.errorCode).message}</p>}
       {job.result?.outputs.map(o=><article key={o.key}><h4>{o.key} · {o.status}</h4>
-        {o.status==='failed'?<p>Variante falhou. Revise o plano; nenhuma nova tentativa automática.</p>:<p>
+        {o.status==='failed'?<p>{failure(o.error)} Nenhuma nova tentativa automática.</p>:<p>
           <a href={renderMediaUrl(campaignId,job.jobId,o.outputVariantId)} target="_blank" rel="noreferrer">Abrir MP4</a> · {' '}
           <a href={renderMediaUrl(campaignId,job.jobId,o.outputVariantId,true)}>Baixar MP4</a></p>}
       </article>)}
