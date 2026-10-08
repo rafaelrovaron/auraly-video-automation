@@ -193,3 +193,41 @@ def test_invalid_media_is_rejected(tmp_path: Path, case: str) -> None:
         encode_master(plan.outputs[0].manifest, source_path=invalid, music_path=None,
                       ass_path=None, output_path=tmp_path / "out.mp4", runtime=detect_runtime())
     assert not (tmp_path / "out.mp4").exists()
+
+
+def test_mix_preserves_delayed_voice_and_complete_duration(tmp_path: Path) -> None:
+    plan = make_render_plan(tmp_path)
+    source = tmp_path / "offset.mp4"
+    run_ffmpeg(["-v", "error", "-f", "lavfi", "-i", "color=s=320x180:r=30:d=2",
+                "-itsoffset", "0.4", "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000:duration=1.6",
+                "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-t", "2", str(source)])
+    music = tmp_path / "silence.wav"
+    run_ffmpeg(["-v", "error", "-f", "lavfi", "-i", "anullsrc=r=48000:cl=mono:d=2", str(music)])
+    m = plan.outputs[0].manifest
+    m.music.enabled = True
+    m.music.fade_in_sec = m.music.fade_out_sec = 0
+    output = tmp_path / "mixed.mp4"
+    encode_master(m, source_path=source, music_path=music, ass_path=None,
+                  output_path=output, runtime=detect_runtime())
+    samples = audio(output)
+    assert amplitude(samples, 440, .05, .25) < .001
+    assert .12 < amplitude(samples, 440, .7, 1.2) < .13
+    assert amplitude(samples, 440, 1.8, 1.95) > .1
+    assert len(samples) / 48000 >= 1.98
+
+
+def test_short_nonloop_music_fades_before_silence(tmp_path: Path) -> None:
+    plan = make_render_plan(tmp_path)
+    m = plan.outputs[0].manifest
+    m.music.enabled, m.music.loop = True, False
+    m.music.volume_db = m.music.duck_under_voice_db = m.music.fade_in_sec = 0
+    m.music.fade_out_sec = .2
+    graph = audio_filter(m, music_duration_sec=.5)
+    assert graph is not None
+    data = run_ffmpeg(["-v", "error", "-f", "lavfi", "-i", "anullsrc=r=48000:cl=mono:d=2",
+                      "-f", "lavfi", "-i", "sine=frequency=880:sample_rate=48000:duration=0.5",
+                      "-filter_complex", graph, "-map", "[audio]", "-ac", "1", "-f", "f32le", "-"])
+    samples = struct.unpack("<" + "f" * (len(data) // 4), data)
+    assert amplitude(samples, 880, .1, .2) > .12
+    assert amplitude(samples, 880, .45, .5) < .04
+    assert amplitude(samples, 880, .7, 1.7) < .001

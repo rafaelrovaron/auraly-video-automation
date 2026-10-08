@@ -18,7 +18,9 @@ def video_filter(manifest: EditManifestV2, source: MediaProbe) -> str:
     base = max(ratios) if f.fit == "cover" else min(ratios)
     zoom = f"({f.scale:g}*({f.zoom_start:g}+({f.zoom_end-f.zoom_start:g})*min(t/{manifest.source.duration_sec:g},1)))"
     w, h = source.video.width * base, source.video.height * base
-    return ("setpts=PTS-STARTPTS,fps=30,"
+    # FFmpeg normalizes the input against its common container start; do not
+    # independently zero each stream and lose the original A/V relationship.
+    return ("fps=30:start_time=0,"
             f"scale=w='ceil({w:g}*{zoom}/2)*2':h='ceil({h:g}*{zoom}/2)*2':eval=frame,"
             f"pad=w='max(iw,1080)':h='max(ih,1920)':x='(ow-iw)*{f.x:g}':y='(oh-ih)*{f.y:g}':color=black:eval=frame,"
             f"crop=1080:1920:x='(iw-1080)*{f.x:g}':y='(ih-1920)*{f.y:g}',setsar=1")
@@ -38,11 +40,12 @@ def audio_filter(manifest: EditManifestV2, *, music_duration_sec: float) -> str 
     repeat = f",aloop=loop=-1:size={round(segment*48000)}:start=0" if m.loop else ""
     fades = (f",afade=t=in:st=0:d={m.fade_in_sec:g}" if m.fade_in_sec > 0 else "")
     if m.fade_out_sec > 0:
-        fades += f",afade=t=out:st={max(0, duration-m.fade_out_sec):g}:d={m.fade_out_sec:g}"
+        effective_end = duration if m.loop else min(segment, duration)
+        fades += f",afade=t=out:st={max(0, effective_end-m.fade_out_sec):g}:d={m.fade_out_sec:g}"
     return (f"[1:a:0]aresample=48000,atrim=start={m.trim_start_sec:g}:end={end:g},"
             f"asetpts=PTS-STARTPTS{repeat},apad,atrim=duration={duration:g},"
             f"volume={m.volume_db+m.duck_under_voice_db:g}dB{fades}[music];"
-            "[0:a:0]asetpts=PTS-STARTPTS[voice];"
+            f"[0:a:0]aresample=48000:first_pts=0,apad,atrim=duration={duration:g}[voice];"
             "[voice][music]amix=inputs=2:duration=first:normalize=0,"
             "alimiter=limit=0.95:level=0:latency=1[audio]")
 

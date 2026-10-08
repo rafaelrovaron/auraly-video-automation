@@ -122,9 +122,14 @@ def _block(text: str, style: TextStyle, font_path: Path, staging: Path,
                 # Conservative font metrics size the probe; libass pixels decide final fit.
                 width = max(2048, math.ceil(font.getlength(line) * 2 + 512))
                 height = max(512, math.ceil(size * 4 + abs(style.shadow_offset_y) * 2 + 256))
+                if style.fit_policy == "shrink" and (width > 8192 or height > 4096):
+                    break  # Oversized candidate: retry smaller, never allocate an unbounded probe.
                 doc = _document(style, family, size, width, height)
                 _event(doc, escape_ass_text(line), _tags(style) + r"\pos(256,128)")
                 boxes.append(measure_ass(doc.to_string("ass"), staging=staging, runtime=runtime))
+            if len(boxes) != len(lines):
+                size -= 1
+                continue
             total_height = max((i * step + b[3] - b[1] for i, b in enumerate(boxes)), default=0) + 2 * pad
             total_width = max((b[2] - b[0] for b in boxes), default=0) + 2 * pad
             x = style.x * 1080

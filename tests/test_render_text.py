@@ -95,3 +95,9 @@ def test_caption_intervals_use_saved_cues(tmp_path: Path) -> None:
 def test_font_selection_has_no_silent_fallback(tmp_path: Path) -> None:
     with pytest.raises(EditingError, match="font"):
         script(tmp_path, text="Missing glyph \U0010ffff")
+
+
+def test_shrink_continues_past_measurement_canvas_limit(tmp_path: Path) -> None:
+    path = script(tmp_path, text="W" * 100, font_size_px=100, max_lines=1, fit_policy="shrink")
+    bbox = frame(path).getchannel("A").getbbox()
+    assert bbox is not None and bbox[2] - bbox[0] <= 972
