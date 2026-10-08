@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import os
 import re
 import subprocess
 
@@ -18,7 +19,10 @@ def invoke_ffmpeg(args: list[str], *, cwd: Path | None = None,
             local.extend(["-protocol_whitelist", "file,pipe"])
         local.append(arg)
     try:
-        result = subprocess.run(["ffmpeg", "-nostdin", "-n", *local], cwd=cwd,
+        environment = os.environ.copy()
+        if cwd is not None and (cwd / "fontconfig.xml").is_file():
+            environment["FONTCONFIG_FILE"] = str(cwd / "fontconfig.xml")
+        result = subprocess.run(["ffmpeg", "-nostdin", "-n", *local], cwd=cwd, env=environment,
                                 capture_output=True, timeout=timeout_sec, check=False)
     except (OSError, subprocess.SubprocessError):
         raise EditingError("runtime", "local FFmpeg unavailable or timed out") from None
