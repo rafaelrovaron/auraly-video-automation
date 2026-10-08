@@ -31,6 +31,7 @@ from auraly_pipeline.editing.batch_planner import verify_batch_plan
 from auraly_pipeline.editing.batch_service import EditBatchService
 from auraly_pipeline.editing.render_service import RenderService
 from auraly_pipeline.editing.render_handler import RenderJobHandler
+from auraly_pipeline.api.render_commands import RenderCommands
 from auraly_pipeline.editing.domain import EditingError, EditingArtifactNotFoundError, EditProfile, relative_path
 from auraly_pipeline.editing.resolver import profile_hash
 from auraly_pipeline.editing.service import validate_editing_path, EditingService
@@ -90,6 +91,8 @@ class ApiCommands:
                 ),
             },
         )
+        self.editorial_renders = RenderCommands(jobs=self.jobs, editing=self.editing, renderer=self.renderer,
+                                               require_campaign=self.require_campaign)
         self.voices = VoiceMasterService(
             engine, work_root=settings.work_root, provider=speech_provider, transcriber=transcriber,
         )
