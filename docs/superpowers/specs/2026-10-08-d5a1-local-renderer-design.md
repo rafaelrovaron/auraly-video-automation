@@ -1,6 +1,6 @@
 # D5A.1 — Motor local de render
 
-Status: abordagem aprovada pelo usuário; spec escrita para revisão.
+Status: abordagem e spec aprovadas pelo usuário em 2026-10-08.
 Implementação não iniciada. Base: main em `42beda7`.
 
 ## Resultado esperado
@@ -202,7 +202,7 @@ estabelece PROVIDER_VERIFIED nem aprovação humana dos masters.
 
 ## Próxima aprovação
 
-Esta spec aguarda revisão do usuário, incluindo os limites explícitos de
-highlight, pesos de fonte, master fixo e ducking estático. Após aprovação,
-escrever o plano de implementação em tarefas pequenas; execução só começa
+O usuário aprovou esta spec, incluindo os limites explícitos de
+highlight, pesos de fonte, master fixo e ducking estático. O próximo artefato
+é o plano de implementação em tarefas pequenas; execução só começa
 depois da revisão/aprovação do plano e escolha do método de execução.
