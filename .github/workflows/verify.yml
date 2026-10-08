@@ -87,7 +87,13 @@ jobs:
             web/package-lock.json
 
       - name: Install FFmpeg for local media fixtures
-        run: choco install ffmpeg --yes --no-progress
+        run: |
+          choco install ffmpeg --yes --no-progress
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          # Bypass the Chocolatey shim so subprocess timeouts kill the encoder itself.
+          $encoders = @(Get-ChildItem "$env:ChocolateyInstall/lib/ffmpeg" -Recurse -Filter ffmpeg.exe -File)
+          if ($encoders.Count -ne 1) { throw "Expected one real FFmpeg executable" }
+          $encoders[0].DirectoryName | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: Install Playwright-managed Chromium
         run: uv run playwright install chromium

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from click import unstyle
 from typer.testing import CliRunner
 
 from auraly_pipeline.cli import app
@@ -73,4 +74,4 @@ def test_windows_ci_includes_render_tests() -> None:
 def test_render_help_describes_local_capability() -> None:
     result = CliRunner().invoke(app, ["edit", "render", "--help"])
     assert result.exit_code == 0
-    assert "--dry-run" in result.output
+    assert "--dry-run" in unstyle(result.output)

@@ -5,6 +5,7 @@ from pathlib import Path
 
 from PIL import Image
 import pytest
+import pysubs2  # type: ignore[import-untyped]
 
 from auraly_pipeline.editing.domain import EditingError
 from auraly_pipeline.editing.batch_domain import CaptionInput
@@ -85,8 +86,10 @@ def test_caption_intervals_use_saved_cues(tmp_path: Path) -> None:
     stage.mkdir()
     path = write_ass(manifest, caption, font_paths={"captions": tmp_path / "project/font.ttf"},
                      staging=stage, runtime=detect_runtime())
-    content = path.read_text(encoding="utf-8")
-    assert "Visual a" not in content and "Click now!" in content
+    events = pysubs2.load(str(path)).events
+    # Fonts can wrap differently; preserve all cue text and its saved interval.
+    assert " ".join(" ".join(event.plaintext for event in events).split()) == "Visual hook Body words. Click now!"
+    assert all((event.start, event.end) == (500, 1000) for event in events)
     assert frame(path, .1).getchannel("A").getbbox() is None
     assert frame(path, .7).getchannel("A").getbbox() is not None
     assert frame(path, 1.2).getchannel("A").getbbox() is None
