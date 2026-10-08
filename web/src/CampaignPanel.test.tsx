@@ -20,11 +20,12 @@ const renderItem = { renderId: 'render-one', campaignId: 'campaign-one', sceneVa
 const job = { jobId: 'job-one', jobType: 'unknown.type', campaignId: 'campaign-one', sceneVariantId: null, status: 'queued', attemptCount: 0, maxAttempts: 3, retrySafety: 'manual_only',
   createdAt: time, updatedAt: time, queuedAt: time, startedAt: null, completedAt: null, cancelledAt: null, nextRetryAt: null, lastErrorCode: 'oauth_required' };
 
-function fakeApi(overrides: Record<string, unknown> = {}) {
+function fakeApi(overrides: Record<string, unknown> = {}, renderGate?: Promise<void>) {
   const calls: { path: string; method: string }[] = [];
   vi.stubGlobal('fetch', async (path: string, options: RequestInit) => {
     calls.push({ path, method: options.method ?? 'GET' });
     const suffix = path.replace('/api/v1/campaigns/campaign-one', '');
+    if (renderGate && suffix === '/heygen/renders') await renderGate;
     const body = { '': detail, '/status': status, '/images': { items: [{ sceneVariantId: 'scene-one', items: [] }] },
       '/voices': { items: [voice] }, '/budget': {state: 'missing', currency: null, limitCents: null}, '/heygen/renders': { items: [renderItem] }, '/jobs': { items: [job] },
       '/jobs/job-one': job, '/worker': { state: 'idle', campaignId: null, kind: null, errorCode: null }, ...overrides }[suffix];
@@ -143,12 +144,17 @@ it.each([
   ['Jobs', '/jobs', { items: [null] }],
 ])('keeps last valid %s data stale and other sections usable after malformed nested DTOs', async (title, suffix, invalid) => {
   const overrides: Record<string, unknown> = {};
-  fakeApi(overrides);
+  // HeyGen loads after campaign detail; reproduce that independent request boundary.
+  let releaseRenders!: () => void;
+  const renderGate = new Promise<void>(resolve => { releaseRenders = resolve; });
+  fakeApi(overrides, title === 'HeyGen' ? renderGate : undefined);
   render(<CampaignDetailPanel campaignId="campaign-one" />);
   expect(await screen.findByText('Copy hook')).toBeTruthy();
+  queueMicrotask(releaseRenders);
+  const section = screen.getByRole('region', { name: title as string });
+  expect(await within(section).findByText(/Última leitura:/)).toBeTruthy();
   overrides[suffix as string] = invalid;
   fireEvent.click(screen.getByRole('button', { name: 'Atualizar' }));
-  const section = screen.getByRole('region', { name: title as string });
   expect(await within(section).findByText(/invalid_response.*Dados desatualizados/)).toBeTruthy();
   expect(screen.getByText('Copy hook')).toBeTruthy();
   expect(screen.getByRole('heading', { name: 'Worker' })).toBeTruthy();
