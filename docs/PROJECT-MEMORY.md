@@ -6,12 +6,47 @@
 Este documento guarda decisões duráveis e fatos verificados. O estado entregue aparece separado
 do produto planejado para impedir que roadmap seja confundido com capacidade existente.
 
-## Entrega atual: D5A.1 — Renderer local (2026-10-08)
+## Entrega atual: D5A.2 — Render Jobs/API/UI (2026-10-08)
+
+`IMPLEMENTED`, `LOCAL_VERIFIED` (Windows) em `feat/d5a2-render-integration`, código `8a34ffc`.
+Gate fresco 19/19, exit 0: 378 frontend em 22 arquivos; 1.924 Python / 27 skips,
+pytest 812,77 s. Tipagem, build e schemas sem drift; revisão independente concluída,
+dois Important corrigidos com cinco regressões RED→GREEN, nenhum Minor adiado.
+Reutiliza renderer D5A.1, JobService/SQLite e worker existentes. Um Job `editing.render`
+por plano inteiro, `MANUAL_ONLY`, maxAttempts=1; kind `editing_render` drena apenas
+renders da campanha, com lease/heartbeat/stop já existentes. Sem migration/dependência.
+
+API POST só admite plano salvo e enfileira. Identidade inclui executionId UUID do cliente;
+request idêntico retorna mesmo Job, nova execução voluntária cria outro Job sem alterar
+plano/recibos. GET valida request/plano/result e agrega succeeded/partial_failure/failed:
+Job completed não implica sucesso de todas as variantes. Media verifica identidade,
+path/containment, recibo, inputs declarados e SHA/tamanho do mesmo handle servido;
+aceita reuso com planHash do produtor e não roda FFmpeg no download.
+
+UI renderiza somente plano salvo confirmado ou consultado, explicitando videoId/hash.
+Rascunho e preview aproximado não mudam alvo; nova seleção de fonte/profile ou consulta
+limpa alvo anterior até confirmação. Clique duplicado não cria outro envio; worker ocupado
+mantém Job queued. Resposta perdida é reconciliada pelo executionId exato, sem repost;
+polling serial 2 s, abort/cleanup e descarte de resposta tardia. Reload lista execuções,
+nova execução pode reused; links por variante. Abandonar acompanhamento não cancela Job.
+Envio incerto não encontrado após consulta bem-sucedida pode ser abandonado com confirmação;
+nenhum request novo é criado automaticamente. Failed exibe diagnóstico local permitido
+(timing/fonte/fit/órfão/recibo) e fallback seguro, nunca erro privado arbitrário.
+
+E2E local real gerou/baixou três masters distintos, validou full decode/probe,
+recarregou e reaproveitou três outputs preservando recibos, upstream, budget e copy.
+Nenhuma chamada externa paga; não amplia PROVIDER_VERIFIED. D5B QC/review/delivery
+continua `PLANNED`; Flow permanece pausado/não bloqueante. Sem merge/push autorizado
+para esta etapa; Actions D5A.2 ainda não executados.
+Evidência: `docs/superpowers/2026-10-08-d5a2-verification.md`.
+
+## Histórico: D5A.1 — Renderer local (2026-10-08)
 
 Integração autorizada pelo usuário: fast-forward de `main` `42beda7` → `8be3fab`.
 Gate completo fresco na cópia principal após merge: 19/19, 350 frontend,
 1.877 Python / 27 skips (pytest 726,17 s), exit 0. Checkpoint abaixo preserva
-o histórico da branch; Actions desta integração ainda pendentes.
+o histórico da branch. Correções mínimas CI integradas até `501d312`;
+Actions Linux e Windows passaram no run `37792802719`, confirmado antes do design D5A.2.
 
 `IMPLEMENTED`, `LOCAL_VERIFIED` (Windows) na branch `feat/d5a1-renderer`,
 código corrigido `f08fbdd`; gate final sobre `7f0b7e6`: 19/19, 350 frontend,
@@ -33,8 +68,8 @@ Recibos imutáveis por outputHash/runtime, planHash como provenance do produtor;
 outro plano pode reutilizar o mesmo output sem modificar recibo. Rehash de inputs
 antes de publicar; falha de variante isolada, sem overwrite/adotar órfãos.
 Dry-run não grava nem mede fit. No Windows, work root usa caminhos longos nativos.
-Nenhum novo Job/API/UI/migration/provider/dependência. D5A.2 Jobs/UI e D5B
-QC/review/delivery permanecem PLANNED; Flow continua pausado/não bloqueante.
+Neste checkpoint não havia novo Job/API/UI/migration/provider/dependência. D5A.2
+Jobs/UI e D5B QC/review/delivery eram PLANNED; Flow continua pausado/não bloqueante.
 
 ## Histórico: D4B.3c — Preview aproximado (2026-10-08)
 

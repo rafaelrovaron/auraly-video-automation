@@ -11,13 +11,22 @@ entrega.
 
 ### Entregue hoje
 
+- D5A.2 `IMPLEMENTED`, `LOCAL_VERIFIED` (Windows) na branch `feat/d5a2-render-integration`:
+  gate 19/19, 378 frontend, 1.924 Python / 27 skips; código `8a34ffc`.
+  Render de planos salvos pela UI, Job `editing.render`, worker dedicado
+  `editing_render`, consulta persistida e masters por variante para abrir/baixar.
+  Mesmo executionId retorna o mesmo Job; nova execução explícita pode reaproveitar
+  masters sem nova codificação. Falhas parciais ficam visíveis. Sem provider pago,
+  migration ou dependência nova; QC/review/delivery editorial permanece D5B.
+  [Evidência D5A.2](docs/superpowers/2026-10-08-d5a2-verification.md).
 - D5A.1 `IMPLEMENTED`, `LOCAL_VERIFIED` (Windows): renderer local sequencial
   FFmpeg/ASS e CLI `edit render` integrado em `main` no código `8be3fab`. Gate pós-merge 19/19,
   350 frontend e 1.877 Python / 27 skips; três achados da revisão corrigidos
-  com RED→GREEN. Actions Linux/Windows desta integração ainda pendentes.
+  com RED→GREEN. Correções CI integradas até `501d312`; Actions Linux/Windows
+  aprovados no [run 37792802719](https://github.com/rafaelrovaron/auraly-video-automation/actions/runs/37792802719).
   Consome plano salvo, gera masters 1080×1920/30 FPS H.264/AAC com headline,
   captions com timing existente, música e framing. A/B reutiliza o MP4 original;
-  recibo por outputHash/runtime permite replay sem encode. Sem novos Jobs/API/UI.
+  recibo por outputHash/runtime permite replay sem encode. Neste checkpoint não havia Jobs/API/UI de render.
   [Evidência D5A.1](docs/superpowers/2026-10-08-d5a1-verification.md).
 - D4B.3c `IMPLEMENTED`, `LOCAL_VERIFIED`, integrado em `main` por fast-forward `fdfb3cb`:
   gate Windows 19/19, 350 frontend e 1.823 Python / 26 skips; preview estático aproximado
@@ -85,7 +94,6 @@ Evidência: [verificação D4B.3b](docs/superpowers/2026-10-07-d4b3b-verificatio
 
 ### Não entregue ainda
 
-- D5A.2: disparar e acompanhar o render por Jobs/API/UI;
 - D5B: QC/review humano e entrega dos masters;
 - piloto end-to-end operável pela interface (o preview aproximado já foi entregue).
 
@@ -108,6 +116,30 @@ planHash do recibo identifica o plano produtor, não precisa ser o plano consumi
 Órfão/corrupção nunca é sobrescrito ou adotado: reparar manualmente o artefato
 identificado, preservando backup se necessário, e executar novamente.
 Windows usa caminhos longos nativos; ferramentas legadas podem precisar de work root curto.
+
+### Render pela interface (D5A.2)
+
+Na seção **Edição e variantes**, valide e salve o plano, ou use **Consultar plano salvo**.
+O bloco **Render final** mostra videoId/planHash do alvo confirmado. Alterar o rascunho
+ou a origem do preview não altera esse alvo; selecionar outra fonte/profile o limpa.
+
+**Renderizar** enfileira uma execução e inicia somente `editing_render` nesta campanha.
+Se outro worker estiver ocupado, o Job permanece na fila: use **Iniciar render pendente**
+depois, sem reenviar o render. Esse worker pode drenar outros Jobs de render já na fila
+da mesma campanha, mas não processa voz/HeyGen.
+
+**Consultar execuções** recupera Jobs persistidos após reload. Se a resposta de um envio
+for perdida, a consulta procura o executionId exato; não há retry automático.
+Após consulta bem-sucedida sem encontrar o envio, é possível abandonar seu acompanhamento
+com confirmação. Isso não cancela um Job que possa aparecer depois; outro render exige
+ação explícita e pode duplicar trabalho. Erros por variante mostram orientação segura
+para timing, fonte, fit ou reparo manual de master/recibo, sem logs ou paths privados.
+Ao terminar, cada variante exibe `rendered`, `reused` ou `failed`, com links para
+**Abrir MP4** e **Baixar MP4** somente nos sucessos. Download valida plano/recibo/hash,
+não roda FFmpeg novamente. **Nova execução** cria outro executionId e pode reutilizar
+masters íntegros. Abandonar acompanhamento não cancela o Job.
+
+Render concluído não significa aprovação humana ou entrega; esses passos são D5B.
 
 ### Google Flow: preservado, mas pausado
 

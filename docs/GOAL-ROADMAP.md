@@ -69,7 +69,7 @@ D4B.3a Profiles UI                           IMPLEMENTED, LOCAL_VERIFIED
 D4B.3b Overrides & Headline Variants UI       IMPLEMENTED, LOCAL_VERIFIED
 D4B.3c Approximate Preview                   IMPLEMENTED, LOCAL_VERIFIED
 D5A.1 Local Renderer                         IMPLEMENTED, LOCAL_VERIFIED (Windows)
-D5A.2 Render Jobs/API/UI                      PLANNED
+D5A.2 Render Jobs/API/UI                      IMPLEMENTED, LOCAL_VERIFIED (Windows)
 D5B Render QC, Review & Delivery
 D6  End-to-End Personal Pilot
 ```
@@ -532,7 +532,10 @@ Permitir que Rafael gerencie a pipeline sem editar JSON ou usar múltiplos coman
 **Status:** D5A.1 `IMPLEMENTED`, `LOCAL_VERIFIED` (Windows), gate final 19/19,
 350 frontend e 1.877 Python / 27 skips. Revisão e correções concluídas;
 integrado em `main` no código `8be3fab`, gate pós-merge repetido com sucesso;
-Actions Linux/Windows desta integração pendentes. D5A.2 `PLANNED`.
+Correções CI até `501d312`, Actions Linux/Windows aprovados no run `37792802719`.
+D5A.2 `IMPLEMENTED`, `LOCAL_VERIFIED` (Windows), código `8a34ffc`, na branch
+`feat/d5a2-render-integration`: gate 19/19, 378 frontend, 1.924 Python / 27 skips;
+merge/push e Actions desta etapa ainda pendentes.
 
 ### D5A.1 — Renderer local / CLI
 
@@ -545,11 +548,18 @@ Identidade outputHash/runtime, planHash apenas como provenance do produtor.
 CLI `edit render` e dry-run sem writes/fit; órfãos exigem reparo manual.
 Evidência: `docs/superpowers/2026-10-08-d5a1-verification.md`.
 
-### D5A.2 — Próximo recorte, ainda planejado
+### D5A.2 — Render Jobs/API/UI
 
-Integrar render com Jobs/API/UI existentes, sem timeline ou preview frame-perfect.
-Design/plano próprios após integrar D5A.1 e verificar Actions Windows/Linux.
-Não ampliar D5A.1 para QC/review/delivery D5B ou alinhamento automático.
+Plano salvo → um Job editing.render → worker editing_render → resultados por variante.
+POST só enfileira; GET/list recuperam execução persistida, downloads validam recibo/hash
+sem reexecutar FFmpeg. executionId diferencia nova execução voluntária de replay do envio.
+UI explicita alvo salvo, worker ocupado/queued, resposta desconhecida e falha parcial;
+polling serial com abort, histórico após reload e abrir/baixar masters íntegros.
+Rascunho/preview não alteram plano; nova execução pode reutilizar outputs sem regenerar
+imagem, voz ou HeyGen. Sem timeline, frame-perfect, migration ou dependência nova.
+E2E real local com três headlines + download/full decode + reload/reuso preservando upstream.
+Evidência: `docs/superpowers/2026-10-08-d5a2-verification.md`.
+Próximo recorte: D5B QC/review/delivery, com design específico antes da execução.
 
 ### Objetivo
 
