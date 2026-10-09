@@ -5,10 +5,11 @@ import math
 from pathlib import Path
 import struct
 import subprocess
+from typing import Literal
 
 from auraly_pipeline.editing.domain import EditManifestV2, EditingError
 from auraly_pipeline.editing.render_domain import RenderRuntime
-from auraly_pipeline.editing.render_runtime import run_ffmpeg
+from auraly_pipeline.editing.render_runtime import invoke_ffmpeg, run_ffmpeg
 from auraly_pipeline.probe import MediaProbe, ProbeError, probe_media
 
 
@@ -72,7 +73,14 @@ def _faststart(path: Path) -> bool:
     return False
 
 
+class MasterCheckError(EditingError):
+    def __init__(self, kind: Literal["invalid", "operational"], probe: MediaProbe | None = None) -> None:
+        self.kind, self.probe = kind, probe
+        super().__init__("output", "master integrity validation failed")
+
+
 def check_master(path: Path, *, duration_sec: float, full_decode: bool = False) -> MediaProbe:
+    probe = None
     try:
         probe = probe_media(path, timeout_seconds=30)
         result = subprocess.run(["ffprobe", "-v", "error", "-protocol_whitelist", "file,pipe",
@@ -86,13 +94,24 @@ def check_master(path: Path, *, duration_sec: float, full_decode: bool = False) 
                 or not math.isfinite(probe.duration_sec) or probe.size_bytes <= 0
                 or abs(probe.duration_sec - duration_sec) > 1/30 + 1024/probe.audio.sample_rate
                 or not _faststart(path)):
-            raise ValueError()
+            raise MasterCheckError("invalid", probe)
         if full_decode:
-            run_ffmpeg(["-v", "error", "-xerror", "-i", str(path), "-map", "0:v:0",
-                        "-map", "0:a:0", "-f", "null", "-"], timeout_sec=120)
+            decode = invoke_ffmpeg(["-v", "error", "-xerror", "-i", str(path), "-map", "0:v:0",
+                                    "-map", "0:a:0", "-f", "null", "-"], timeout_sec=120, check=False)
+            if decode.returncode:
+                raise MasterCheckError("invalid", probe)
         return probe
-    except (OSError, ValueError, KeyError, TypeError, ProbeError, subprocess.SubprocessError):
-        raise EditingError("output", "master integrity validation failed") from None
+    except MasterCheckError:
+        raise
+    except ProbeError as exc:
+        kind: Literal["invalid", "operational"] = "operational" if isinstance(exc.__cause__, OSError) else "invalid"
+        raise MasterCheckError(kind, probe) from None
+    except (OSError, subprocess.TimeoutExpired, EditingError, json.JSONDecodeError):
+        raise MasterCheckError("operational", probe) from None
+    except subprocess.CalledProcessError:
+        raise MasterCheckError("invalid", probe) from None
+    except (ValueError, KeyError, TypeError):
+        raise MasterCheckError("operational", probe) from None
 
 
 def encode_master(manifest: EditManifestV2, *, source_path: Path, music_path: Path | None,
