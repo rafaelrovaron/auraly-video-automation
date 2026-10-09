@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-import hashlib
-import os
 from typing import BinaryIO, cast
 
 from pydantic import JsonValue
@@ -12,8 +10,8 @@ from auraly_pipeline.api.render_contracts import RenderJobSubmission, RenderJobV
 from auraly_pipeline.editing.batch_domain import EditBatchPlan
 from auraly_pipeline.editing.batch_service import EditBatchService
 from auraly_pipeline.editing.domain import EditingError
-from auraly_pipeline.editing.render_domain import RenderBatchResult, RenderReceipt
-from auraly_pipeline.editing.service import validate_editing_path
+from auraly_pipeline.editing.render_domain import RenderBatchResult
+from auraly_pipeline.editing.render_artifacts import open_verified_render
 from auraly_pipeline.editing.render_job_domain import RenderJobRequest, render_status
 from auraly_pipeline.editing.render_service import RenderService
 from auraly_pipeline.editing.resolver import content_hash
@@ -101,46 +99,11 @@ class RenderCommands:
             raise QueryError("not_found")
         if item.status not in {"rendered", "reused"}:
             raise QueryError("operation_not_allowed")
-        stream = None
         try:
             plan = self._plan(view)
             output = next(o for o in plan.outputs if o.output_variant_id == output_variant_id)
-            manifest = output.manifest
-            root = self.renderer.work_root
-            path = validate_editing_path(root, root / "campaigns" / campaign_id / "editing" / "renders"
-                / output_variant_id / item.render_key / output.filename)
-            if item.path != path.relative_to(root).as_posix():
-                raise ValueError("unexpected render path")
-            receipt_path = validate_editing_path(root, path.with_name("render.json"))
-            receipt = RenderReceipt.model_validate_json(receipt_path.read_bytes())
-            inputs = {"source": plan.source.sha256}
-            for field, style in (("headlineFont", manifest.headline), ("captionsFont", manifest.captions)):
-                if style.enabled:
-                    if style.font is None:
-                        raise ValueError("missing font")
-                    inputs[field] = style.font.sha256
-            if manifest.music.enabled:
-                if manifest.music.asset is None:
-                    raise ValueError("missing music")
-                inputs["music"] = manifest.music.asset.sha256
-            if manifest.captions.enabled:
-                if plan.caption_input.timing_ref is None:
-                    raise ValueError("missing timing")
-                inputs["timing"] = plan.caption_input.timing_ref.sha256
-            if ((receipt.campaign_id, receipt.video_id, receipt.output_variant_id, receipt.manifest_hash,
-                 receipt.output_hash, receipt.render_key, receipt.path) !=
-                (campaign_id, view.video_id, output_variant_id, output.manifest_hash,
-                 output.output_hash, item.render_key, item.path)
-                    or receipt.inputs != inputs
-                    or receipt.mix_policy != ("fixed_duck_mix" if manifest.music.enabled else "source_copy")):
-                raise ValueError("render receipt mismatch")
-            stream = path.open("rb")
-            if (os.fstat(stream.fileno()).st_size != receipt.size_bytes
-                    or hashlib.file_digest(stream, "sha256").hexdigest() != receipt.sha256):
-                raise ValueError("invalid master integrity")
-            stream.seek(0)
-            return stream, output.filename
+            artifact = open_verified_render(work_root=self.renderer.work_root, plan=plan,
+                output_variant_id=output_variant_id, render_key=item.render_key, expected_path=item.path)
+            return artifact.stream, output.filename
         except (ValueError, OSError, StopIteration):
-            if stream is not None:
-                stream.close()
             raise QueryError("artifact_invalid") from None
