@@ -12,7 +12,7 @@ from auraly_pipeline.cli import app
 from auraly_pipeline.editing.batch_domain import EditBatchPlan
 from auraly_pipeline.editing.qc_domain import QcRequest
 from auraly_pipeline.editing.qc_service import QcService
-pytest_plugins = ["tests.test_qc_service"]
+from tests.test_qc_service import qc_case as qc_case
 
 
 def roots(service: QcService) -> list[str]:
