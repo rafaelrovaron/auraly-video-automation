@@ -34,6 +34,15 @@ Synthetic local media only; no actual editorial approval is implied.
 
 ## Full gate
 
+Final post-fix gate over `7b1e12a`: `rtk proxy uv run python scripts/verify.py full`,
+exit 0, 19/19 steps; 1,994 Python passed / 27 unchanged platform skips in 899.18 s;
+378 frontend / 22 files (30.75 s). Ruff, mypy 120 source/137 test files, build,
+dependency checks and schema exports passed with zero drift. Checkout remained clean.
+Status: `IMPLEMENTED`, `LOCAL_VERIFIED` (Windows); no new Actions/provider claim.
+Final documentation counts were updated afterward without changing code or tests.
+
+First gate (before review fixes):
+
 Fresh command: `rtk uv run python scripts/verify.py full`, exit 0, 19/19 steps.
 Windows Python 3.11.15: 1,991 passed / 27 preexisting platform skips in 907.01 s.
 Frontend: 378 passed / 22 files; typecheck/build passed, UI audit zero vulnerabilities.
@@ -54,7 +63,8 @@ passed after cause-based probe classification and source-level raster runtime er
 Both assert no publication and successful explicit retry after repairing analysis.
 A preservation regression keeps genuine raster clipping as text.fit.
 Affected fast gate: 100 passed / 1 preexisting skip in 139.74 s, Ruff/mypy passed.
-Final full gate pending; no second reviewer is required by Native.
+Final full gate passed 19/19 with 1,994 Python / 27 skips after this one fix pass.
+No Critical/Important findings remain unresolved; no second reviewer per Native workflow.
 Minor deferred: successful enabled-caption QC and conflicting hash-valid timing
 identity/cue regression coverage. Existing renderer caption tests remain in the full gate.
 

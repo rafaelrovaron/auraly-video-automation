@@ -599,9 +599,9 @@ Renderizar cada EditManifest resolvido em um MP4 vertical reproduzível.
 ### D5B.1 — Final QC backend/CLI
 
 **Status:** `IMPLEMENTED`, `LOCAL_VERIFIED` (Windows) nesta branch. Gate 19/19,
-378 frontend, 1.991 Python / 27 skips (907,01 s), schemas sem drift;
-revisão independente concluída; correção operacional RED→GREEN; gate completo final
-pendente. Sem push/CI novo.
+378 frontend, 1.994 Python / 27 skips (899,18 s), schemas sem drift;
+revisão independente concluída; correção operacional RED→GREEN; gate pós-correção
+19/19 aprovado. Sem push/CI novo.
 
 Master existente selecionado por renderKey histórico → identidade/receipt/SHA →
 contrato de mídia/full decode → loudness/true peak → fit ASS → report imutável.

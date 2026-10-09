@@ -20,9 +20,9 @@ aprova o vídeo: `humanReviewRequired: true`; voz inteligível e distorção exi
 Política interna inicial `final-qc-v1`: abaixo de −30 LUFS ou pico ≥0 dBTP bloqueia;
 não é regra de plataforma nem detecção completa de clipping. Texto mede layout do
 manifest, não OCR de frames queimados. D5B.2 review/UI e D5B.3 entrega seguem planejados.
-Gate local Windows 19/19: 378 frontend, 1.991 Python / 27 skips (907,01 s),
+Gate final local Windows 19/19: 378 frontend, 1.994 Python / 27 skips (899,18 s),
 Ruff/mypy e schemas sem drift. Revisão independente concluída; classificação de
-falha operacional corrigida com RED→GREEN; gate completo final pendente. Sem merge/push
+falha operacional corrigida com RED→GREEN; gate pós-correção aprovado. Sem merge/push
 ou Actions novos, sem ampliar PROVIDER_VERIFIED.
 Evidência: `docs/superpowers/2026-10-09-d5b1-verification.md`.
 
