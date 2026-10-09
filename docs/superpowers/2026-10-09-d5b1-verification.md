@@ -2,10 +2,24 @@
 
 Date: 2026-10-09. Execution: Native, approved plan/spec; isolated branch
 `feat/d5b1-final-qc`, documentary base `82fcc7b`; shipped baseline `30b799c`.
-No merge/push, paid calls or new provider verification authorized/performed here.
+Durante implementação não houve merge/push; integração autorizada posteriormente
+em 2026-10-09. Nenhuma chamada paga ou nova verificação de provider foi realizada.
 Baseline CI Linux/Windows passed in
 [run 37899431421](https://github.com/rafaelrovaron/auraly-video-automation/actions/runs/37899431421);
 this is not CI evidence for D5B.1.
+
+## Main integration (2026-10-09)
+
+User authorized merge and push. Local fast-forward `main` `30b799c` → `a84aec2`,
+including approved design/plan and implementation commits; no force or code conflict.
+Fresh post-merge command `rtk proxy uv run python scripts/verify.py full` in the
+primary checkout passed, exit 0, 19/19: 1,994 Python / 27 unchanged skips in 899.45 s;
+378 frontend / 22 files (30.19 s). Ruff, mypy 120 source/137 test files, build and
+all schemas passed with zero drift. Five preexisting moderate npm findings remain
+below the existing high threshold. No paid provider calls. Legacy D4B.3c scratch
+in the primary checkout was preserved. Integration documentation updated after
+the gate without changing source/tests/schema/workflow. Push authorized; new CI
+result remains pending and is not represented by the baseline run above.
 
 ## Implemented scope
 

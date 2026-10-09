@@ -21,7 +21,7 @@ genérico e não terá timeline estilo CapCut ou preview frame-perfect.
 
 Checkpoint atual D5B.1 (2026-10-09):
 
-D5B.1 implementado nesta branch: QC técnico de masters existentes por variante via CLI,
+D5B.1 implementado e integrado em `main` (`a84aec2`): QC técnico de masters existentes por variante via CLI,
 sem render novo, provider, HTTP, Job ou UI adicionais. Valida identidade/receipt/SHA,
 contrato de mídia e full decode; mede loudness/true peak do áudio inteiro e reutiliza
 fit de headline/captions via ASS. Relatórios passed/blocked são imutáveis; erros
@@ -30,10 +30,10 @@ aprova o vídeo: `humanReviewRequired: true`; voz inteligível e distorção exi
 Política interna inicial `final-qc-v1`: abaixo de −30 LUFS ou pico ≥0 dBTP bloqueia;
 não é regra de plataforma nem detecção completa de clipping. Texto mede layout do
 manifest, não OCR de frames queimados. D5B.2 review/UI e D5B.3 entrega seguem planejados.
-Gate final local Windows 19/19: 378 frontend, 1.994 Python / 27 skips (899,18 s),
+Gate pós-merge Windows 19/19: 378 frontend, 1.994 Python / 27 skips (899,45 s),
 Ruff/mypy e schemas sem drift. Revisão independente concluída; classificação de
-falha operacional corrigida com RED→GREEN; gate pós-correção aprovado. Sem merge/push
-ou Actions novos, sem ampliar PROVIDER_VERIFIED.
+falha operacional corrigida com RED→GREEN; gate pós-merge aprovado. Merge/push
+autorizados em 2026-10-09; CI desta integração pendente, sem ampliar PROVIDER_VERIFIED.
 Evidência: `docs/superpowers/2026-10-09-d5b1-verification.md`.
 
 D5A.2 já entrega render Jobs/API/UI e download por variante em main; baseline
