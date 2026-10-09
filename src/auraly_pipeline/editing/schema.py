@@ -52,7 +52,24 @@ def export_render_job_schemas(output_dir: Path) -> tuple[Path, ...]:
     return tuple(paths)
 
 
+def export_qc_schemas(output_dir: Path) -> tuple[Path, ...]:
+    from auraly_pipeline.editing.qc_domain import QcRequest, QcReport, QcBatchResult
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    paths = []
+    for model, name, mode in ((QcRequest, "request", "validation"),
+                              (QcReport, "report", "validation"),
+                              (QcBatchResult, "batch-result", "serialization")):
+        path = output_dir / f"qc-{name}.schema.json"
+        schema = model.model_json_schema(by_alias=True, mode=mode)  # type: ignore[arg-type]
+        schema["$id"] = f"https://auraly.local/schemas/{path.name}"
+        path.write_text(json.dumps(schema, indent=2) + "\n", encoding="utf-8")
+        paths.append(path)
+    return tuple(paths)
+
+
 if __name__ == "__main__":
     export_editing_schemas(Path("schemas"))
     export_render_schemas(Path("schemas"))
     export_render_job_schemas(Path("schemas"))
+    export_qc_schemas(Path("schemas"))

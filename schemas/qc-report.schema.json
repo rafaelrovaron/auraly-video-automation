@@ -1,0 +1,433 @@
+{
+  "$defs": {
+    "AudioProbe": {
+      "additionalProperties": false,
+      "properties": {
+        "codec": {
+          "title": "Codec",
+          "type": "string"
+        },
+        "sampleRate": {
+          "exclusiveMinimum": 0,
+          "title": "Samplerate",
+          "type": "integer"
+        },
+        "channels": {
+          "exclusiveMinimum": 0,
+          "title": "Channels",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "codec",
+        "sampleRate",
+        "channels"
+      ],
+      "title": "AudioProbe",
+      "type": "object"
+    },
+    "MediaProbe": {
+      "additionalProperties": false,
+      "properties": {
+        "formatName": {
+          "title": "Formatname",
+          "type": "string"
+        },
+        "durationSec": {
+          "exclusiveMinimum": 0,
+          "title": "Durationsec",
+          "type": "number"
+        },
+        "sizeBytes": {
+          "minimum": 0,
+          "title": "Sizebytes",
+          "type": "integer"
+        },
+        "video": {
+          "$ref": "#/$defs/VideoProbe"
+        },
+        "audio": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AudioProbe"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "warnings": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Warnings",
+          "type": "array"
+        }
+      },
+      "required": [
+        "formatName",
+        "durationSec",
+        "sizeBytes",
+        "video"
+      ],
+      "title": "MediaProbe",
+      "type": "object"
+    },
+    "QcAudio": {
+      "additionalProperties": false,
+      "properties": {
+        "integratedLoudnessLufs": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Integratedloudnesslufs"
+        },
+        "truePeakDbtp": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Truepeakdbtp"
+        }
+      },
+      "required": [
+        "integratedLoudnessLufs",
+        "truePeakDbtp"
+      ],
+      "title": "QcAudio",
+      "type": "object"
+    },
+    "QcCheck": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "enum": [
+            "integrity",
+            "audio",
+            "text"
+          ],
+          "title": "Name",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "passed",
+            "blocked",
+            "not_applicable",
+            "skipped"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "findings": {
+          "items": {
+            "$ref": "#/$defs/QcFinding"
+          },
+          "title": "Findings",
+          "type": "array"
+        }
+      },
+      "required": [
+        "name",
+        "status"
+      ],
+      "title": "QcCheck",
+      "type": "object"
+    },
+    "QcFinding": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+          "title": "Code",
+          "type": "string"
+        },
+        "field": {
+          "title": "Field",
+          "type": "string"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "field",
+        "message"
+      ],
+      "title": "QcFinding",
+      "type": "object"
+    },
+    "QcPolicy": {
+      "additionalProperties": false,
+      "properties": {
+        "version": {
+          "const": "final-qc-v1",
+          "default": "final-qc-v1",
+          "title": "Version",
+          "type": "string"
+        },
+        "minLoudnessLufs": {
+          "default": -30.0,
+          "title": "Minloudnesslufs",
+          "type": "number"
+        },
+        "maxTruePeakDbtp": {
+          "default": 0.0,
+          "title": "Maxtruepeakdbtp",
+          "type": "number"
+        }
+      },
+      "title": "QcPolicy",
+      "type": "object"
+    },
+    "RenderRuntime": {
+      "additionalProperties": false,
+      "properties": {
+        "fingerprint": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Fingerprint",
+          "type": "string"
+        },
+        "ffmpegVersion": {
+          "title": "Ffmpegversion",
+          "type": "string"
+        },
+        "libassVersion": {
+          "title": "Libassversion",
+          "type": "string"
+        },
+        "encoding": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Encoding",
+          "type": "object"
+        }
+      },
+      "required": [
+        "fingerprint",
+        "ffmpegVersion",
+        "libassVersion",
+        "encoding"
+      ],
+      "title": "RenderRuntime",
+      "type": "object"
+    },
+    "VideoProbe": {
+      "additionalProperties": false,
+      "properties": {
+        "codec": {
+          "title": "Codec",
+          "type": "string"
+        },
+        "width": {
+          "exclusiveMinimum": 0,
+          "title": "Width",
+          "type": "integer"
+        },
+        "height": {
+          "exclusiveMinimum": 0,
+          "title": "Height",
+          "type": "integer"
+        },
+        "fps": {
+          "exclusiveMinimum": 0,
+          "title": "Fps",
+          "type": "number"
+        },
+        "nominalFps": {
+          "exclusiveMinimum": 0,
+          "title": "Nominalfps",
+          "type": "number"
+        },
+        "isVfr": {
+          "title": "Isvfr",
+          "type": "boolean"
+        },
+        "rotation": {
+          "default": 0,
+          "title": "Rotation",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "codec",
+        "width",
+        "height",
+        "fps",
+        "nominalFps",
+        "isVfr"
+      ],
+      "title": "VideoProbe",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Schemaversion",
+      "type": "string"
+    },
+    "qcVersion": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Qcversion",
+      "type": "string"
+    },
+    "campaignId": {
+      "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+      "title": "Campaignid",
+      "type": "string"
+    },
+    "videoId": {
+      "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+      "title": "Videoid",
+      "type": "string"
+    },
+    "outputVariantId": {
+      "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+      "title": "Outputvariantid",
+      "type": "string"
+    },
+    "planHash": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Planhash",
+      "type": "string"
+    },
+    "manifestHash": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Manifesthash",
+      "type": "string"
+    },
+    "outputHash": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Outputhash",
+      "type": "string"
+    },
+    "renderKey": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Renderkey",
+      "type": "string"
+    },
+    "masterPath": {
+      "title": "Masterpath",
+      "type": "string"
+    },
+    "masterSha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Mastersha256",
+      "type": "string"
+    },
+    "sizeBytes": {
+      "exclusiveMinimum": 0,
+      "title": "Sizebytes",
+      "type": "integer"
+    },
+    "receiptSha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Receiptsha256",
+      "type": "string"
+    },
+    "policy": {
+      "$ref": "#/$defs/QcPolicy"
+    },
+    "policyHash": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Policyhash",
+      "type": "string"
+    },
+    "runtime": {
+      "$ref": "#/$defs/RenderRuntime"
+    },
+    "qcKey": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Qckey",
+      "type": "string"
+    },
+    "probe": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/MediaProbe"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "checks": {
+      "items": {
+        "$ref": "#/$defs/QcCheck"
+      },
+      "title": "Checks",
+      "type": "array"
+    },
+    "audio": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/QcAudio"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "status": {
+      "enum": [
+        "passed",
+        "blocked"
+      ],
+      "title": "Status",
+      "type": "string"
+    },
+    "humanReviewRequired": {
+      "const": true,
+      "default": true,
+      "title": "Humanreviewrequired",
+      "type": "boolean"
+    },
+    "textMeasurementScope": {
+      "const": "manifest_layout_not_burned_frames",
+      "default": "manifest_layout_not_burned_frames",
+      "title": "Textmeasurementscope",
+      "type": "string"
+    }
+  },
+  "required": [
+    "campaignId",
+    "videoId",
+    "outputVariantId",
+    "planHash",
+    "manifestHash",
+    "outputHash",
+    "renderKey",
+    "masterPath",
+    "masterSha256",
+    "sizeBytes",
+    "receiptSha256",
+    "policy",
+    "policyHash",
+    "runtime",
+    "qcKey",
+    "probe",
+    "checks",
+    "audio",
+    "status"
+  ],
+  "title": "QcReport",
+  "type": "object",
+  "$id": "https://auraly.local/schemas/qc-report.schema.json"
+}

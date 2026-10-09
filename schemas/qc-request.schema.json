@@ -1,0 +1,66 @@
+{
+  "$defs": {
+    "QcTarget": {
+      "additionalProperties": false,
+      "properties": {
+        "outputVariantId": {
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+          "title": "Outputvariantid",
+          "type": "string"
+        },
+        "renderKey": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Renderkey",
+          "type": "string"
+        }
+      },
+      "required": [
+        "outputVariantId",
+        "renderKey"
+      ],
+      "title": "QcTarget",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Schemaversion",
+      "type": "string"
+    },
+    "campaignId": {
+      "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+      "title": "Campaignid",
+      "type": "string"
+    },
+    "videoId": {
+      "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+      "title": "Videoid",
+      "type": "string"
+    },
+    "planHash": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Planhash",
+      "type": "string"
+    },
+    "outputs": {
+      "items": {
+        "$ref": "#/$defs/QcTarget"
+      },
+      "minItems": 1,
+      "title": "Outputs",
+      "type": "array"
+    }
+  },
+  "required": [
+    "campaignId",
+    "videoId",
+    "planHash",
+    "outputs"
+  ],
+  "title": "QcRequest",
+  "type": "object",
+  "$id": "https://auraly.local/schemas/qc-request.schema.json"
+}
