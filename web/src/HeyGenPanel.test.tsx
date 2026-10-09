@@ -40,7 +40,11 @@ function fakeApi(options: {result?: unknown; operation?: string; submit?: (path:
   return {calls, data, setWrapper: (value: unknown) => {wrapper = value;}};
 }
 const prepare = () => screen.getByRole('button', {name: 'Preparar assets HeyGen'});
-async function openPanel() { render(<CampaignDetailPanel campaignId="campaign-one" />); await waitFor(() => expect((prepare() as HTMLButtonElement).disabled).toBe(false)); }
+async function openPanel() {
+  // Flush initial reads, including HeyGen's request after campaign detail, before role queries.
+  await act(async () => { render(<CampaignDetailPanel campaignId="campaign-one" />); });
+  await waitFor(() => expect((prepare() as HTMLButtonElement).disabled).toBe(false));
+}
 
 it('test_prepare_enqueues_wrapper_without_start', async () => {
   const api = fakeApi(); await openPanel(); fireEvent.click(prepare());

@@ -110,3 +110,24 @@ preexistentes HyperFrames permanecem os mesmos, sem upgrade breaking.
 Actions desta integração ainda pendentes; não alegar CI_VERIFIED antes do resultado.
 Worktree preservado por conter scratch de outra etapa: não remover arquivos alheios
 para realizar cleanup de branch. Nenhuma alteração em AGENTS.md ou sources/.
+
+## Correção mínima CI Windows — 2026-10-09
+
+[Run 37845602297](https://github.com/rafaelrovaron/auraly-video-automation/actions/runs/37845602297),
+commit `2ca9e29`: Linux full passou; Windows falhou no UI gate com um teste failed
+e 377 passed. `test_prepare_enqueues_wrapper_without_start` esgotou a espera
+buscando o botão antes das leituras iniciais, inclusive HeyGen dependente do detail.
+Busca global por role em DOM grande pode ocupar o event loop e consumir o timeout.
+Reprodução diagnóstica local: custo de 1.100 ms apenas na busca do botão ainda ausente
+reproduziu a mesma falha; aguardar `act` assíncrono no render inicial passou com
+esse mesmo diagnóstico. Instrumentação temporária removida depois de RED→GREEN.
+
+Correção apenas no helper `openPanel` de `HeyGenPanel.test.tsx`: aguardar as
+leituras iniciais antes da busca/assertion existentes. Sem alteração na aplicação,
+timeout, retries, skips, dependências ou workflow. Gate UI local fresco 4/4:
+378 testes / 22 arquivos (27,63 s), tipagem/build/audit aprovados.
+Reexecução focada sem instrumentação: 60 testes HeyGen aprovados (9,92 s).
+Revisão independente read-only do helper: zero Critical/Important/Minor;
+não certificou a reprodução temporária nem o CI, que exigem evidência separada.
+Isso não é uma nova execução local do gate Python completo; preserva a evidência
+Linux e Windows local anteriores. Actions do push corretivo ainda pendentes.
