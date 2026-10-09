@@ -1,0 +1,12 @@
+{
+  "schemaVersion": "1.0",
+  "campaignId": "example-campaign",
+  "videoId": "example-video",
+  "planHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "outputs": [
+    {
+      "outputVariantId": "headline-a",
+      "renderKey": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    }
+  ]
+}
