@@ -67,7 +67,7 @@ it('preview_selection_does_not_mutate_editorial_request',async()=>{
   expect(preview.getByText('B')).toBeTruthy();
   fireEvent.click(screen.getByRole('button',{name:'Remover variante renamed'}));
   expect(preview.getByText('Base')).toBeTruthy();expect(s.posts).toEqual([]);
-});
+},15000); // This multi-variant interaction exceeds 5s on hosted Windows runners.
 it('readonly_preview_uses_exact_plan_without_overwriting_draft',async()=>{
   const s=server();render(<EditingPanel campaignId="campaign-one" renders={renders}/>);await draft();
   validate();await screen.findByText('Plano validado. Nenhum arquivo de edição publicado.');
