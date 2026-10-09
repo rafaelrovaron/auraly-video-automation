@@ -81,8 +81,10 @@ def measure_ass(script: str, *, staging: Path, runtime: RenderRuntime) -> tuple[
             if bbox[0] <= 0 or bbox[1] <= 0 or bbox[2] >= width or bbox[3] >= height:
                 raise EditingError("text.fit", "measurement would clip text")
             return bbox
+    except EditingError:
+        raise
     except (OSError, ValueError):
-        raise EditingError("text.fit", "cannot measure local text raster") from None
+        raise EditingError("runtime", "cannot measure local text raster") from None
 
 
 def _lines(text: str, font: ImageFont.FreeTypeFont, max_width: float, fit: str) -> list[str]:

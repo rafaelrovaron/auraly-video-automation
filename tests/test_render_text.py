@@ -22,6 +22,20 @@ def frame(path: Path, at: float = .1) -> Image.Image:
     return Image.open(BytesIO(data)).convert("RGBA")
 
 
+def test_measurement_clipping_remains_fit_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import subprocess
+    from auraly_pipeline.editing import render_text
+    png = BytesIO()
+    Image.new("RGBA", (4, 4), (255, 255, 255, 255)).save(png, format="PNG")
+    monkeypatch.setattr(render_text, "invoke_ffmpeg", lambda *a, **kw:
+                        subprocess.CompletedProcess(a, 0, png.getvalue(), b"fontselect: local font"))
+    doc = pysubs2.SSAFile()
+    doc.info.update(PlayResX="4", PlayResY="4")
+    with pytest.raises(EditingError) as caught:
+        render_text.measure_ass(doc.to_string("ass"), staging=tmp_path, runtime=detect_runtime())
+    assert caught.value.field == "text.fit"
+
+
 def script(tmp_path: Path, **changes: object) -> Path:
     plan = make_render_plan(tmp_path / "project")
     manifest = plan.outputs[0].manifest

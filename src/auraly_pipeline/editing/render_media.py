@@ -104,7 +104,8 @@ def check_master(path: Path, *, duration_sec: float, full_decode: bool = False) 
     except MasterCheckError:
         raise
     except ProbeError as exc:
-        kind: Literal["invalid", "operational"] = "operational" if isinstance(exc.__cause__, OSError) else "invalid"
+        kind: Literal["invalid", "operational"] = (
+            "operational" if isinstance(exc.__cause__, (OSError, json.JSONDecodeError)) else "invalid")
         raise MasterCheckError(kind, probe) from None
     except (OSError, subprocess.TimeoutExpired, EditingError, json.JSONDecodeError):
         raise MasterCheckError("operational", probe) from None

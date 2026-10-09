@@ -196,6 +196,34 @@ def test_get_report_needs_no_ffmpeg_and_rejects_stale_identity(qc_case: tuple[Qc
         get_first(service, request, result.outputs[0].qc_key)
 
 
+@pytest.mark.parametrize("failure", ["probe_json", "text_raster"])
+def test_failed_analysis_is_not_cached_and_retries_after_repair(
+        qc_case: tuple[QcService, QcRequest, EditBatchPlan],
+        monkeypatch: pytest.MonkeyPatch, failure: str) -> None:
+    import subprocess
+    from auraly_pipeline.editing import render_media, render_text
+    from auraly_pipeline.probe import ProbeError
+
+    service, request, plan = qc_case
+    request.outputs = request.outputs[:1]
+    with monkeypatch.context() as patch:
+        if failure == "probe_json":
+            def invalid_probe(*args: object, **kwargs: object) -> None:
+                raise ProbeError("private probe detail") from json.JSONDecodeError("bad JSON", "", 0)
+            patch.setattr(render_media, "probe_media", invalid_probe)
+        else:
+            patch.setattr(render_text, "invoke_ffmpeg", lambda *a, **kw:
+                          subprocess.CompletedProcess(a, 0, b"unreadable PNG", b"fontselect: local font"))
+        failed = service.run(request)
+    assert failed.outputs[0].status == "error"
+    assert failed.outputs[0].error is not None
+    assert failed.outputs[0].error.code == "runtime_unavailable"
+    assert failed.outputs[0].qc_key is None
+    assert not list(service.work_root.glob(f"campaigns/{plan.campaign_id}/editing/qc/*/*/*/report.json"))
+    repaired = service.run(request)
+    assert repaired.outputs[0].status == "passed" and not repaired.outputs[0].reused
+
+
 def test_integrity_block_skips_dependents(qc_case: tuple[QcService, QcRequest, EditBatchPlan]) -> None:
     import hashlib
     service, request, _ = qc_case
