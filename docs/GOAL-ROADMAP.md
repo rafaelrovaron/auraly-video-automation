@@ -70,7 +70,9 @@ D4B.3b Overrides & Headline Variants UI       IMPLEMENTED, LOCAL_VERIFIED
 D4B.3c Approximate Preview                   IMPLEMENTED, LOCAL_VERIFIED
 D5A.1 Local Renderer                         IMPLEMENTED, LOCAL_VERIFIED (Windows)
 D5A.2 Render Jobs/API/UI                      IMPLEMENTED, LOCAL_VERIFIED (Windows)
-D5B Render QC, Review & Delivery
+D5B.1 Final QC backend/CLI                    IMPLEMENTED, LOCAL_VERIFIED (Windows)
+D5B.2 Human Review / QC UI                   PLANNED
+D5B.3 Approved Master Delivery              PLANNED
 D6  End-to-End Personal Pilot
 ```
 
@@ -536,7 +538,8 @@ Correções CI até `501d312`, Actions Linux/Windows aprovados no run `377928027
 D5A.2 `IMPLEMENTED`, `LOCAL_VERIFIED` (Windows), código `8a34ffc`, na branch
 `feat/d5a2-render-integration`: gate 19/19, 378 frontend, 1.924 Python / 27 skips;
 merge/push autorizados, integrado em `main` por fast-forward `38257de`;
-gate pós-merge 19/19 com mesmas contagens. Actions desta integração ainda pendentes.
+gate pós-merge 19/19 com mesmas contagens. Correção Windows até `30b799c`;
+Actions Linux/Windows aprovados no run `37899431421`.
 
 ### D5A.1 — Renderer local / CLI
 
@@ -560,7 +563,7 @@ Rascunho/preview não alteram plano; nova execução pode reutilizar outputs sem
 imagem, voz ou HeyGen. Sem timeline, frame-perfect, migration ou dependência nova.
 E2E real local com três headlines + download/full decode + reload/reuso preservando upstream.
 Evidência: `docs/superpowers/2026-10-08-d5a2-verification.md`.
-Próximo recorte: D5B QC/review/delivery, com design específico antes da execução.
+Próximo recorte após D5B.1: D5B.2 review humano/UI, com design aprovado antes da execução.
 
 ### Objetivo
 
@@ -593,7 +596,34 @@ Renderizar cada EditManifest resolvido em um MP4 vertical reproduzível.
 
 ## D5B — Render QC, Review & Delivery
 
-**Status:** `PLANNED`.
+### D5B.1 — Final QC backend/CLI
+
+**Status:** `IMPLEMENTED`, `LOCAL_VERIFIED` (Windows) nesta branch. Gate 19/19,
+378 frontend, 1.991 Python / 27 skips (907,01 s), schemas sem drift;
+revisão independente concluída; correção operacional RED→GREEN; gate completo final
+pendente. Sem push/CI novo.
+
+Master existente selecionado por renderKey histórico → identidade/receipt/SHA →
+contrato de mídia/full decode → loudness/true peak → fit ASS → report imutável.
+Política `final-qc-v1`: loudness <−30 LUFS ou true peak ≥0 dBTP bloqueia.
+Silêncio/medição não mensurável bloqueiam; falha operacional gera error sem cache.
+Thresholds internos iniciais, não requisito de plataforma; não detectam todo clipping.
+Áudio do mix inteiro não prova clareza da voz; escuta humana permanece obrigatória.
+Texto mede layout do manifest, não frames queimados. Reuso valida hashes e report
+sem medir novamente; consulta exata dispensa FFmpeg. Sem encode/provider/UI/Job/SQL.
+Evidência: `docs/superpowers/2026-10-09-d5b1-verification.md`.
+
+### D5B.2 — Human Review / QC UI
+
+**Status:** `PLANNED`. Exibir QC por variante e permitir escuta/inspeção e decisão
+approve/reject com comentário; `passed` técnico nunca equivale à aprovação.
+Proxy/contact sheet somente se necessário ao fluxo simples. Rejeição referencia
+nova revisão, sem sobrescrever master. Sem revisão humana automatizada.
+
+### D5B.3 — Approved Master Delivery
+
+**Status:** `PLANNED`. Copiar apenas master aprovado para pasta de entrega,
+verificar hashes origem/destino e registrar entrega separadamente de upload cloud.
 
 ### Objetivo
 
@@ -601,7 +631,7 @@ Fechar o ciclo local do render até entrega.
 
 ### Incluído
 
-- QC de streams, duração, resolução, FPS, loudness e clipping;
+- QC de streams, duração, resolução, FPS, loudness e risco de pico (D5B.1);
 - bounds de headline/captions;
 - proxy/contact sheet;
 - approve/reject com comentário;
@@ -610,7 +640,8 @@ Fechar o ciclo local do render até entrega.
 
 ### Critérios de saída
 
-- mix com voz baixa ou clipping bloqueia aprovação;
+- QC bloqueado impede aprovação; clareza/volume relativo da voz e distorção
+  dependem também da revisão humana, não apenas da medição escalar do mix;
 - rejeição cria nova revisão, não sobrescreve master;
 - delivery é distinguido de upload cloud;
 - UI exibe QC e decisão.

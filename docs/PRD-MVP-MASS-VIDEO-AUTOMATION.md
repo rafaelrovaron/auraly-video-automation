@@ -19,10 +19,31 @@ genérico e não terá timeline estilo CapCut ou preview frame-perfect.
 
 ### 2.1 Capacidade entregue
 
+Checkpoint atual D5B.1 (2026-10-09):
+
+D5B.1 implementado nesta branch: QC técnico de masters existentes por variante via CLI,
+sem render novo, provider, HTTP, Job ou UI adicionais. Valida identidade/receipt/SHA,
+contrato de mídia e full decode; mede loudness/true peak do áudio inteiro e reutiliza
+fit de headline/captions via ASS. Relatórios passed/blocked são imutáveis; erros
+operacionais não são cacheados. Consulta exata não requer FFmpeg. `passed` nunca
+aprova o vídeo: `humanReviewRequired: true`; voz inteligível e distorção exigem escuta.
+Política interna inicial `final-qc-v1`: abaixo de −30 LUFS ou pico ≥0 dBTP bloqueia;
+não é regra de plataforma nem detecção completa de clipping. Texto mede layout do
+manifest, não OCR de frames queimados. D5B.2 review/UI e D5B.3 entrega seguem planejados.
+Gate local Windows 19/19: 378 frontend, 1.991 Python / 27 skips (907,01 s),
+Ruff/mypy e schemas sem drift. Revisão independente concluída; classificação de
+falha operacional corrigida com RED→GREEN; gate completo final pendente. Sem merge/push
+ou Actions novos, sem ampliar PROVIDER_VERIFIED.
+Evidência: `docs/superpowers/2026-10-09-d5b1-verification.md`.
+
+D5A.2 já entrega render Jobs/API/UI e download por variante em main; baseline
+`30b799c`, [CI Linux/Windows aprovado](https://github.com/rafaelrovaron/auraly-video-automation/actions/runs/37899431421).
+Os checkpoints abaixo preservam o estado existente em suas respectivas datas.
+
 Checkpoint D5A.1 (2026-10-08): renderer local `IMPLEMENTED`, `LOCAL_VERIFIED`
 (Windows) integrado em `main` no código `8be3fab`: gate pós-merge 19/19, 350 frontend,
 1.877 Python / 27 skips. Três Important da revisão corrigidos com RED→GREEN;
-Actions Linux/Windows desta integração pendentes. CLI `edit render`
+Naquele checkpoint, Actions Linux/Windows ainda estavam pendentes. CLI `edit render`
 consome plano salvo sem nova geração upstream. Masters fixos 1080×1920/30 FPS
 H.264/AAC/yuv420p/faststart, headline/captions com fonte local exata e fit real,
 música e framing. Captions exigem timing aceito em source_mp4, pesos 400/700,
@@ -30,8 +51,9 @@ sem highlight por palavra. Sem música copia AAC; com música usa ducking fixo,
 voz ganho 1/amix normalize=0/limiter sem auto-gain. Voz vem do MP4, nunca do WAV.
 Recibo imutável por outputHash/runtime, planHash do produtor; reuso requer
 hash/probe/recibo íntegros. Falha isolada e reparo manual de órfãos, sem overwrite.
-Dry-run não grava nem mede fit. D5A.2 Jobs/API/UI e D5B QC/review/delivery
-continuam PLANNED; não significa D5A inteiro entregue ou novo PROVIDER_VERIFIED.
+Dry-run não grava nem mede fit. Naquele checkpoint, D5A.2 Jobs/API/UI e D5B
+QC/review/delivery estavam PLANNED; o estado atual aparece acima.
+Não implica novo PROVIDER_VERIFIED.
 Evidência: `docs/superpowers/2026-10-08-d5a1-verification.md`.
 
 Checkpoint D4B.3c (2026-10-08): preview aproximado `IMPLEMENTED`, `LOCAL_VERIFIED`

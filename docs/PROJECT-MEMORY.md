@@ -1,12 +1,29 @@
 # Auraly Mass Video Pipeline — Memória do Projeto
 
-**Atualizado em:** 2026-10-08
+**Atualizado em:** 2026-10-09
 **Decisão vigente:** MVP delivery-first para uso local e pessoal
 
 Este documento guarda decisões duráveis e fatos verificados. O estado entregue aparece separado
 do produto planejado para impedir que roadmap seja confundido com capacidade existente.
 
-## Entrega atual: D5A.2 — Render Jobs/API/UI (2026-10-08)
+## Entrega atual: D5B.1 — QC técnico local (2026-10-09)
+
+D5B.1 implementado nesta branch: QC técnico de masters existentes por variante via CLI,
+sem render novo, provider, HTTP, Job ou UI adicionais. Valida identidade/receipt/SHA,
+contrato de mídia e full decode; mede loudness/true peak do áudio inteiro e reutiliza
+fit de headline/captions via ASS. Relatórios passed/blocked são imutáveis; erros
+operacionais não são cacheados. Consulta exata não requer FFmpeg. `passed` nunca
+aprova o vídeo: `humanReviewRequired: true`; voz inteligível e distorção exigem escuta.
+Política interna inicial `final-qc-v1`: abaixo de −30 LUFS ou pico ≥0 dBTP bloqueia;
+não é regra de plataforma nem detecção completa de clipping. Texto mede layout do
+manifest, não OCR de frames queimados. D5B.2 review/UI e D5B.3 entrega seguem planejados.
+Gate local Windows 19/19: 378 frontend, 1.991 Python / 27 skips (907,01 s),
+Ruff/mypy e schemas sem drift. Revisão independente concluída; classificação de
+falha operacional corrigida com RED→GREEN; gate completo final pendente. Sem merge/push
+ou Actions novos, sem ampliar PROVIDER_VERIFIED.
+Evidência: `docs/superpowers/2026-10-09-d5b1-verification.md`.
+
+## Histórico: D5A.2 — Render Jobs/API/UI (2026-10-08)
 
 `IMPLEMENTED`, `LOCAL_VERIFIED` (Windows) em `feat/d5a2-render-integration`, código `8a34ffc`.
 Gate fresco 19/19, exit 0: 378 frontend em 22 arquivos; 1.924 Python / 27 skips,
@@ -39,7 +56,8 @@ Nenhuma chamada externa paga; não amplia PROVIDER_VERIFIED. D5B QC/review/deliv
 continua `PLANNED`; Flow permanece pausado/não bloqueante. Merge e push autorizados
 em 2026-10-08: fast-forward de `main` `501d312` → `38257de`.
 Gate fresco pós-merge 19/19, exit 0; 378 frontend, 1.924 Python / 27 skips
-(pytest 821,87 s). Actions desta integração ainda pendentes.
+(pytest 821,87 s). Correção Windows integrada até `30b799c`; Actions Linux/Windows
+aprovados no run `37899431421`, confirmado antes de D5B.1.
 Worktree preservado por conter temporários de outra etapa; nenhum arquivo alheio removido.
 Evidência: `docs/superpowers/2026-10-08-d5a2-verification.md`.
 

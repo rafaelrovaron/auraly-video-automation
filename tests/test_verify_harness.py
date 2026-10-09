@@ -68,6 +68,14 @@ def load_verify_workflow() -> dict[Any, Any]:
     return loaded
 
 
+def test_windows_gate_includes_qc_targets_once() -> None:
+    job = load_verify_workflow()["jobs"]["windows-focused"]
+    command = next(step["run"] for step in job["steps"]
+                   if step.get("name") == "Run focused cross-platform verification")
+    for name in ("qc_domain", "render_artifacts", "qc_checks", "qc_service", "qc_cli"):
+        assert command.split().count(f"tests/test_{name}.py") == 1
+
+
 def test_editing_schemas_are_audited_by_full_gate() -> None:
     verify = load_verify_module()
     steps = [step for step in verify.build_full_steps() if step.name == "editing schemas"]

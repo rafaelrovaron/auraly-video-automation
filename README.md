@@ -11,6 +11,21 @@ entrega.
 
 ### Entregue hoje
 
+D5B.1 implementado nesta branch: QC técnico de masters existentes por variante via CLI,
+sem render novo, provider, HTTP, Job ou UI adicionais. Valida identidade/receipt/SHA,
+contrato de mídia e full decode; mede loudness/true peak do áudio inteiro e reutiliza
+fit de headline/captions via ASS. Relatórios passed/blocked são imutáveis; erros
+operacionais não são cacheados. Consulta exata não requer FFmpeg. `passed` nunca
+aprova o vídeo: `humanReviewRequired: true`; voz inteligível e distorção exigem escuta.
+Política interna inicial `final-qc-v1`: abaixo de −30 LUFS ou pico ≥0 dBTP bloqueia;
+não é regra de plataforma nem detecção completa de clipping. Texto mede layout do
+manifest, não OCR de frames queimados. D5B.2 review/UI e D5B.3 entrega seguem planejados.
+Gate local Windows 19/19: 378 frontend, 1.991 Python / 27 skips (907,01 s),
+Ruff/mypy e schemas sem drift. Revisão independente concluída; classificação de
+falha operacional corrigida com RED→GREEN; gate completo final pendente. Sem merge/push
+ou Actions novos, sem ampliar PROVIDER_VERIFIED.
+Evidência: `docs/superpowers/2026-10-09-d5b1-verification.md`.
+
 - D5A.2 `IMPLEMENTED`, `LOCAL_VERIFIED` (Windows), integrado em `main` por fast-forward `38257de`:
   gate 19/19, 378 frontend, 1.924 Python / 27 skips; código `8a34ffc`.
   Render de planos salvos pela UI, Job `editing.render`, worker dedicado
@@ -19,7 +34,8 @@ entrega.
   masters sem nova codificação. Falhas parciais ficam visíveis. Sem provider pago,
   migration ou dependência nova; QC/review/delivery editorial permanece D5B.
   [Evidência D5A.2](docs/superpowers/2026-10-08-d5a2-verification.md).
-  Gate pós-merge repetido: 19/19, mesmas contagens; Actions desta integração ainda pendentes.
+  Gate pós-merge repetido: 19/19, mesmas contagens. Correção Windows integrada até
+  `30b799c`; [Actions Linux/Windows aprovados](https://github.com/rafaelrovaron/auraly-video-automation/actions/runs/37899431421).
 - D5A.1 `IMPLEMENTED`, `LOCAL_VERIFIED` (Windows): renderer local sequencial
   FFmpeg/ASS e CLI `edit render` integrado em `main` no código `8be3fab`. Gate pós-merge 19/19,
   350 frontend e 1.877 Python / 27 skips; três achados da revisão corrigidos
@@ -95,7 +111,7 @@ Evidência: [verificação D4B.3b](docs/superpowers/2026-10-07-d4b3b-verificatio
 
 ### Não entregue ainda
 
-- D5B: QC/review humano e entrega dos masters;
+- D5B.2: review humano e UI de QC; D5B.3: entrega dos masters aprovados;
 - piloto end-to-end operável pela interface (o preview aproximado já foi entregue).
 
 ### Render local de um plano salvo (D5A.1)
@@ -142,7 +158,28 @@ masters íntegros. Abandonar acompanhamento não cancela o Job.
 
 Render concluído não significa aprovação humana ou entrega; esses passos são D5B.
 
+### QC local de masters existentes (D5B.1)
+
+Copie `examples/qc-request.json` e substitua campaignId/videoId/planHash pelos do
+plano salvo; cada output seleciona outputVariantId/renderKey de um render existente.
+Os hashes do exemplo são fictícios. Nunca informe caminho arbitrário de MP4.
+
+```powershell
+uv run auraly edit qc --request qc-request.json --project-root <project> --work-root <work>
+uv run auraly edit qc-get --campaign-id <campaign> --video-id <video> --plan-hash <hash> --output-variant-id <variant> --render-key <renderKey> --qc-key <qcKey> --project-root <project> --work-root <work>
+```
+
+`qc` retorna batch JSON completo, exit 0 somente se todos passaram; blocked/error
+retornam exit 1. `qc-get` retorna exit 0 também para um relatório blocked válido,
+exit 1 para consulta inválida. Erros globais não publicam batch/report. Relatórios em
+`campaigns/<campaign>/editing/qc/<variant>/<renderKey>/<qcKey>/report.json`;
+hashes atuais são revalidados em consulta/reuso. Repetição exata não mede novamente.
+Alterar runtime/plano consumidor gera outra identidade QC sem regenerar o master.
+Relatório corrupto não é sobrescrito. Corrija manualmente com backup; falhas operacionais
+permitem nova tentativa explícita. Aprovação humana e entrega ainda não estão conectadas.
+
 ### Google Flow: preservado, mas pausado
+
 
 A automação do Google Flow não será removida. Ela representa trabalho técnico relevante e pode
 voltar a ser usada como caminho opcional. Porém:

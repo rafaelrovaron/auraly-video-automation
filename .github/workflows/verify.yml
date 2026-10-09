@@ -105,6 +105,11 @@ jobs:
         run: >-
           uv run python scripts/verify.py fast --pytest
           tests/test_verify_harness.py
+          tests/test_qc_domain.py
+          tests/test_render_artifacts.py
+          tests/test_qc_checks.py
+          tests/test_qc_service.py
+          tests/test_qc_cli.py
           tests/test_render_domain.py
           tests/test_render_text.py
           tests/test_render_media.py
