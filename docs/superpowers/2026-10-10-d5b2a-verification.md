@@ -28,7 +28,7 @@ QC status and `humanReviewRequired` remain unchanged. Flow remains paused.
   made the regression GREEN. Covers conflicts, first-decision concurrency,
   independent plan/variant contexts, corrupt/changed evidence and no processing.
 - Task 3: missing CLI command RED, missing example RED, missing Windows target
-  RED (count 0); GREEN fast gate 113 tests (68.51 s), CLI-first 45 (71.56 s),
+  RED (count 0); GREEN fast gate 113 tests (72.01 s final task run), CLI-first 45 (71.56 s),
   CLI-alone 11 (8.02 s). Explicit shared fixture imports, no test-module plugin.
 - `MYPYPATH=src` mypy all tests passed: 141 files. Source mypy: 122 files.
   Two review modules only; no new dependencies. Windows workflow adds exactly
@@ -52,8 +52,18 @@ Linux local/Actions for this new branch not claimed; publication remains unautho
 
 ## Independent review
 
-Pending one fresh-context whole-branch review after the complete gate and task
-commit. No merge/push authorized by the implementation plan.
+One fresh-context read-only whole-branch review by gpt-6-astra over
+`5aa6221..6815eb9` completed after all three tasks and the complete gate.
+Verdict: ready to merge; zero Critical, zero Important, one Minor. Reviewer
+focused repetition/QC-key/concurrency/evidence tests: 11 passed / 23 deselected
+in 20.83 s; whitespace and checkout status clean. No production fix required,
+no second reviewer. Status: `IMPLEMENTED`, `LOCAL_VERIFIED` (Windows).
+No merge/push or Actions for this slice; implementation authorization is not
+integration authorization.
+
+Minor deferred: the equal-concurrency regression synchronizes publication but
+does not force/assert two different candidate timestamps. Production winner
+reconciliation is correct; a future test-only change should stub two UTC times.
 
 ## Execution rulings
 
@@ -63,6 +73,17 @@ commit. No merge/push authorized by the implementation plan.
 - Added one explicit model tuple type annotation to the Task 1 schema test in
   Task 2, after test typing exposed ambiguous metaclass inference. No behavior
   change; cost if wrong: undo one test annotation.
+- Coherent rewriting/deletion/rollback of all local evidence remains excluded:
+  integrity model, not hostile-operator attestation. Cost if wrong: a coherent
+  local operator can forge/remove approval evidence.
+- External changes after final validation have no filesystem snapshot guarantee;
+  pre-publication checks and subsequent consultation revalidation stand. Cost if
+  wrong: a returned decision may immediately become stale and needs reconsultation.
+- Authentication, measured playback, revocation, API/UI and delivery remain
+  excluded per approved backend/CLI scope. Cost if wrong: this slice cannot
+  authenticate, measure watching, revoke, or complete UI/delivery workflow.
+- Resource limits for abnormal local JSON payloads remain deferred under personal
+  use/no general hardening. Cost if wrong: huge files can exhaust memory/resources.
 
 ## Remaining scope
 

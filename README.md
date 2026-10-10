@@ -17,7 +17,8 @@ imutável e consulta que revalida master, receipt e bytes do relatório QC. Apro
 exige QC passed e confirmação explícita de assistir e ouvir; rejeitar exige comentário.
 Repetição idêntica preserva data/bytes; outra decisão, comentário ou QC key conflita.
 Sem HTTP/UI, SQL, Job, provider, render ou análise novos. Gate Windows 19/19 passou:
-2.070 Python / 27 skips e 378 frontend; revisão independente em andamento.
+2.070 Python / 27 skips e 378 frontend; revisão independente aprovada,
+sem Critical/Important, um Minor de teste adiado. `IMPLEMENTED`, `LOCAL_VERIFIED` (Windows).
 D5B.2B UI e D5B.3 entrega planejados.
 Evidência: `docs/superpowers/2026-10-10-d5b2a-verification.md`.
 
