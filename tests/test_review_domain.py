@@ -99,7 +99,8 @@ def test_exported_review_schemas_validate_contracts(tmp_path: Path) -> None:
     from auraly_pipeline.editing.schema import export_review_schemas
     paths = export_review_schemas(tmp_path)
     assert [p.name for p in paths] == ["review-request.schema.json", "review-record.schema.json"]
-    for path, model, payload in zip(paths, (HumanReviewRequest, HumanReviewRecord),
+    models: tuple[type[HumanReviewRequest], ...] = (HumanReviewRequest, HumanReviewRecord)
+    for path, model, payload in zip(paths, models,
                                    (request_payload(), record_payload()), strict=True):
         schema = json.loads(path.read_bytes())
         Draft202012Validator(schema).validate(model.model_validate(payload).model_dump(mode="json", by_alias=True))
