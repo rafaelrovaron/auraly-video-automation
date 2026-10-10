@@ -1,0 +1,84 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Schemaversion",
+      "type": "string"
+    },
+    "campaignId": {
+      "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+      "title": "Campaignid",
+      "type": "string"
+    },
+    "videoId": {
+      "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+      "title": "Videoid",
+      "type": "string"
+    },
+    "planHash": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Planhash",
+      "type": "string"
+    },
+    "outputVariantId": {
+      "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+      "title": "Outputvariantid",
+      "type": "string"
+    },
+    "renderKey": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Renderkey",
+      "type": "string"
+    },
+    "qcKey": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Qckey",
+      "type": "string"
+    },
+    "decision": {
+      "enum": [
+        "approved",
+        "rejected"
+      ],
+      "title": "Decision",
+      "type": "string"
+    },
+    "reviewedBy": {
+      "minLength": 1,
+      "title": "Reviewedby",
+      "type": "string"
+    },
+    "comment": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Comment"
+    },
+    "watchedAndListened": {
+      "title": "Watchedandlistened",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "campaignId",
+    "videoId",
+    "planHash",
+    "outputVariantId",
+    "renderKey",
+    "qcKey",
+    "decision",
+    "reviewedBy",
+    "watchedAndListened"
+  ],
+  "title": "HumanReviewRequest",
+  "type": "object",
+  "$id": "https://auraly.local/schemas/review-request.schema.json"
+}

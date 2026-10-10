@@ -68,8 +68,23 @@ def export_qc_schemas(output_dir: Path) -> tuple[Path, ...]:
     return tuple(paths)
 
 
+def export_review_schemas(output_dir: Path) -> tuple[Path, ...]:
+    from auraly_pipeline.editing.review_domain import HumanReviewRequest, HumanReviewRecord
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    paths = []
+    for model, name in ((HumanReviewRequest, "request"), (HumanReviewRecord, "record")):
+        path = output_dir / f"review-{name}.schema.json"
+        schema = model.model_json_schema(by_alias=True, mode="validation")
+        schema["$id"] = f"https://auraly.local/schemas/{path.name}"
+        path.write_text(json.dumps(schema, indent=2) + "\n", encoding="utf-8")
+        paths.append(path)
+    return tuple(paths)
+
+
 if __name__ == "__main__":
     export_editing_schemas(Path("schemas"))
     export_render_schemas(Path("schemas"))
     export_render_job_schemas(Path("schemas"))
     export_qc_schemas(Path("schemas"))
+    export_review_schemas(Path("schemas"))
