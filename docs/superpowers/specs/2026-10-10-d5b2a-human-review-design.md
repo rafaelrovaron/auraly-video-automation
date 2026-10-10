@@ -2,7 +2,7 @@
 
 Date: 2026-10-10
 
-Status: conversational scope and rules approved; written spec awaiting user review.
+Status: written spec approved by the user on 2026-10-10; implementation not started.
 Baseline: main `5aa6221`; D5B.1 QC backend/CLI already shipped.
 This document describes new work, not a shipped approval capability.
 
