@@ -110,6 +110,9 @@ jobs:
           tests/test_qc_checks.py
           tests/test_qc_service.py
           tests/test_qc_cli.py
+          tests/test_review_domain.py
+          tests/test_review_service.py
+          tests/test_review_cli.py
           tests/test_render_domain.py
           tests/test_render_text.py
           tests/test_render_media.py

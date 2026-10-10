@@ -1,12 +1,33 @@
 # Auraly Mass Video Pipeline — Memória do Projeto
 
-**Atualizado em:** 2026-10-09
+**Atualizado em:** 2026-10-10
 **Decisão vigente:** MVP delivery-first para uso local e pessoal
 
 Este documento guarda decisões duráveis e fatos verificados. O estado entregue aparece separado
 do produto planejado para impedir que roadmap seja confundido com capacidade existente.
 
-## Entrega atual: D5B.1 — QC técnico local (2026-10-09)
+## Entrega atual na branch: D5B.2A — Review humano backend/CLI (2026-10-10)
+
+Implementado em `feat/d5b2a-human-review`, sem merge/push desta etapa. Gate Windows
+19/19 passou: 2.070 Python / 27 skips (950,76 s), 378 frontend; schemas sem drift.
+Revisão independente em andamento. D5B.2B API/UI e D5B.3 entrega continuam `PLANNED`.
+Evidência: `docs/superpowers/2026-10-10-d5b2a-verification.md`.
+Reutiliza QC GET e publicação JSON exclusiva; sem SQL, Job ou dependência nova.
+CLI `edit review|review-get`: seleção explícita, decisão definitiva, reviewer/comentário
+normalizados, data UTC gerada pelo serviço. Aprovação exige QC passed e confirmação
+de assistir/ouvir; esta é declaração humana, não prova de playback. Rejeição exige
+comentário e aceita relatório passed/blocked; error/ausente/corrupto não é revisável.
+
+Versão = campanha/vídeo/plano consumidor/variante/render/master SHA/receipt SHA.
+QC key/runtime, data, decisão e comentário não criam outra versão. Repetição idêntica
+retorna original; mudanças conflitam, incluindo QC key. Concorrência preserva um vencedor.
+Consulta readonly revalida contexto e bytes master/receipt/QC original, sem FFmpeg.
+Rejeição não regenera nem sobrescreve: operador edita, gera nova versão, faz QC/review.
+Um plano novo que reaproveita o mesmo MP4 não herda aprovação. QC permanece separado
+com `humanReviewRequired: true`; proteção de integridade local, não atestação contra
+um operador hostil. Nenhum provider pago/arquivo real de campanha alterado.
+
+## Histórico: D5B.1 — QC técnico local (2026-10-09)
 
 D5B.1 implementado e integrado em `main` (`a84aec2`): QC técnico de masters existentes por variante via CLI,
 sem render novo, provider, HTTP, Job ou UI adicionais. Valida identidade/receipt/SHA,

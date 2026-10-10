@@ -695,6 +695,13 @@ def test_windows_ci_installs_chromium_before_focused_verification() -> None:
     assert "secrets" not in str(job).lower()
 
 
+def test_windows_ci_includes_human_review_once() -> None:
+    commands = workflow_commands(load_verify_workflow()["jobs"]["windows-focused"])
+    targets = next(c for c in commands if "scripts/verify.py fast" in c).split()[6:]
+    for target in ("tests/test_review_domain.py", "tests/test_review_service.py", "tests/test_review_cli.py"):
+        assert targets.count(target) == 1
+
+
 def test_windows_ci_includes_editorial_render_integration() -> None:
     commands = workflow_commands(load_verify_workflow()["jobs"]["windows-focused"])
     targets = next(c for c in commands if "scripts/verify.py fast" in c).split()[6:]

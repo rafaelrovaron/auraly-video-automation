@@ -1,6 +1,6 @@
 # Auraly Delivery-First Goal Roadmap
 
-**Roadmap vigente:** 2026-10-08
+**Roadmap vigente:** 2026-10-10
 
 Este documento é a ordem operacional dos próximos Goals. O PRD define o produto; este roadmap
 define como chegar a ele sem transformar cada Goal em um projeto grande demais.
@@ -71,7 +71,8 @@ D4B.3c Approximate Preview                   IMPLEMENTED, LOCAL_VERIFIED
 D5A.1 Local Renderer                         IMPLEMENTED, LOCAL_VERIFIED (Windows)
 D5A.2 Render Jobs/API/UI                      IMPLEMENTED, LOCAL_VERIFIED (Windows)
 D5B.1 Final QC backend/CLI                    IMPLEMENTED, LOCAL_VERIFIED (Windows)
-D5B.2 Human Review / QC UI                   PLANNED
+D5B.2A Human Review backend/CLI              IMPLEMENTED (branch; full gate passed, review pending)
+D5B.2B QC / Human Review API/UI              PLANNED
 D5B.3 Approved Master Delivery              PLANNED
 D6  End-to-End Personal Pilot
 ```
@@ -563,7 +564,7 @@ Rascunho/preview não alteram plano; nova execução pode reutilizar outputs sem
 imagem, voz ou HeyGen. Sem timeline, frame-perfect, migration ou dependência nova.
 E2E real local com três headlines + download/full decode + reload/reuso preservando upstream.
 Evidência: `docs/superpowers/2026-10-08-d5a2-verification.md`.
-Próximo recorte após D5B.1: D5B.2 review humano/UI, com design aprovado antes da execução.
+Próximo recorte após D5B.2A: D5B.2B QC/review API/UI, com design aprovado antes da execução.
 
 ### Objetivo
 
@@ -613,7 +614,21 @@ Texto mede layout do manifest, não frames queimados. Reuso valida hashes e repo
 sem medir novamente; consulta exata dispensa FFmpeg. Sem encode/provider/UI/Job/SQL.
 Evidência: `docs/superpowers/2026-10-09-d5b1-verification.md`.
 
-### D5B.2 — Human Review / QC UI
+### D5B.2A — Human Review backend/CLI
+
+**Status:** `IMPLEMENTED` em `feat/d5b2a-human-review`; gate Windows 19/19 passou,
+2.070 Python / 27 skips, 378 frontend; revisão independente em andamento.
+Sem merge/push desta etapa. Evidência: `docs/superpowers/2026-10-10-d5b2a-verification.md`.
+
+Contratos/schema 1.0, serviço e CLI `edit review|review-get`. Uma decisão definitiva
+por contexto salvo/master, data UTC gerada pelo serviço, reviewer e comentário.
+Aprovar exige QC passed e confirmação humana de assistir/ouvir; rejeitar exige comentário.
+Repetição idêntica preserva bytes/data; request alterado, inclusive outra QC key,
+conflita. Consulta exata revalida evidência original sem FFmpeg. Rejeição preserva
+versão; operador produz/revisa a próxima, sem regeneração automática.
+Sem HTTP/React, Jobs, SQL, entrega, provider ou dependências novas.
+
+### D5B.2B — QC / Human Review API/UI
 
 **Status:** `PLANNED`. Exibir QC por variante e permitir escuta/inspeção e decisão
 approve/reject com comentário; `passed` técnico nunca equivale à aprovação.
@@ -642,7 +657,7 @@ Fechar o ciclo local do render até entrega.
 
 - QC bloqueado impede aprovação; clareza/volume relativo da voz e distorção
   dependem também da revisão humana, não apenas da medição escalar do mix;
-- rejeição cria nova revisão, não sobrescreve master;
+- após rejeição, operador cria/revisa nova versão; não sobrescreve master nem há regeneração automática;
 - delivery é distinguido de upload cloud;
 - UI exibe QC e decisão.
 

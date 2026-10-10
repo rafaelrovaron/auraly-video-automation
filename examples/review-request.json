@@ -1,0 +1,13 @@
+{
+  "schemaVersion": "1.0",
+  "campaignId": "campaign-one",
+  "videoId": "video-one",
+  "planHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "outputVariantId": "variant-a",
+  "renderKey": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "qcKey": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "decision": "approved",
+  "reviewedBy": "Local reviewer",
+  "comment": null,
+  "watchedAndListened": true
+}

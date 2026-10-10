@@ -11,6 +11,16 @@ entrega.
 
 ### Entregue hoje
 
+D5B.2A backend/CLI implementado na branch `feat/d5b2a-human-review`, ainda sem
+merge/push: decisão humana definitiva por versão exata de master/plano, registro
+imutável e consulta que revalida master, receipt e bytes do relatório QC. Aprovar
+exige QC passed e confirmação explícita de assistir e ouvir; rejeitar exige comentário.
+Repetição idêntica preserva data/bytes; outra decisão, comentário ou QC key conflita.
+Sem HTTP/UI, SQL, Job, provider, render ou análise novos. Gate Windows 19/19 passou:
+2.070 Python / 27 skips e 378 frontend; revisão independente em andamento.
+D5B.2B UI e D5B.3 entrega planejados.
+Evidência: `docs/superpowers/2026-10-10-d5b2a-verification.md`.
+
 D5B.1 implementado e integrado em `main` (`a84aec2`): QC técnico de masters existentes por variante via CLI,
 sem render novo, provider, HTTP, Job ou UI adicionais. Valida identidade/receipt/SHA,
 contrato de mídia e full decode; mede loudness/true peak do áudio inteiro e reutiliza
@@ -19,7 +29,7 @@ operacionais não são cacheados. Consulta exata não requer FFmpeg. `passed` nu
 aprova o vídeo: `humanReviewRequired: true`; voz inteligível e distorção exigem escuta.
 Política interna inicial `final-qc-v1`: abaixo de −30 LUFS ou pico ≥0 dBTP bloqueia;
 não é regra de plataforma nem detecção completa de clipping. Texto mede layout do
-manifest, não OCR de frames queimados. D5B.2 review/UI e D5B.3 entrega seguem planejados.
+manifest, não OCR de frames queimados. D5B.2B UI e D5B.3 entrega seguem planejados.
 Gate pós-merge Windows 19/19: 378 frontend, 1.994 Python / 27 skips (899,45 s),
 Ruff/mypy e schemas sem drift. Revisão independente concluída; classificação de
 falha operacional corrigida com RED→GREEN; gate pós-merge aprovado. Merge/push
@@ -111,7 +121,7 @@ Evidência: [verificação D4B.3b](docs/superpowers/2026-10-07-d4b3b-verificatio
 
 ### Não entregue ainda
 
-- D5B.2: review humano e UI de QC; D5B.3: entrega dos masters aprovados;
+- D5B.2B: integrar QC e review humano à API/UI; D5B.3: entrega dos masters aprovados;
 - piloto end-to-end operável pela interface (o preview aproximado já foi entregue).
 
 ### Render local de um plano salvo (D5A.1)
@@ -176,7 +186,39 @@ exit 1 para consulta inválida. Erros globais não publicam batch/report. Relat�
 hashes atuais são revalidados em consulta/reuso. Repetição exata não mede novamente.
 Alterar runtime/plano consumidor gera outra identidade QC sem regenerar o master.
 Relatório corrupto não é sobrescrito. Corrija manualmente com backup; falhas operacionais
-permitem nova tentativa explícita. Aprovação humana e entrega ainda não estão conectadas.
+permitem nova tentativa explícita. A decisão humana usa o backend/CLI D5B.2A abaixo;
+integração à interface e entrega ainda não estão conectadas.
+
+### Decisão humana de um master existente (D5B.2A)
+
+Abra o MP4 existente, assista e ouça antes de aprovar. Copie
+`examples/review-request.json` e substitua os seletores pelos do plano/render/QC
+exatos; os hashes do exemplo são fictícios. Informe reviewer e decisão reais.
+`watchedAndListened: true` é sua declaração humana, não medição de playback.
+Não execute o exemplo como aprovação automática.
+
+```powershell
+uv run auraly edit review --request review-request.json --project-root <project> --work-root <work>
+uv run auraly edit review-get --campaign-id <campaign> --video-id <video> --plan-hash <hash> --output-variant-id <variant> --render-key <renderKey> --review-key <reviewKey> --project-root <project> --work-root <work>
+```
+
+Ambos retornam registro JSON e exit 0 também para rejeição válida. Exit 1 sem
+registro em stdout para entrada inválida, conflito ou evidência ausente/alterada.
+Aprovação exige QC `passed` e confirmação; rejeição aceita QC `passed` ou `blocked`
+com comentário obrigatório. QC `error` não oferece relatório revisável.
+
+Decisões em `campaigns/<campaign>/editing/reviews/<variant>/<renderKey>/<reviewKey>/review.json`.
+Uma decisão definitiva por campanha/vídeo/plano/variante/render/master SHA/receipt SHA,
+sem undo ou overwrite. QC key não cria outra versão: mudar apenas reviewer, comentário,
+decisão, confirmação ou QC key conflita; repetição normalizada idêntica retorna a data
+original. Outro plano/variante/master requer review independente, sem herdar aprovação.
+Se a resposta for perdida, consulte o reviewKey conhecido ou repita o request idêntico.
+
+Rejeição preserva tudo: faça a edição necessária, gere a nova versão pelo fluxo existente,
+execute seu QC e revise-a. Nenhuma regeneração automática. Registro e consulta não
+exigem FFmpeg nem executam QC/render/provider; preservam masters e relatórios.
+Artefato corrompido não é reparado automaticamente. Futuras UI/delivery devem consultar
+o serviço validado, nunca inferir aprovação da presença do arquivo ou de QC passed.
 
 ### Google Flow: preservado, mas pausado
 

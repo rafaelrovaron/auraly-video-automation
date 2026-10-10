@@ -22,6 +22,8 @@ from auraly_pipeline.editing.render_domain import RenderBatchResult, RenderError
 from auraly_pipeline.editing.render_service import RenderService
 from auraly_pipeline.editing.qc_domain import QcRequest, QcTarget
 from auraly_pipeline.editing.qc_service import QcService
+from auraly_pipeline.editing.review_domain import HumanReviewRecord, HumanReviewRequest
+from auraly_pipeline.editing.review_service import HumanReviewService
 
 
 ProjectRoot = Annotated[Path | None, typer.Option("--project-root")]
@@ -42,7 +44,8 @@ def _errors() -> Iterator[None]:
         field = validation_field(exc, extra_models=(CaptionInput, CaptionTimingCue,
             CaptionTimingInput, CopyRef, EditBatchPlan, EditBatchRequest,
             EditPlannedOutput, EditVariant, ResolvedCaptionCue, RenderBatchResult,
-            RenderError, RenderOutputResult, RenderReceipt, RenderRuntime, QcRequest, QcTarget))
+            RenderError, RenderOutputResult, RenderReceipt, RenderRuntime, QcRequest, QcTarget,
+            HumanReviewRequest, HumanReviewRecord))
         typer.echo(f"{field}: invalid field", err=True)
         raise typer.Exit(1) from None
     except (OSError, ValueError):
@@ -65,6 +68,31 @@ def _load(path: Path) -> object:
 def register_editing_commands(app: typer.Typer) -> None:
     edit = typer.Typer(help="Resolve editing plans and render local vertical masters.", no_args_is_help=True)
     app.add_typer(edit, name="edit")
+
+    @edit.command("review")
+    def review(request: RequestFile, project_root: ProjectRoot = None,
+               work_root: WorkRoot = None) -> None:
+        """Record one definitive human decision; never render or run QC."""
+        with _errors():
+            payload = HumanReviewRequest.model_validate(_load(request))
+            roots = _service(project_root, work_root)
+            result = HumanReviewService(project_root=roots.project_root, work_root=roots.work_root).record(payload)
+            typer.echo(result.model_dump_json(by_alias=True))
+
+    @edit.command("review-get")
+    def review_get(campaign_id: Annotated[str, typer.Option("--campaign-id")],
+                   video_id: Annotated[str, typer.Option("--video-id")],
+                   plan_hash: Annotated[str, typer.Option("--plan-hash")],
+                   output_variant_id: Annotated[str, typer.Option("--output-variant-id")],
+                   render_key: Annotated[str, typer.Option("--render-key")],
+                   review_key: Annotated[str, typer.Option("--review-key")],
+                   project_root: ProjectRoot = None, work_root: WorkRoot = None) -> None:
+        """Read an exact decision, revalidating master/QC evidence without FFmpeg."""
+        with _errors():
+            roots = _service(project_root, work_root)
+            result = HumanReviewService(project_root=roots.project_root, work_root=roots.work_root).get_review(
+                campaign_id, video_id, plan_hash, output_variant_id, render_key, review_key)
+            typer.echo(result.model_dump_json(by_alias=True))
 
     @edit.command("qc")
     def qc(request: RequestFile, project_root: ProjectRoot = None,
