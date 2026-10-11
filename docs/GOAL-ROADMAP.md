@@ -1,6 +1,6 @@
 # Auraly Delivery-First Goal Roadmap
 
-**Roadmap vigente:** 2026-10-10
+**Roadmap vigente:** 2026-10-11
 
 Este documento é a ordem operacional dos próximos Goals. O PRD define o produto; este roadmap
 define como chegar a ele sem transformar cada Goal em um projeto grande demais.
@@ -72,7 +72,7 @@ D5A.1 Local Renderer                         IMPLEMENTED, LOCAL_VERIFIED (Window
 D5A.2 Render Jobs/API/UI                      IMPLEMENTED, LOCAL_VERIFIED (Windows)
 D5B.1 Final QC backend/CLI                    IMPLEMENTED, LOCAL_VERIFIED (Windows)
 D5B.2A Human Review backend/CLI              IMPLEMENTED, LOCAL_VERIFIED (Windows; main)
-D5B.2B QC / Human Review API/UI              PLANNED
+D5B.2B QC / Human Review API/UI              IMPLEMENTED, LOCAL_VERIFIED (Windows; branch local)
 D5B.3 Approved Master Delivery              PLANNED
 D6  End-to-End Personal Pilot
 ```
@@ -564,7 +564,8 @@ Rascunho/preview não alteram plano; nova execução pode reutilizar outputs sem
 imagem, voz ou HeyGen. Sem timeline, frame-perfect, migration ou dependência nova.
 E2E real local com três headlines + download/full decode + reload/reuso preservando upstream.
 Evidência: `docs/superpowers/2026-10-08-d5a2-verification.md`.
-Próximo recorte após D5B.2A: D5B.2B QC/review API/UI, com design aprovado antes da execução.
+Próximo recorte após integrar D5B.2B: D5B.3 entrega dos masters aprovados,
+com design aprovado antes da execução.
 
 ### Objetivo
 
@@ -633,10 +634,16 @@ Sem HTTP/React, Jobs, SQL, entrega, provider ou dependências novas.
 
 ### D5B.2B — QC / Human Review API/UI
 
-**Status:** `PLANNED`. Exibir QC por variante e permitir escuta/inspeção e decisão
-approve/reject com comentário; `passed` técnico nunca equivale à aprovação.
-Proxy/contact sheet somente se necessário ao fluxo simples. Rejeição referencia
-nova revisão, sem sobrescrever master. Sem revisão humana automatizada.
+**Status:** `IMPLEMENTED`, `LOCAL_VERIFIED` (Windows) em branch local
+`feat/d5b2b-qc-review-ui`, ainda sem merge/push. Gate 19/19: 399 frontend,
+2.093 Python / 28 skips (1.027,18 s). Revisão independente em andamento.
+QC explícito por output bem-sucedido do Job/plano salvo, player nativo e decisão
+definitiva readonly. Operação edit_qc reutiliza fila/worker locais; GET verificado
+sem FFmpeg recupera QC/review/execuções após reload. Respostas perdidas exigem consulta,
+sem reenvio automático ou nova identidade silenciosa. QC passed não aprova sozinho;
+aprovar exige nome/confirmação, rejeitar exige comentário. Sem proxy/contact sheet,
+provider, encode, dependência, tabela ou migration novos. D5B.3 segue planejado.
+Evidência: `docs/superpowers/2026-10-11-d5b2b-verification.md`.
 
 ### D5B.3 — Approved Master Delivery
 

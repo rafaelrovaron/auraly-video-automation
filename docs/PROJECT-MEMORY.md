@@ -6,16 +6,36 @@
 Este documento guarda decisões duráveis e fatos verificados. O estado entregue aparece separado
 do produto planejado para impedir que roadmap seja confundido com capacidade existente.
 
-## Entrega atual em main: D5B.2A — Review humano backend/CLI (2026-10-11)
+## Checkpoint local: D5B.2B — QC/review API/UI (2026-10-11)
+
+`IMPLEMENTED`, `LOCAL_VERIFIED` (Windows) em `feat/d5b2b-qc-review-ui`, ainda sem
+merge/push. Gate 19/19: 399 frontend, 2.093 Python / 28 skips (1.027,18 s).
+Revisão independente em andamento.
+Reutiliza QcService / HumanReviewService e mídia verificada. QC individual é operação
+`edit_qc` na fila existente `api.local.operation`; worker `local_operations` explícito.
+Review é POST direto, definitivo e imutável. GET do output selecionado deriva contexto
+do Job de render/plano salvo e revalida master/receipt/QC/review sem análise FFmpeg.
+
+UI no RenderPanel: player nativo controls/preload metadata, sem autoplay/mute;
+checks e loudness/true peak, escolha explícita entre múltiplos QC, nome/comentário/
+confirmação humana, decisão readonly com UTC. Polling serial apenas para QC ativo.
+Resposta desconhecida bloqueia novos envios até consulta; recuperação não adota outro
+executionId, não reenvia QC, não substitui decisão de outro cliente e retry explícito
+de review preserva request congelado. Erro de consulta limpa aprovação acionável.
+Sem nova dependência/tabela/migration/provider/encode; sem campanhas reais aprovadas.
+D5B.3 entrega permanece `PLANNED`; Flow preservado/pausado.
+Evidência: `docs/superpowers/2026-10-11-d5b2b-verification.md`.
+
+## Entrega atual em main / histórico: D5B.2A — Review humano backend/CLI (2026-10-11)
 
 Implementado e integrado em `main` por fast-forward até `8d1a656`. Gate Windows
 19/19 passou: 2.070 Python / 27 skips (950,76 s), 378 frontend; schemas sem drift.
 `IMPLEMENTED`, `LOCAL_VERIFIED` (Windows); revisão independente aprovada, zero
 Critical/Important, um Minor de teste adiado (forçar timestamps distintos na concorrência).
 Gate fresco pós-merge em 2026-10-11: 19/19, 2.070 Python / 27 skips (936,09 s),
-378 frontend; schemas sem drift. Push autorizado pelo usuário; Actions desta
-integração pendentes de confirmação. Não amplia `PROVIDER_VERIFIED`.
-D5B.2B API/UI e D5B.3 entrega continuam `PLANNED`.
+378 frontend; schemas sem drift. Push autorizado pelo usuário; Actions Linux/Windows
+confirmados no run 38141288303, SHA d9d0db3. Não amplia `PROVIDER_VERIFIED`.
+Naquele checkpoint D5B.2B API/UI e D5B.3 entrega eram `PLANNED`.
 Evidência: `docs/superpowers/2026-10-10-d5b2a-verification.md`.
 Reutiliza QC GET e publicação JSON exclusiva; sem SQL, Job ou dependência nova.
 CLI `edit review|review-get`: seleção explícita, decisão definitiva, reviewer/comentário

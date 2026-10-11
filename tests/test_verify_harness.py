@@ -76,6 +76,14 @@ def test_windows_gate_includes_qc_targets_once() -> None:
         assert command.split().count(f"tests/test_{name}.py") == 1
 
 
+def test_windows_gate_includes_final_review_targets_once() -> None:
+    job = load_verify_workflow()["jobs"]["windows-focused"]
+    command = next(step["run"] for step in job["steps"]
+                   if step.get("name") == "Run focused cross-platform verification")
+    for name in ("review_discovery", "api_final_review", "web_final_review_e2e"):
+        assert command.split().count(f"tests/test_{name}.py") == 1
+
+
 def test_editing_schemas_are_audited_by_full_gate() -> None:
     verify = load_verify_module()
     steps = [step for step in verify.build_full_steps() if step.name == "editing schemas"]

@@ -11,6 +11,18 @@ entrega.
 
 ### Entregue hoje
 
+Checkpoint local D5B.2B (2026-10-11), em `feat/d5b2b-qc-review-ui`, ainda sem merge/push:
+QC explícito por output na tela de render, player nativo do master e decisão humana
+definitiva. Reutiliza `api.local.operation` / `local_operations`; GET revalida evidências
+sem FFmpeg e recupera relatórios, execuções e decisão após reload. UI diferencia QC
+técnico de aprovação humana e consulta respostas perdidas sem reenvio automático.
+Sem dependência, tabela, migration, encode ou provider novos; entrega permanece D5B.3.
+Código `IMPLEMENTED`, `LOCAL_VERIFIED` (Windows): gate 19/19, 399 frontend,
+2.093 Python / 28 skips (1.027,18 s). Revisão independente em andamento.
+Evidência: `docs/superpowers/2026-10-11-d5b2b-verification.md`.
+
+Histórico D5B.2A:
+
 D5B.2A backend/CLI implementado e integrado em `main` (código `8d1a656`):
 decisão humana definitiva por versão exata de master/plano, registro
 imutável e consulta que revalida master, receipt e bytes do relatório QC. Aprovar
@@ -21,7 +33,7 @@ Sem HTTP/UI, SQL, Job, provider, render ou análise novos. Gate Windows 19/19 pa
 sem Critical/Important, um Minor de teste adiado. `IMPLEMENTED`, `LOCAL_VERIFIED` (Windows).
 D5B.2B UI e D5B.3 entrega planejados.
 Gate fresco pós-merge em 2026-10-11: 19/19, mesmas contagens; pytest 936,09 s.
-Push autorizado; Actions desta integração ainda pendentes de confirmação.
+Push autorizado; Actions Linux/Windows da integração D5B.2A passaram no run 38141288303.
 Evidência: `docs/superpowers/2026-10-10-d5b2a-verification.md`.
 
 D5B.1 implementado e integrado em `main` (`a84aec2`): QC técnico de masters existentes por variante via CLI,
@@ -124,7 +136,7 @@ Evidência: [verificação D4B.3b](docs/superpowers/2026-10-07-d4b3b-verificatio
 
 ### Não entregue ainda
 
-- D5B.2B: integrar QC e review humano à API/UI; D5B.3: entrega dos masters aprovados;
+- D5B.3: entrega dos masters aprovados (D5B.2B implementado na branch local, aguardando integração);
 - piloto end-to-end operável pela interface (o preview aproximado já foi entregue).
 
 ### Render local de um plano salvo (D5A.1)
@@ -146,6 +158,23 @@ planHash do recibo identifica o plano produtor, não precisa ser o plano consumi
 Órfão/corrupção nunca é sobrescrito ou adotado: reparar manualmente o artefato
 identificado, preservando backup se necessário, e executar novamente.
 Windows usa caminhos longos nativos; ferramentas legadas podem precisar de work root curto.
+
+### QC e review na tela de render (D5B.2B)
+
+Selecione o plano salvo e a execução de render. Em cada output bem-sucedido, use
+**Executar QC**, confira os checks/medidas e assista/ouça o master no player ou nos
+links Abrir/Baixar MP4. O worker `local_operations` pode drenar outras operações
+locais pendentes desta campanha; ocupado não significa que o QC enfileirado falhou.
+Com vários relatórios válidos, selecione explicitamente o QC por chave/policy/runtime.
+
+Para aprovar: QC passed, nome e “Assisti e ouvi este master”. Para rejeitar: QC
+passed/blocked, nome e comentário. Confirme a decisão definitiva; outra decisão
+exige nova versão/plano, nunca sobrescreve o master. Data/revisor/comentário ficam
+somente leitura. QC técnico aprovado não significa aprovação humana.
+Se a resposta se perder, **Consultar QC e review** recupera a execução pelo
+executionId ou a decisão original. Só uma consulta bem-sucedida de ausência permite
+retry explícito da mesma decisão congelada; QC nunca é reenviado automaticamente.
+Erro de integridade remove aprovação acionável; repare a evidência antes de continuar.
 
 ### Render pela interface (D5A.2)
 

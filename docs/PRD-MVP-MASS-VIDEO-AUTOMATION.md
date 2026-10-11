@@ -19,7 +19,23 @@ genérico e não terá timeline estilo CapCut ou preview frame-perfect.
 
 ### 2.1 Capacidade entregue
 
-Checkpoint atual D5B.1 (2026-10-09):
+Checkpoint local D5B.2B (2026-10-11): `IMPLEMENTED`, `LOCAL_VERIFIED` (Windows) na
+branch `feat/d5b2b-qc-review-ui`, sem merge/push. Gate 19/19: 399 frontend,
+2.093 Python / 28 skips (1.027,18 s). Revisão independente em andamento.
+QC explícito e decisão humana no RenderPanel por output bem-sucedido. Reutiliza
+fila api.local.operation / worker local_operations, serviços QC/review e mídia
+verificada; sem provider/encode/tabela/migration/dependência novos. Player nativo,
+checks/medidas, escolha de QC, confirmação humana, decisão readonly, UTC e reload.
+Respostas perdidas são consultadas antes de novos envios; não há retry automático.
+GET revalida evidência, erros removem aprovação acionável. Sem timeline/frame-perfect
+ou playback tracking. D5B.3 entrega e D6 piloto pessoal permanecem planejados.
+Evidência: `docs/superpowers/2026-10-11-d5b2b-verification.md`.
+
+Baseline em main: D5B.2A review backend/CLI integrado, gate Windows 19/19,
+2.070 Python / 27 skips, 378 frontend; Actions Linux/Windows run 38141288303 aprovados.
+Sem ampliação de `PROVIDER_VERIFIED` por estes testes locais.
+
+Histórico D5B.1 (2026-10-09):
 
 D5B.1 implementado e integrado em `main` (`a84aec2`): QC técnico de masters existentes por variante via CLI,
 sem render novo, provider, HTTP, Job ou UI adicionais. Valida identidade/receipt/SHA,
