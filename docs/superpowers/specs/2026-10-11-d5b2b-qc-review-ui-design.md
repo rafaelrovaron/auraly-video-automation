@@ -1,6 +1,6 @@
 # D5B.2B — QC e review humano na API/UI local
 
-Data: 2026-10-11. Status: proposta escrita para revisão do usuário; não implementada.
+Data: 2026-10-11. Status: design escrito aprovado pelo usuário; não implementado.
 Base: `main` em `d9d0db3`, com D5B.1 QC e D5B.2A review backend/CLI.
 O fluxo conceitual foi aprovado na conversa. Este documento detalha a integração;
 sua aprovação permite escrever o plano, não iniciar implementação ou fazer push.
@@ -159,5 +159,5 @@ QC implícito pós-render, provider, geração nova, dependência ou hardening g
 Entrega/cópia de masters aprovados permanece D5B.3. Flow continua pausado.
 AGENTS.md e referências sincronizadas não serão alterados.
 
-Próximo gate: usuário revisar este design escrito; depois escrever plano de
-implementação em tarefas pequenas e obter aprovação/método de execução.
+Design escrito aprovado na conversa em 2026-10-11. Próximo gate: revisar o plano
+de implementação em tarefas pequenas e aprovar o método de execução.
