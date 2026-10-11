@@ -635,8 +635,9 @@ Sem HTTP/React, Jobs, SQL, entrega, provider ou dependências novas.
 ### D5B.2B — QC / Human Review API/UI
 
 **Status:** `IMPLEMENTED`, `LOCAL_VERIFIED` (Windows) em branch local
-`feat/d5b2b-qc-review-ui`, ainda sem merge/push. Gate 19/19: 399 frontend,
-2.093 Python / 28 skips (1.027,18 s). Revisão independente em andamento.
+`feat/d5b2b-qc-review-ui`, ainda sem merge/push. Pós-fix: 19 checks aprovados
+(audit retomado após falha de rede), 401 frontend, 2.093 Python / 28 skips
+(1.001,47 s). Revisão independente concluída: dois Important corrigidos, dois Minor adiados.
 QC explícito por output bem-sucedido do Job/plano salvo, player nativo e decisão
 definitiva readonly. Operação edit_qc reutiliza fila/worker locais; GET verificado
 sem FFmpeg recupera QC/review/execuções após reload. Respostas perdidas exigem consulta,

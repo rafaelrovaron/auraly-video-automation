@@ -3,7 +3,7 @@
 Data: 2026-10-11. Branch: `feat/d5b2b-qc-review-ui`, base `4ea77b7`.
 Design e plano aprovados; execução Native com TDD e commits por tarefa.
 Sem merge/push nesta etapa. `IMPLEMENTED`, `LOCAL_VERIFIED` (Windows);
-gate completo aprovado, revisão independente em andamento.
+verificações pós-fix aprovadas, revisão independente concluída.
 
 ## Escopo
 
@@ -40,7 +40,16 @@ dependência, tabela/migration, timeline, proxy ou entrega. AGENTS e sources pre
   HyperFrames doctor exit 0; Docker e runtimes AI opcionais ausentes.
   Não há alegação de execução Linux local nem Actions deste slice.
 
-Gate full aprovado; revisão independente pendente.
+Gate full pré-revisão aprovado; revisão independente concluída.
+Pós-fix: frontend **401 passed**, Python **2.093 passed / 28 skipped**
+(1.001,47 s), Ruff/mypy/schema/deps/build/doctor aprovados. O comando full passou
+as primeiras 17 etapas e parou na 18 por ENOENT de DNS no registry.npmjs.org.
+Retomada pelo mesmo harness `run_steps(build_full_steps()[17:])`: exit 0,
+audit e whitespace **2/2 aprovados**. Todos os 19 checks verificados sobre o
+código corrigido; não é uma execução full atômica 19/19. Nenhum código mudou
+entre full e retomada. Audit mantém cinco vulnerabilidades moderadas transitivas,
+zero high; sem upgrade breaking. Logs locais preservados em
+`.superpowers/sdd/d5b2b-verification-logs/`.
 Testes locais não significam aprovação editorial de campanha real ou PROVIDER_VERIFIED.
 
 ## Decisões de execução
@@ -55,6 +64,44 @@ Testes locais não significam aprovação editorial de campanha real ou PROVIDER
    compatibilidade de serialização dos resultados QC.
 4. Atualizar os testes de inventário OpenAPI para as três rotas aprovadas.
    Custo se errado: contagens de rotas inexatas nos testes.
+5. Autenticação e prova objetiva de playback seguem excluídas: checkbox é declaração
+   humana em ferramenta local/pessoal. Custo se errado: identidade/escuta não comprováveis.
+6. Reescrita maliciosa coerente de toda a evidência segue excluída: hashes protegem
+   corrupção, não um proprietário local hostil. Custo se errado: adulteração deliberada
+   pode não ser detectada.
+7. Escalabilidade de enumeração/hashing em grandes acervos adiada: sem gargalo
+   demonstrado no uso pessoal. Custo se errado: consulta lenta em acervos grandes.
+8. Sem alegação editorial/provider real: mídia sintética local. Custo se errado:
+   problemas de campanha/provider reais permanecem desconhecidos.
+9. Entrega/cópia permanece D5B.3: slice termina no review definitivo. Custo se errado:
+   operador copia masters manualmente até implementar entrega.
+10. Sem certificação Linux/Actions: somente Windows local executado. Custo se errado:
+    falhas específicas de plataforma podem aparecer no CI.
+11. Retomar apenas etapas 18–19 após erro DNS: as primeiras 17 passaram sobre o
+    mesmo código, sem motivo para repetir 16 minutos de testes. Custo se errado:
+    possível mudança de ambiente entre execuções; não alegar full atômico.
+
+## Revisão independente e correções
+
+Revisor fresh-context gpt-6-astra, diff completo `4ea77b7..7aa292b`, somente leitura.
+Zero Critical, dois Important e dois Minor. Important confirmados por RED (2 failures,
+12 passes) e corrigidos em uma rodada:
+
+- POST QC com artifact_invalid limpa state/seleção/checkbox e bloqueia envios até
+  GET válido; regressão `QC integrity failure clears the prior actionable evidence`.
+- Mudança no conjunto de relatórios exige seleção explícita quando há múltiplos QC,
+  preservando o QC original de decisão já salva; regressão
+  `one report becoming multiple after QC requires a fresh explicit selection`.
+
+GREEN: 67 testes UI selecionados e TypeScript/build. Sem re-review; regressões e
+gate completo pós-fix fornecem a evidência das correções.
+
+Minor adiado (não alterado nesta etapa):
+
+- Traduzir findings conhecidos text_fit/master_invalid/integrity_prerequisite; hoje
+  usa fallback fixo sanitizado, sem exibir mensagem bruta.
+- Exibir estado observado ao consultar worker; hoje consulta funciona, mas apresenta
+  orientação genérica em vez do estado retornado.
 
 ## Limites / próximo passo
 

@@ -20,8 +20,9 @@ genérico e não terá timeline estilo CapCut ou preview frame-perfect.
 ### 2.1 Capacidade entregue
 
 Checkpoint local D5B.2B (2026-10-11): `IMPLEMENTED`, `LOCAL_VERIFIED` (Windows) na
-branch `feat/d5b2b-qc-review-ui`, sem merge/push. Gate 19/19: 399 frontend,
-2.093 Python / 28 skips (1.027,18 s). Revisão independente em andamento.
+branch `feat/d5b2b-qc-review-ui`, sem merge/push. Pós-fix: 19 checks aprovados
+(audit retomado após falha de rede), 401 frontend, 2.093 Python / 28 skips
+(1.001,47 s). Revisão independente concluída: dois Important corrigidos, dois Minor adiados.
 QC explícito e decisão humana no RenderPanel por output bem-sucedido. Reutiliza
 fila api.local.operation / worker local_operations, serviços QC/review e mídia
 verificada; sem provider/encode/tabela/migration/dependência novos. Player nativo,

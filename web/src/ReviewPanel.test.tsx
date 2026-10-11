@@ -75,6 +75,31 @@ it('multiple_qc_requires_selection',async()=>{
   fireEvent.click(screen.getByLabelText('Assisti e ouvi este master'));
   expect(screen.getByRole('button',{name:'Aprovar master'}).hasAttribute('disabled')).toBe(false);
 });
+it('QC integrity failure clears the prior actionable evidence',async()=>{
+  await mount(ready);fill();fireEvent.change(screen.getByLabelText('Comentário'),{target:{value:'Review'}});
+  vi.mocked(submitQc).mockRejectedValueOnce(new ApiError('artifact_invalid',409));
+  fireEvent.click(screen.getByRole('button',{name:'Executar QC'}));await screen.findByText(/Artefato armazenado inválido/);
+  expect(screen.queryByText('QC técnico: Aprovado')).toBeNull();
+  for(const name of ['Executar QC','Aprovar master','Rejeitar master'])expect(screen.getByRole('button',{name}).hasAttribute('disabled')).toBe(true);
+  expect((screen.getByLabelText('Assisti e ouvi este master') as HTMLInputElement).checked).toBe(false);
+  expect(startQcWorker).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button',{name:'Consultar QC e review'}));await screen.findByText('QC técnico: Aprovado');
+  expect(screen.getByRole('button',{name:'Executar QC'}).hasAttribute('disabled')).toBe(false);
+  expect(screen.getByRole('button',{name:'Aprovar master'}).hasAttribute('disabled')).toBe(true);
+});
+it('one report becoming multiple after QC requires a fresh explicit selection',async()=>{
+  await mount(ready);fill();
+  vi.mocked(getReviewState).mockResolvedValue({...queued,reports:[report]});
+  fireEvent.click(screen.getByRole('button',{name:'Executar QC'}));await screen.findByText(/QC na fila/);
+  vi.mocked(getReviewState).mockResolvedValue({...ready,reports:[report,{...report,qcKey:'f'.repeat(64),status:'blocked'}]});
+  fireEvent.click(screen.getByRole('button',{name:'Consultar QC e review'}));
+  await waitFor(()=>expect(screen.getByRole('button',{name:'Executar QC'}).hasAttribute('disabled')).toBe(false));
+  expect((screen.getByLabelText('Relatório QC') as HTMLSelectElement).value).toBe('');
+  expect(screen.getByRole('button',{name:'Aprovar master'}).hasAttribute('disabled')).toBe(true);
+  fireEvent.change(screen.getByLabelText('Relatório QC'),{target:{value:report.qcKey}});
+  fireEvent.click(screen.getByLabelText('Assisti e ouvi este master'));
+  expect(screen.getByRole('button',{name:'Aprovar master'}).hasAttribute('disabled')).toBe(false);
+});
 it('stale_response_or_target_change_clears_old_approval',async()=>{
   const saved=record({...context,qcKey:report.qcKey,decision:'approved',reviewedBy:'Tester',comment:null,watchedAndListened:true});
   const view=await mount({...ready,review:saved});expect(screen.getByText('Decisão definitiva: Aprovado')).toBeTruthy();

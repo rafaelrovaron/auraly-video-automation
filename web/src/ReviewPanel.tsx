@@ -14,6 +14,7 @@ function ReviewFlow({target}:{target:ReviewTarget}){
   const [pendingReview,setPendingReview]=useState<HumanReviewRequest|null>(null),[retryReview,setRetryReview]=useState(false),[workerUnknown,setWorkerUnknown]=useState(false);
   const [name,setName]=useState(''),[comment,setComment]=useState(''),[watched,setWatched]=useState(false);
   const alive=useRef(true),lock=useRef(false),controller=useRef<AbortController|null>(null),version=useRef(0);
+  const reportSet=useRef('');
   const timer=useRef<ReturnType<typeof setTimeout>|undefined>(undefined),inspectRef=useRef<(recoverQc?:boolean)=>Promise<void>>(async()=>{});
   const qcPending=state?.runs.some(run=>active(run.status))??false;
   const report=state?.reports.find(item=>item.qcKey===selected);
@@ -22,7 +23,8 @@ function ReviewFlow({target}:{target:ReviewTarget}){
     const token=++version.current;controller.current?.abort();clearTimeout(timer.current);
     const abort=new AbortController();controller.current=abort;setReading(true);setAbsentQc(false);setRetryReview(false);
     try{const fresh=await getReviewState(target,abort.signal);if(!alive.current||token!==version.current)return;
-      setState(fresh);setSelected(previous=>fresh.review?.qcKey??(fresh.reports.length===1?fresh.reports[0].qcKey:fresh.reports.some(r=>r.qcKey===previous)?previous:''));
+      const keys=fresh.reports.map(r=>r.qcKey).sort().join(','),sameReports=keys===reportSet.current;reportSet.current=keys;
+      setState(fresh);setSelected(previous=>fresh.review?.qcKey??(fresh.reports.length===1?fresh.reports[0].qcKey:sameReports&&fresh.reports.some(r=>r.qcKey===previous)?previous:''));
       if(unknownQc&&recoverQc){if(fresh.runs.some(run=>run.request.executionId===unknownQc.executionId)){setUnknownQc(null);setNotice('Execução QC encontrada. Nenhum reenvio.');}
         else{setAbsentQc(true);setNotice('Execução QC ainda não encontrada. Nenhum reenvio automático.');}}
       if(pendingReview){if(fresh.review){setPendingReview(null);setRetryReview(false);setNotice('Decisão definitiva recuperada do servidor.');}else setRetryReview(true);}
@@ -45,7 +47,8 @@ function ReviewFlow({target}:{target:ReviewTarget}){
     if(blocked||lock.current)return;lock.current=true;setBusy(true);setNotice(null);
     const request:EditQcOperation={...target,operation:'edit_qc',executionId:crypto.randomUUID()};setUnknownQc(request);setAbsentQc(false);
     try{await submitQc(request);if(!alive.current)return;setUnknownQc(null);await start();await inspectRef.current(false);}
-    catch(e){if(alive.current){const error=safe(e);setNotice(error.message);if(!uncertain(error))setUnknownQc(null);}}
+    catch(e){if(alive.current){const error=safe(e);setNotice(error.message);if(!uncertain(error))setUnknownQc(null);
+      if(error.code==='artifact_invalid'){++version.current;controller.current?.abort();clearTimeout(timer.current);setReading(false);setState(null);setSelected('');setWatched(false);reportSet.current='';}}}
     finally{if(alive.current){lock.current=false;setBusy(false);}}
   };
   const sendReview=async(request:HumanReviewRequest)=>{

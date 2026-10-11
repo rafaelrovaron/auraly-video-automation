@@ -17,8 +17,9 @@ definitiva. Reutiliza `api.local.operation` / `local_operations`; GET revalida e
 sem FFmpeg e recupera relatórios, execuções e decisão após reload. UI diferencia QC
 técnico de aprovação humana e consulta respostas perdidas sem reenvio automático.
 Sem dependência, tabela, migration, encode ou provider novos; entrega permanece D5B.3.
-Código `IMPLEMENTED`, `LOCAL_VERIFIED` (Windows): gate 19/19, 399 frontend,
-2.093 Python / 28 skips (1.027,18 s). Revisão independente em andamento.
+Código `IMPLEMENTED`, `LOCAL_VERIFIED` (Windows): 19 checks aprovados pós-fix
+(audit retomado após falha de rede), 401 frontend, 2.093 Python / 28 skips
+(1.001,47 s). Revisão independente concluída: dois Important corrigidos, dois Minor adiados.
 Evidência: `docs/superpowers/2026-10-11-d5b2b-verification.md`.
 
 Histórico D5B.2A:

@@ -9,8 +9,9 @@ do produto planejado para impedir que roadmap seja confundido com capacidade exi
 ## Checkpoint local: D5B.2B — QC/review API/UI (2026-10-11)
 
 `IMPLEMENTED`, `LOCAL_VERIFIED` (Windows) em `feat/d5b2b-qc-review-ui`, ainda sem
-merge/push. Gate 19/19: 399 frontend, 2.093 Python / 28 skips (1.027,18 s).
-Revisão independente em andamento.
+merge/push. Pós-fix: 19 checks aprovados (audit retomado após falha de rede),
+401 frontend, 2.093 Python / 28 skips (1.001,47 s).
+Revisão independente concluída: dois Important corrigidos, dois Minor adiados.
 Reutiliza QcService / HumanReviewService e mídia verificada. QC individual é operação
 `edit_qc` na fila existente `api.local.operation`; worker `local_operations` explícito.
 Review é POST direto, definitivo e imutável. GET do output selecionado deriva contexto
