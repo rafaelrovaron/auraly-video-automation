@@ -92,6 +92,34 @@ class QcService:
                 outputs.append(_error(target, exc))
         return QcBatchResult(**context, outputs=outputs)
 
+    def list_reports(self, campaign_id: str, video_id: str, plan_hash: str,
+                     output_variant_id: str, render_key: str) -> list[QcReport]:
+        try:
+            target = QcTarget(output_variant_id=output_variant_id, render_key=render_key)
+            plan = self.batch.get_plan(campaign_id, video_id, plan_hash)
+            artifact = open_verified_render(work_root=self.work_root, plan=plan,
+                output_variant_id=target.output_variant_id, render_key=target.render_key)
+            with artifact.stream:
+                directory = validate_editing_path(self.work_root, self.work_root / "campaigns"
+                    / campaign_id / "editing" / "qc" / output_variant_id / render_key)
+                try:
+                    children = sorted(directory.iterdir())
+                except FileNotFoundError:
+                    return []
+                reports = []
+                for child in children:
+                    TypeAdapter(Sha).validate_python(child.name)
+                    path = validate_editing_path(self.work_root, child / "report.json")
+                    report = QcReport.model_validate_json(path.read_bytes())
+                    if (report.campaign_id, report.output_variant_id, report.render_key, report.qc_key) != (
+                            campaign_id, output_variant_id, render_key, child.name):
+                        raise EditingError("artifact", "QC directory identity mismatch")
+                    if (report.video_id, report.plan_hash) == (video_id, plan_hash):
+                        reports.append(self._read_report(plan, target, child.name, artifact))
+                return reports
+        except (OSError, ValueError):
+            raise EditingError("artifact", "cannot discover valid QC reports") from None
+
     def _run_one(self, plan: EditBatchPlan, target: QcTarget, runtime: RenderRuntime) -> QcOutputResult:
         artifact = open_verified_render(work_root=self.work_root, plan=plan,
             output_variant_id=target.output_variant_id, render_key=target.render_key)
