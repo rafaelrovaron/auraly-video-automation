@@ -7,6 +7,7 @@ import type {RenderJobRequest,RenderJobView} from './renderApi';
 import {editPlanFixture} from './editingTestSupport';
 vi.mock('./renderApi',async original=>({...await original<typeof import('./renderApi')>(),getRender:vi.fn(),listRenders:vi.fn(),startRenderWorker:vi.fn(),submitRender:vi.fn()}));
 vi.mock('./api',async original=>({...await original<typeof import('./api')>(),readWorker:vi.fn()}));
+vi.mock('./ReviewPanel',()=>({ReviewPanel:({target}:{target:{outputVariantId:string;planHash:string}})=><section aria-label={`Review ${target.outputVariantId}`}>{target.planHash}</section>}));
 const plan=editPlanFixture(),jobId='22222222-2222-4222-8222-222222222222';
 const body:RenderJobRequest={schemaVersion:'1.0',campaignId:plan.campaignId,videoId:plan.videoId,planHash:plan.planHash,executionId:'11111111-1111-4111-8111-111111111111'};
 const queued:RenderJobView={...body,jobId,status:'queued',result:null,renderStatus:null,errorCode:null};
@@ -48,6 +49,7 @@ it('shows partial outcomes, safe media links and explicit new execution',async()
   vi.mocked(getRender).mockResolvedValue(completed);
   render(<RenderPanel campaignId={plan.campaignId} plan={plan}/>);fireEvent.click(screen.getByRole('button',{name:'Renderizar'}));
   await screen.findByText('Falha parcial');expect(screen.getAllByRole('link',{name:'Abrir MP4'})).toHaveLength(1);
+  expect(screen.getByRole('region',{name:'Review ab-a'})).toBeTruthy();expect(screen.queryByRole('region',{name:'Review ab-b'})).toBeNull();
   expect(screen.getByRole('link',{name:'Baixar MP4'}).getAttribute('href')).toContain('/outputs/ab-a/media?download=true');
   expect(screen.queryByText(/private-path-secret/)).toBeNull();expect(screen.getByText(/Podem ser reaproveitados/)).toBeTruthy();
   vi.mocked(crypto.randomUUID).mockReturnValue('44444444-4444-4444-8444-444444444444');

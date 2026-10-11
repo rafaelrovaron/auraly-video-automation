@@ -3,6 +3,7 @@ import {ApiError,readWorker,statusLabel} from './api';
 import type {EditBatchPlan} from './editingApi';
 import {getRender,listRenders,renderMediaUrl,startRenderWorker,submitRender} from './renderApi';
 import type {RenderJobRequest,RenderJobView,RenderOutput} from './renderApi';
+import {ReviewPanel} from './ReviewPanel';
 type Props={campaignId:string;plan:EditBatchPlan|null};
 const active=(v:RenderJobView)=>['queued','running','retry_scheduled'].includes(v.status);
 const safe=(e:unknown)=>e instanceof ApiError?e:new ApiError('connection_lost');
@@ -112,6 +113,8 @@ function RenderFlow({campaignId,plan}:Props){
         {o.status==='failed'?<p>{failure(o.error)} Nenhuma nova tentativa automática.</p>:<p>
           <a href={renderMediaUrl(campaignId,job.jobId,o.outputVariantId)} target="_blank" rel="noreferrer">Abrir MP4</a> · {' '}
           <a href={renderMediaUrl(campaignId,job.jobId,o.outputVariantId,true)}>Baixar MP4</a></p>}
+        {o.status!=='failed'&&<ReviewPanel target={{schemaVersion:'1.0',campaignId,jobId:job.jobId,
+          videoId:job.videoId,planHash:job.planHash,outputVariantId:o.outputVariantId,renderKey:o.renderKey}}/>}
       </article>)}
     </>}
     {notice&&<p role="status">{notice}</p>}
