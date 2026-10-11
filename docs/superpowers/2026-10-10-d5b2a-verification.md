@@ -2,7 +2,7 @@
 
 Date: 2026-10-10. Execution: Native, approved design and implementation plan.
 Branch: `feat/d5b2a-human-review`, documentary base `2b2b638`, shipped baseline
-`5aa6221`. No merge/push or paid provider execution for this slice.
+`5aa6221`. At this implementation checkpoint, no merge/push or paid provider execution.
 
 ## Scope
 
@@ -48,7 +48,7 @@ Doctor exits 0 with known update/Docker/optional transcription/TTS/music warning
 FFmpeg/ffprobe 8.1.1; no provider canary. PowerShell renders redirected native stderr
 as NativeCommandError decoration even for successful uv sync; harness and process
 both exited 0. Git LF/CRLF notices were warnings, not whitespace errors.
-Linux local/Actions for this new branch not claimed; publication remains unauthorized.
+Linux local/Actions for this new branch not claimed; publication was not yet authorized at this checkpoint.
 
 ## Independent review
 
@@ -58,8 +58,8 @@ Verdict: ready to merge; zero Critical, zero Important, one Minor. Reviewer
 focused repetition/QC-key/concurrency/evidence tests: 11 passed / 23 deselected
 in 20.83 s; whitespace and checkout status clean. No production fix required,
 no second reviewer. Status: `IMPLEMENTED`, `LOCAL_VERIFIED` (Windows).
-No merge/push or Actions for this slice; implementation authorization is not
-integration authorization.
+No merge/push or Actions at this checkpoint; implementation authorization is not
+integration authorization. Subsequent authorized integration is recorded below.
 
 Minor deferred: the equal-concurrency regression synchronizes publication but
 does not force/assert two different candidate timestamps. Production winner
@@ -84,6 +84,24 @@ reconciliation is correct; a future test-only change should stub two UTC times.
   authenticate, measure watching, revoke, or complete UI/delivery workflow.
 - Resource limits for abnormal local JSON payloads remain deferred under personal
   use/no general hardening. Cost if wrong: huge files can exhaust memory/resources.
+
+## Main integration — 2026-10-11
+
+User explicitly authorized merge and push. Local fast-forward from `5aa6221`
+to `8d1a656` integrates all D5B.2A commits without source changes during integration.
+The initial post-merge harness was interrupted at 99% with no final result;
+it is not counted as passing. A new sole-active full harness in the main checkout
+completed with exit 0 and 19/19 steps passed.
+
+Python: 2,070 passed / 27 unchanged skips in 936.09 s. Frontend: 378 passed /
+22 files in 33.23 s. Ruff, mypy (122 source / 141 tests), build, dependency checks
+and exported schemas passed without drift. UI audit has zero vulnerabilities;
+root audit retains five moderate transitive findings below the high threshold.
+Doctor's existing optional-tool/update warnings remain non-blocking (exit 0).
+No paid provider execution, real editorial approval or new PROVIDER_VERIFIED claim.
+Only integration documentation changes follow this verified source checkpoint.
+GitHub Actions for the published integration remain pending confirmation.
+Unrelated worktrees, scratch and synced project sources are preserved.
 
 ## Remaining scope
 

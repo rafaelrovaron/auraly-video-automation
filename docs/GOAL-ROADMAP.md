@@ -71,7 +71,7 @@ D4B.3c Approximate Preview                   IMPLEMENTED, LOCAL_VERIFIED
 D5A.1 Local Renderer                         IMPLEMENTED, LOCAL_VERIFIED (Windows)
 D5A.2 Render Jobs/API/UI                      IMPLEMENTED, LOCAL_VERIFIED (Windows)
 D5B.1 Final QC backend/CLI                    IMPLEMENTED, LOCAL_VERIFIED (Windows)
-D5B.2A Human Review backend/CLI              IMPLEMENTED, LOCAL_VERIFIED (Windows; branch)
+D5B.2A Human Review backend/CLI              IMPLEMENTED, LOCAL_VERIFIED (Windows; main)
 D5B.2B QC / Human Review API/UI              PLANNED
 D5B.3 Approved Master Delivery              PLANNED
 D6  End-to-End Personal Pilot
@@ -616,10 +616,12 @@ Evidência: `docs/superpowers/2026-10-09-d5b1-verification.md`.
 
 ### D5B.2A — Human Review backend/CLI
 
-**Status:** `IMPLEMENTED`, `LOCAL_VERIFIED` em `feat/d5b2a-human-review`; gate Windows 19/19 passou,
+**Status:** `IMPLEMENTED`, `LOCAL_VERIFIED` integrado em `main` até `8d1a656`; gate Windows 19/19 passou,
 2.070 Python / 27 skips, 378 frontend; revisão independente aprovada, zero Critical/Important,
 um Minor de teste adiado (timestamps distintos na concorrência).
-Sem merge/push desta etapa. Evidência: `docs/superpowers/2026-10-10-d5b2a-verification.md`.
+Gate fresco pós-merge em 2026-10-11: 19/19, mesmas contagens (pytest 936,09 s).
+Push autorizado; Actions desta integração pendentes de confirmação.
+Evidência: `docs/superpowers/2026-10-10-d5b2a-verification.md`.
 
 Contratos/schema 1.0, serviço e CLI `edit review|review-get`. Uma decisão definitiva
 por contexto salvo/master, data UTC gerada pelo serviço, reviewer e comentário.

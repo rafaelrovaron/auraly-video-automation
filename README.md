@@ -11,8 +11,8 @@ entrega.
 
 ### Entregue hoje
 
-D5B.2A backend/CLI implementado na branch `feat/d5b2a-human-review`, ainda sem
-merge/push: decisão humana definitiva por versão exata de master/plano, registro
+D5B.2A backend/CLI implementado e integrado em `main` (código `8d1a656`):
+decisão humana definitiva por versão exata de master/plano, registro
 imutável e consulta que revalida master, receipt e bytes do relatório QC. Aprovar
 exige QC passed e confirmação explícita de assistir e ouvir; rejeitar exige comentário.
 Repetição idêntica preserva data/bytes; outra decisão, comentário ou QC key conflita.
@@ -20,6 +20,8 @@ Sem HTTP/UI, SQL, Job, provider, render ou análise novos. Gate Windows 19/19 pa
 2.070 Python / 27 skips e 378 frontend; revisão independente aprovada,
 sem Critical/Important, um Minor de teste adiado. `IMPLEMENTED`, `LOCAL_VERIFIED` (Windows).
 D5B.2B UI e D5B.3 entrega planejados.
+Gate fresco pós-merge em 2026-10-11: 19/19, mesmas contagens; pytest 936,09 s.
+Push autorizado; Actions desta integração ainda pendentes de confirmação.
 Evidência: `docs/superpowers/2026-10-10-d5b2a-verification.md`.
 
 D5B.1 implementado e integrado em `main` (`a84aec2`): QC técnico de masters existentes por variante via CLI,
