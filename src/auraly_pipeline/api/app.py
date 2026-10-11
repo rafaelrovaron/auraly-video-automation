@@ -203,4 +203,6 @@ def create_app(settings: ApiSettings) -> FastAPI:
     register_action_routes(app)
     from auraly_pipeline.api.render_routes import register_render_routes
     register_render_routes(app)
+    from auraly_pipeline.api.review_routes import register_review_routes
+    register_review_routes(app)
     return app

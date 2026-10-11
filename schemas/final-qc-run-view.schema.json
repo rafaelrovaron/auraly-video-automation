@@ -1,0 +1,326 @@
+{
+  "$defs": {
+    "EditQcOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "campaignId": {
+          "minLength": 1,
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+          "title": "Campaignid",
+          "type": "string"
+        },
+        "operation": {
+          "const": "edit_qc",
+          "default": "edit_qc",
+          "title": "Operation",
+          "type": "string"
+        },
+        "schemaVersion": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Schemaversion",
+          "type": "string"
+        },
+        "jobId": {
+          "format": "uuid",
+          "title": "Jobid",
+          "type": "string"
+        },
+        "videoId": {
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+          "title": "Videoid",
+          "type": "string"
+        },
+        "planHash": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Planhash",
+          "type": "string"
+        },
+        "outputVariantId": {
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+          "title": "Outputvariantid",
+          "type": "string"
+        },
+        "renderKey": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Renderkey",
+          "type": "string"
+        },
+        "executionId": {
+          "format": "uuid",
+          "title": "Executionid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "campaignId",
+        "jobId",
+        "videoId",
+        "planHash",
+        "outputVariantId",
+        "renderKey",
+        "executionId"
+      ],
+      "title": "EditQcOperation",
+      "type": "object"
+    },
+    "EditQcResult": {
+      "additionalProperties": false,
+      "properties": {
+        "operation": {
+          "const": "edit_qc",
+          "default": "edit_qc",
+          "title": "Operation",
+          "type": "string"
+        },
+        "request": {
+          "$ref": "#/$defs/EditQcOperation"
+        },
+        "result": {
+          "$ref": "#/$defs/QcBatchResult"
+        }
+      },
+      "required": [
+        "request",
+        "result"
+      ],
+      "title": "EditQcResult",
+      "type": "object"
+    },
+    "JobStatus": {
+      "enum": [
+        "queued",
+        "running",
+        "completed",
+        "failed",
+        "blocked",
+        "retry_scheduled",
+        "cancelled"
+      ],
+      "title": "JobStatus",
+      "type": "string"
+    },
+    "QcBatchResult": {
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Schemaversion",
+          "type": "string"
+        },
+        "campaignId": {
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+          "title": "Campaignid",
+          "type": "string"
+        },
+        "videoId": {
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+          "title": "Videoid",
+          "type": "string"
+        },
+        "planHash": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Planhash",
+          "type": "string"
+        },
+        "outputs": {
+          "items": {
+            "$ref": "#/$defs/QcOutputResult"
+          },
+          "minItems": 1,
+          "title": "Outputs",
+          "type": "array"
+        },
+        "hasFailures": {
+          "readOnly": true,
+          "title": "Hasfailures",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "campaignId",
+        "videoId",
+        "planHash",
+        "outputs",
+        "hasFailures"
+      ],
+      "title": "QcBatchResult",
+      "type": "object"
+    },
+    "QcFinding": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+          "title": "Code",
+          "type": "string"
+        },
+        "field": {
+          "title": "Field",
+          "type": "string"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "field",
+        "message"
+      ],
+      "title": "QcFinding",
+      "type": "object"
+    },
+    "QcOutputResult": {
+      "additionalProperties": false,
+      "properties": {
+        "outputVariantId": {
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+          "title": "Outputvariantid",
+          "type": "string"
+        },
+        "renderKey": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Renderkey",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "passed",
+            "blocked",
+            "error"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "reused": {
+          "default": false,
+          "title": "Reused",
+          "type": "boolean"
+        },
+        "qcKey": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Qckey"
+        },
+        "path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Path"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/QcFinding"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "outputVariantId",
+        "renderKey",
+        "status"
+      ],
+      "title": "QcOutputResult",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "jobId": {
+      "title": "Jobid",
+      "type": "string"
+    },
+    "campaignId": {
+      "title": "Campaignid",
+      "type": "string"
+    },
+    "operation": {
+      "const": "edit_qc",
+      "default": "edit_qc",
+      "title": "Operation",
+      "type": "string"
+    },
+    "voiceMasterId": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Voicemasterid"
+    },
+    "status": {
+      "$ref": "#/$defs/JobStatus"
+    },
+    "result": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/EditQcResult"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "errorCode": {
+      "anyOf": [
+        {
+          "enum": [
+            "invalid_request",
+            "not_found",
+            "artifact_invalid",
+            "storage_unavailable",
+            "internal_error",
+            "method_not_allowed",
+            "operation_conflict",
+            "operation_not_allowed"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Errorcode"
+    },
+    "request": {
+      "$ref": "#/$defs/EditQcOperation"
+    }
+  },
+  "required": [
+    "jobId",
+    "campaignId",
+    "status",
+    "request"
+  ],
+  "title": "QcRunView",
+  "type": "object",
+  "$id": "https://auraly.local/schemas/final-qc-run-view.schema.json"
+}

@@ -1,0 +1,65 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "campaignId": {
+      "minLength": 1,
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+      "title": "Campaignid",
+      "type": "string"
+    },
+    "operation": {
+      "const": "edit_qc",
+      "default": "edit_qc",
+      "title": "Operation",
+      "type": "string"
+    },
+    "schemaVersion": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Schemaversion",
+      "type": "string"
+    },
+    "jobId": {
+      "format": "uuid",
+      "title": "Jobid",
+      "type": "string"
+    },
+    "videoId": {
+      "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+      "title": "Videoid",
+      "type": "string"
+    },
+    "planHash": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Planhash",
+      "type": "string"
+    },
+    "outputVariantId": {
+      "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+      "title": "Outputvariantid",
+      "type": "string"
+    },
+    "renderKey": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Renderkey",
+      "type": "string"
+    },
+    "executionId": {
+      "format": "uuid",
+      "title": "Executionid",
+      "type": "string"
+    }
+  },
+  "required": [
+    "campaignId",
+    "jobId",
+    "videoId",
+    "planHash",
+    "outputVariantId",
+    "renderKey",
+    "executionId"
+  ],
+  "title": "EditQcOperation",
+  "type": "object",
+  "$id": "https://auraly.local/schemas/final-qc-operation.schema.json"
+}

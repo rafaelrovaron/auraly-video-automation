@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from typing import Annotated, Literal, Self, TypeAlias
+from uuid import UUID
 
 from pydantic import Field, field_validator, model_validator
 
 from auraly_pipeline.api.contracts import ErrorCode, RenderSummary
 from auraly_pipeline.editing.batch_domain import EditBatchPlan, EditBatchRequest
-from auraly_pipeline.editing.domain import Sha, relative_path
+from auraly_pipeline.editing.domain import Identifier, Sha, relative_path, safe_id
+from auraly_pipeline.editing.qc_domain import QcBatchResult
 from auraly_pipeline.jobs.state_machine import JobStatus
 from auraly_pipeline.heygen.video_domain import HeyGenVideoConfig
 from auraly_pipeline.models import ContractModel
@@ -16,7 +18,7 @@ from auraly_pipeline.voices.domain import VoiceImportRequest, VoiceMasterStatus
 
 OperationKind = Literal[
     "image_prepare", "image_manifest", "image_import", "edit_plan", "voice_generate", "voice_import", "voice_review",
-    "heygen_assets", "heygen_video_plan", "heygen_video_submit", "heygen_reconcile",
+    "heygen_assets", "heygen_video_plan", "heygen_video_submit", "heygen_reconcile", "edit_qc",
 ]
 
 
@@ -70,6 +72,18 @@ class EditPlanOperation(OperationRequest):
     operation: Literal["edit_plan"] = "edit_plan"
     request: EditBatchRequest
     persist: bool = True
+
+
+class EditQcOperation(OperationRequest):
+    operation: Literal["edit_qc"] = "edit_qc"
+    schema_version: Literal["1.0"] = "1.0"
+    job_id: UUID
+    video_id: Identifier
+    plan_hash: Sha
+    output_variant_id: Identifier
+    render_key: Sha
+    execution_id: UUID
+    _ids = field_validator("video_id", "output_variant_id")(safe_id)
 
 
 class VoiceImportOperation(OperationRequest):
@@ -135,7 +149,7 @@ class HeyGenReconcileOperation(OperationRequest):
 
 
 LocalOperationRequest: TypeAlias = Annotated[
-    ImagePrepareOperation | ImageManifestOperation | ImageImportOperation | EditPlanOperation |
+    ImagePrepareOperation | ImageManifestOperation | ImageImportOperation | EditPlanOperation | EditQcOperation |
     VoiceImportOperation | VoiceReviewOperation | HeyGenAssetsOperation |
     HeyGenVideoPlanOperation | HeyGenVideoSubmitOperation | HeyGenReconcileOperation,
     Field(discriminator="operation"),
@@ -211,6 +225,23 @@ class EditPlanResult(ContractModel):
     plan: EditBatchPlan
 
 
+class EditQcResult(ContractModel):
+    operation: Literal["edit_qc"] = "edit_qc"
+    request: EditQcOperation
+    result: QcBatchResult
+
+    @model_validator(mode="after")
+    def coherent(self) -> Self:
+        request, result = self.request, self.result
+        if ((result.campaign_id, result.video_id, result.plan_hash) !=
+                (request.campaign_id, request.video_id, request.plan_hash)
+                or len(result.outputs) != 1
+                or (result.outputs[0].output_variant_id, result.outputs[0].render_key) !=
+                (request.output_variant_id, request.render_key)):
+            raise ValueError("QC result context mismatch")
+        return self
+
+
 class VoiceImportResult(ContractModel):
     operation: Literal["voice_import"] = "voice_import"
     voice_master_id: str
@@ -251,7 +282,7 @@ class HeyGenReconcileResult(ContractModel):
 
 
 OperationResult: TypeAlias = Annotated[
-    ImagePrepareResult | ImageManifestResult | ImageImportOperationResult | EditPlanResult |
+    ImagePrepareResult | ImageManifestResult | ImageImportOperationResult | EditPlanResult | EditQcResult |
     VoiceImportResult | VoiceReviewResult | HeyGenAssetsResult |
     HeyGenVideoPlanResult | HeyGenVideoSubmitResult | HeyGenReconcileResult,
     Field(discriminator="operation"),

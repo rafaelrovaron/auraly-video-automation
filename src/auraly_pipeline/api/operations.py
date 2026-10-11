@@ -30,7 +30,8 @@ class ApiOperationHandler:
             result = self.commands.execute_operation(request, job_id=context.job_id)
             return JobExecutionResult(
                 outcome=JobExecutionOutcome.SUCCESS,
-                result=cast(dict[str, JsonValue], result.model_dump(mode="json", by_alias=True)),
+                result=cast(dict[str, JsonValue], result.model_dump(mode="json", by_alias=True,
+                    exclude_computed_fields=request.operation == "edit_qc")),
             )
         except HeyGenProviderFailure:
             return JobExecutionResult(

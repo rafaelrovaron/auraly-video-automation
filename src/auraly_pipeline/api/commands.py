@@ -11,7 +11,7 @@ from sqlalchemy import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from auraly_pipeline.api.action_contracts import (
-    EditPlanOperation, EditPlanResult, ImageImportItemResult, ImageImportOperation,
+    EditPlanOperation, EditPlanResult, EditQcOperation, EditQcResult, ImageImportItemResult, ImageImportOperation,
     ImageImportOperationResult, ImagePrepareOperation, ImagePrepareResult, ImageManifestOperation, ImageManifestResult,
     LocalOperationRequest, OperationResult, OperationSubmission, OperationView,
     VoiceImportOperation, VoiceImportResult, VoiceReviewOperation, VoiceReviewResult,
@@ -32,6 +32,9 @@ from auraly_pipeline.editing.batch_service import EditBatchService
 from auraly_pipeline.editing.render_service import RenderService
 from auraly_pipeline.editing.render_handler import RenderJobHandler
 from auraly_pipeline.api.render_commands import RenderCommands
+from auraly_pipeline.api.review_commands import ReviewCommands
+from auraly_pipeline.editing.qc_service import QcService
+from auraly_pipeline.editing.review_service import HumanReviewService
 from auraly_pipeline.editing.domain import EditingError, EditingArtifactNotFoundError, EditProfile, relative_path
 from auraly_pipeline.editing.resolver import profile_hash
 from auraly_pipeline.editing.service import validate_editing_path, EditingService
@@ -93,6 +96,10 @@ class ApiCommands:
         )
         self.editorial_renders = RenderCommands(jobs=self.jobs, editing=self.editing, renderer=self.renderer,
                                                require_campaign=self.require_campaign)
+        self.editorial_reviews = ReviewCommands(renders=self.editorial_renders,
+            qc=QcService(project_root=settings.project_root, work_root=settings.work_root),
+            reviews=HumanReviewService(project_root=settings.project_root, work_root=settings.work_root),
+            jobs=self.jobs, get_operation=self.get_operation)
         self.voices = VoiceMasterService(
             engine, work_root=settings.work_root, provider=speech_provider, transcriber=transcriber,
         )
@@ -323,6 +330,8 @@ class ApiCommands:
             request.model_dump(mode="json", by_alias=True),
         )
         self.require_campaign(request.campaign_id)
+        if isinstance(request, EditQcOperation):
+            self.editorial_reviews.validate_qc(request)
         if isinstance(request, ImagePrepareOperation):
             output = self._path(request.output_path, root=self.settings.work_root)
             request = request.model_copy(update={
@@ -393,6 +402,8 @@ class ApiCommands:
                 if result.operation != request.operation:
                     raise ValueError("invalid operation result")
                 self._validate_heygen_result(campaign_id, result)
+                if isinstance(result, EditQcResult) and result.request != request:
+                    raise ValueError("invalid QC result identity")
                 if isinstance(result, EditPlanResult):
                     verify_batch_plan(result.plan)
                     if (not isinstance(request, EditPlanOperation)
@@ -421,6 +432,9 @@ class ApiCommands:
     ) -> OperationResult:
         self.require_campaign(request.campaign_id)
         try:
+            if isinstance(request, EditQcOperation):
+                qc_request = self.editorial_reviews.validate_qc(request)
+                return EditQcResult(request=request, result=self.editorial_reviews.qc.run(qc_request))
             if isinstance(request, (HeyGenAssetsOperation, HeyGenVideoPlanOperation,
                                     HeyGenVideoSubmitOperation, HeyGenReconcileOperation)):
                 if job_id is None:

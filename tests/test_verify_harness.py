@@ -92,6 +92,8 @@ def test_editing_schemas_are_audited_by_full_gate() -> None:
         Path("schemas/qc-request.schema.json"), Path("schemas/qc-report.schema.json"),
         Path("schemas/qc-batch-result.schema.json"),
         Path("schemas/review-request.schema.json"), Path("schemas/review-record.schema.json"),
+        Path("schemas/final-qc-operation.schema.json"), Path("schemas/final-qc-run-view.schema.json"),
+        Path("schemas/final-review-state.schema.json"),
     )
 
 
@@ -494,7 +496,9 @@ def test_full_schema_generators_declare_tracked_outputs() -> None:
                             Path("schemas/render-job-view.schema.json"),
                             Path("schemas/qc-request.schema.json"), Path("schemas/qc-report.schema.json"),
                             Path("schemas/qc-batch-result.schema.json"),
-                            Path("schemas/review-request.schema.json"), Path("schemas/review-record.schema.json")),
+                            Path("schemas/review-request.schema.json"), Path("schemas/review-record.schema.json"),
+                            Path("schemas/final-qc-operation.schema.json"), Path("schemas/final-qc-run-view.schema.json"),
+                            Path("schemas/final-review-state.schema.json")),
     }
 
 

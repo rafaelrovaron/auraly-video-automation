@@ -1,0 +1,948 @@
+{
+  "$defs": {
+    "AudioProbe": {
+      "additionalProperties": false,
+      "properties": {
+        "codec": {
+          "title": "Codec",
+          "type": "string"
+        },
+        "sampleRate": {
+          "exclusiveMinimum": 0,
+          "title": "Samplerate",
+          "type": "integer"
+        },
+        "channels": {
+          "exclusiveMinimum": 0,
+          "title": "Channels",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "codec",
+        "sampleRate",
+        "channels"
+      ],
+      "title": "AudioProbe",
+      "type": "object"
+    },
+    "EditQcOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "campaignId": {
+          "minLength": 1,
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+          "title": "Campaignid",
+          "type": "string"
+        },
+        "operation": {
+          "const": "edit_qc",
+          "default": "edit_qc",
+          "title": "Operation",
+          "type": "string"
+        },
+        "schemaVersion": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Schemaversion",
+          "type": "string"
+        },
+        "jobId": {
+          "format": "uuid",
+          "title": "Jobid",
+          "type": "string"
+        },
+        "videoId": {
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+          "title": "Videoid",
+          "type": "string"
+        },
+        "planHash": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Planhash",
+          "type": "string"
+        },
+        "outputVariantId": {
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+          "title": "Outputvariantid",
+          "type": "string"
+        },
+        "renderKey": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Renderkey",
+          "type": "string"
+        },
+        "executionId": {
+          "format": "uuid",
+          "title": "Executionid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "campaignId",
+        "jobId",
+        "videoId",
+        "planHash",
+        "outputVariantId",
+        "renderKey",
+        "executionId"
+      ],
+      "title": "EditQcOperation",
+      "type": "object"
+    },
+    "EditQcResult": {
+      "additionalProperties": false,
+      "properties": {
+        "operation": {
+          "const": "edit_qc",
+          "default": "edit_qc",
+          "title": "Operation",
+          "type": "string"
+        },
+        "request": {
+          "$ref": "#/$defs/EditQcOperation"
+        },
+        "result": {
+          "$ref": "#/$defs/QcBatchResult"
+        }
+      },
+      "required": [
+        "request",
+        "result"
+      ],
+      "title": "EditQcResult",
+      "type": "object"
+    },
+    "HumanReviewRecord": {
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Schemaversion",
+          "type": "string"
+        },
+        "campaignId": {
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+          "title": "Campaignid",
+          "type": "string"
+        },
+        "videoId": {
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+          "title": "Videoid",
+          "type": "string"
+        },
+        "planHash": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Planhash",
+          "type": "string"
+        },
+        "outputVariantId": {
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+          "title": "Outputvariantid",
+          "type": "string"
+        },
+        "renderKey": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Renderkey",
+          "type": "string"
+        },
+        "qcKey": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Qckey",
+          "type": "string"
+        },
+        "decision": {
+          "enum": [
+            "approved",
+            "rejected"
+          ],
+          "title": "Decision",
+          "type": "string"
+        },
+        "reviewedBy": {
+          "minLength": 1,
+          "title": "Reviewedby",
+          "type": "string"
+        },
+        "comment": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Comment"
+        },
+        "watchedAndListened": {
+          "title": "Watchedandlistened",
+          "type": "boolean"
+        },
+        "reviewedAt": {
+          "format": "date-time",
+          "title": "Reviewedat",
+          "type": "string"
+        },
+        "reviewKey": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Reviewkey",
+          "type": "string"
+        },
+        "masterPath": {
+          "title": "Masterpath",
+          "type": "string"
+        },
+        "masterSha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Mastersha256",
+          "type": "string"
+        },
+        "sizeBytes": {
+          "exclusiveMinimum": 0,
+          "title": "Sizebytes",
+          "type": "integer"
+        },
+        "receiptSha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Receiptsha256",
+          "type": "string"
+        },
+        "qcReportSha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Qcreportsha256",
+          "type": "string"
+        },
+        "qcStatus": {
+          "enum": [
+            "passed",
+            "blocked"
+          ],
+          "title": "Qcstatus",
+          "type": "string"
+        }
+      },
+      "required": [
+        "campaignId",
+        "videoId",
+        "planHash",
+        "outputVariantId",
+        "renderKey",
+        "qcKey",
+        "decision",
+        "reviewedBy",
+        "watchedAndListened",
+        "reviewedAt",
+        "reviewKey",
+        "masterPath",
+        "masterSha256",
+        "sizeBytes",
+        "receiptSha256",
+        "qcReportSha256",
+        "qcStatus"
+      ],
+      "title": "HumanReviewRecord",
+      "type": "object"
+    },
+    "JobStatus": {
+      "enum": [
+        "queued",
+        "running",
+        "completed",
+        "failed",
+        "blocked",
+        "retry_scheduled",
+        "cancelled"
+      ],
+      "title": "JobStatus",
+      "type": "string"
+    },
+    "MediaProbe": {
+      "additionalProperties": false,
+      "properties": {
+        "formatName": {
+          "title": "Formatname",
+          "type": "string"
+        },
+        "durationSec": {
+          "exclusiveMinimum": 0,
+          "title": "Durationsec",
+          "type": "number"
+        },
+        "sizeBytes": {
+          "minimum": 0,
+          "title": "Sizebytes",
+          "type": "integer"
+        },
+        "video": {
+          "$ref": "#/$defs/VideoProbe"
+        },
+        "audio": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AudioProbe"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "warnings": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Warnings",
+          "type": "array"
+        },
+        "hasAudio": {
+          "readOnly": true,
+          "title": "Hasaudio",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "formatName",
+        "durationSec",
+        "sizeBytes",
+        "video",
+        "hasAudio"
+      ],
+      "title": "MediaProbe",
+      "type": "object"
+    },
+    "QcAudio": {
+      "additionalProperties": false,
+      "properties": {
+        "integratedLoudnessLufs": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Integratedloudnesslufs"
+        },
+        "truePeakDbtp": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Truepeakdbtp"
+        }
+      },
+      "required": [
+        "integratedLoudnessLufs",
+        "truePeakDbtp"
+      ],
+      "title": "QcAudio",
+      "type": "object"
+    },
+    "QcBatchResult": {
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Schemaversion",
+          "type": "string"
+        },
+        "campaignId": {
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+          "title": "Campaignid",
+          "type": "string"
+        },
+        "videoId": {
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+          "title": "Videoid",
+          "type": "string"
+        },
+        "planHash": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Planhash",
+          "type": "string"
+        },
+        "outputs": {
+          "items": {
+            "$ref": "#/$defs/QcOutputResult"
+          },
+          "minItems": 1,
+          "title": "Outputs",
+          "type": "array"
+        },
+        "hasFailures": {
+          "readOnly": true,
+          "title": "Hasfailures",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "campaignId",
+        "videoId",
+        "planHash",
+        "outputs",
+        "hasFailures"
+      ],
+      "title": "QcBatchResult",
+      "type": "object"
+    },
+    "QcCheck": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "enum": [
+            "integrity",
+            "audio",
+            "text"
+          ],
+          "title": "Name",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "passed",
+            "blocked",
+            "not_applicable",
+            "skipped"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "findings": {
+          "items": {
+            "$ref": "#/$defs/QcFinding"
+          },
+          "title": "Findings",
+          "type": "array"
+        }
+      },
+      "required": [
+        "name",
+        "status"
+      ],
+      "title": "QcCheck",
+      "type": "object"
+    },
+    "QcFinding": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+          "title": "Code",
+          "type": "string"
+        },
+        "field": {
+          "title": "Field",
+          "type": "string"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "field",
+        "message"
+      ],
+      "title": "QcFinding",
+      "type": "object"
+    },
+    "QcOutputResult": {
+      "additionalProperties": false,
+      "properties": {
+        "outputVariantId": {
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+          "title": "Outputvariantid",
+          "type": "string"
+        },
+        "renderKey": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Renderkey",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "passed",
+            "blocked",
+            "error"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "reused": {
+          "default": false,
+          "title": "Reused",
+          "type": "boolean"
+        },
+        "qcKey": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Qckey"
+        },
+        "path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Path"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/QcFinding"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "outputVariantId",
+        "renderKey",
+        "status"
+      ],
+      "title": "QcOutputResult",
+      "type": "object"
+    },
+    "QcPolicy": {
+      "additionalProperties": false,
+      "properties": {
+        "version": {
+          "const": "final-qc-v1",
+          "default": "final-qc-v1",
+          "title": "Version",
+          "type": "string"
+        },
+        "minLoudnessLufs": {
+          "default": -30.0,
+          "title": "Minloudnesslufs",
+          "type": "number"
+        },
+        "maxTruePeakDbtp": {
+          "default": 0.0,
+          "title": "Maxtruepeakdbtp",
+          "type": "number"
+        }
+      },
+      "title": "QcPolicy",
+      "type": "object"
+    },
+    "QcReport": {
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Schemaversion",
+          "type": "string"
+        },
+        "qcVersion": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Qcversion",
+          "type": "string"
+        },
+        "campaignId": {
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+          "title": "Campaignid",
+          "type": "string"
+        },
+        "videoId": {
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+          "title": "Videoid",
+          "type": "string"
+        },
+        "outputVariantId": {
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+          "title": "Outputvariantid",
+          "type": "string"
+        },
+        "planHash": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Planhash",
+          "type": "string"
+        },
+        "manifestHash": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Manifesthash",
+          "type": "string"
+        },
+        "outputHash": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Outputhash",
+          "type": "string"
+        },
+        "renderKey": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Renderkey",
+          "type": "string"
+        },
+        "masterPath": {
+          "title": "Masterpath",
+          "type": "string"
+        },
+        "masterSha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Mastersha256",
+          "type": "string"
+        },
+        "sizeBytes": {
+          "exclusiveMinimum": 0,
+          "title": "Sizebytes",
+          "type": "integer"
+        },
+        "receiptSha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Receiptsha256",
+          "type": "string"
+        },
+        "policy": {
+          "$ref": "#/$defs/QcPolicy"
+        },
+        "policyHash": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Policyhash",
+          "type": "string"
+        },
+        "runtime": {
+          "$ref": "#/$defs/RenderRuntime"
+        },
+        "qcKey": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Qckey",
+          "type": "string"
+        },
+        "probe": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MediaProbe"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "checks": {
+          "items": {
+            "$ref": "#/$defs/QcCheck"
+          },
+          "title": "Checks",
+          "type": "array"
+        },
+        "audio": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/QcAudio"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "enum": [
+            "passed",
+            "blocked"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "humanReviewRequired": {
+          "const": true,
+          "default": true,
+          "title": "Humanreviewrequired",
+          "type": "boolean"
+        },
+        "textMeasurementScope": {
+          "const": "manifest_layout_not_burned_frames",
+          "default": "manifest_layout_not_burned_frames",
+          "title": "Textmeasurementscope",
+          "type": "string"
+        }
+      },
+      "required": [
+        "campaignId",
+        "videoId",
+        "outputVariantId",
+        "planHash",
+        "manifestHash",
+        "outputHash",
+        "renderKey",
+        "masterPath",
+        "masterSha256",
+        "sizeBytes",
+        "receiptSha256",
+        "policy",
+        "policyHash",
+        "runtime",
+        "qcKey",
+        "probe",
+        "checks",
+        "audio",
+        "status"
+      ],
+      "title": "QcReport",
+      "type": "object"
+    },
+    "QcRunView": {
+      "additionalProperties": false,
+      "properties": {
+        "jobId": {
+          "title": "Jobid",
+          "type": "string"
+        },
+        "campaignId": {
+          "title": "Campaignid",
+          "type": "string"
+        },
+        "operation": {
+          "const": "edit_qc",
+          "default": "edit_qc",
+          "title": "Operation",
+          "type": "string"
+        },
+        "voiceMasterId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Voicemasterid"
+        },
+        "status": {
+          "$ref": "#/$defs/JobStatus"
+        },
+        "result": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EditQcResult"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "errorCode": {
+          "anyOf": [
+            {
+              "enum": [
+                "invalid_request",
+                "not_found",
+                "artifact_invalid",
+                "storage_unavailable",
+                "internal_error",
+                "method_not_allowed",
+                "operation_conflict",
+                "operation_not_allowed"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Errorcode"
+        },
+        "request": {
+          "$ref": "#/$defs/EditQcOperation"
+        }
+      },
+      "required": [
+        "jobId",
+        "campaignId",
+        "status",
+        "request"
+      ],
+      "title": "QcRunView",
+      "type": "object"
+    },
+    "RenderRuntime": {
+      "additionalProperties": false,
+      "properties": {
+        "fingerprint": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Fingerprint",
+          "type": "string"
+        },
+        "ffmpegVersion": {
+          "title": "Ffmpegversion",
+          "type": "string"
+        },
+        "libassVersion": {
+          "title": "Libassversion",
+          "type": "string"
+        },
+        "encoding": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Encoding",
+          "type": "object"
+        }
+      },
+      "required": [
+        "fingerprint",
+        "ffmpegVersion",
+        "libassVersion",
+        "encoding"
+      ],
+      "title": "RenderRuntime",
+      "type": "object"
+    },
+    "VideoProbe": {
+      "additionalProperties": false,
+      "properties": {
+        "codec": {
+          "title": "Codec",
+          "type": "string"
+        },
+        "width": {
+          "exclusiveMinimum": 0,
+          "title": "Width",
+          "type": "integer"
+        },
+        "height": {
+          "exclusiveMinimum": 0,
+          "title": "Height",
+          "type": "integer"
+        },
+        "fps": {
+          "exclusiveMinimum": 0,
+          "title": "Fps",
+          "type": "number"
+        },
+        "nominalFps": {
+          "exclusiveMinimum": 0,
+          "title": "Nominalfps",
+          "type": "number"
+        },
+        "isVfr": {
+          "title": "Isvfr",
+          "type": "boolean"
+        },
+        "rotation": {
+          "default": 0,
+          "title": "Rotation",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "codec",
+        "width",
+        "height",
+        "fps",
+        "nominalFps",
+        "isVfr"
+      ],
+      "title": "VideoProbe",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Schemaversion",
+      "type": "string"
+    },
+    "campaignId": {
+      "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+      "title": "Campaignid",
+      "type": "string"
+    },
+    "jobId": {
+      "format": "uuid",
+      "title": "Jobid",
+      "type": "string"
+    },
+    "videoId": {
+      "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+      "title": "Videoid",
+      "type": "string"
+    },
+    "planHash": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Planhash",
+      "type": "string"
+    },
+    "outputVariantId": {
+      "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+      "title": "Outputvariantid",
+      "type": "string"
+    },
+    "renderKey": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Renderkey",
+      "type": "string"
+    },
+    "reports": {
+      "items": {
+        "$ref": "#/$defs/QcReport"
+      },
+      "title": "Reports",
+      "type": "array"
+    },
+    "review": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/HumanReviewRecord"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "runs": {
+      "items": {
+        "$ref": "#/$defs/QcRunView"
+      },
+      "title": "Runs",
+      "type": "array"
+    }
+  },
+  "required": [
+    "campaignId",
+    "jobId",
+    "videoId",
+    "planHash",
+    "outputVariantId",
+    "renderKey",
+    "reports",
+    "review",
+    "runs"
+  ],
+  "title": "FinalReviewState",
+  "type": "object",
+  "$id": "https://auraly.local/schemas/final-review-state.schema.json"
+}

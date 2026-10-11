@@ -82,9 +82,27 @@ def export_review_schemas(output_dir: Path) -> tuple[Path, ...]:
     return tuple(paths)
 
 
+def export_final_review_schemas(output_dir: Path) -> tuple[Path, ...]:
+    from auraly_pipeline.api.action_contracts import EditQcOperation
+    from auraly_pipeline.api.review_contracts import QcRunView, FinalReviewState
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    paths = []
+    for model, name, mode in ((EditQcOperation, "final-qc-operation", "validation"),
+                              (QcRunView, "final-qc-run-view", "serialization"),
+                              (FinalReviewState, "final-review-state", "serialization")):
+        path = output_dir / f"{name}.schema.json"
+        schema = model.model_json_schema(by_alias=True, mode=mode)  # type: ignore[arg-type]
+        schema["$id"] = f"https://auraly.local/schemas/{path.name}"
+        path.write_text(json.dumps(schema, indent=2) + "\n", encoding="utf-8")
+        paths.append(path)
+    return tuple(paths)
+
+
 if __name__ == "__main__":
     export_editing_schemas(Path("schemas"))
     export_render_schemas(Path("schemas"))
     export_render_job_schemas(Path("schemas"))
     export_qc_schemas(Path("schemas"))
     export_review_schemas(Path("schemas"))
+    export_final_review_schemas(Path("schemas"))
