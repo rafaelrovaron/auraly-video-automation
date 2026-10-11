@@ -11,7 +11,7 @@ entrega.
 
 ### Entregue hoje
 
-Checkpoint local D5B.2B (2026-10-11), em `feat/d5b2b-qc-review-ui`, ainda sem merge/push:
+Checkpoint D5B.2B (2026-10-11), integrado em `main` por fast-forward até `d89edd7`:
 QC explícito por output na tela de render, player nativo do master e decisão humana
 definitiva. Reutiliza `api.local.operation` / `local_operations`; GET revalida evidências
 sem FFmpeg e recupera relatórios, execuções e decisão após reload. UI diferencia QC
@@ -20,6 +20,8 @@ Sem dependência, tabela, migration, encode ou provider novos; entrega permanece
 Código `IMPLEMENTED`, `LOCAL_VERIFIED` (Windows): 19 checks aprovados pós-fix
 (audit retomado após falha de rede), 401 frontend, 2.093 Python / 28 skips
 (1.001,47 s). Revisão independente concluída: dois Important corrigidos, dois Minor adiados.
+Gate fresco pós-merge em main: 19/19, 401 frontend, 2.093 Python / 28 skips
+(1.060,85 s), exit 0. CI deste slice ainda não confirmado.
 Evidência: `docs/superpowers/2026-10-11-d5b2b-verification.md`.
 
 Histórico D5B.2A:

@@ -49,7 +49,7 @@ audit e whitespace **2/2 aprovados**. Todos os 19 checks verificados sobre o
 código corrigido; não é uma execução full atômica 19/19. Nenhum código mudou
 entre full e retomada. Audit mantém cinco vulnerabilidades moderadas transitivas,
 zero high; sem upgrade breaking. Logs locais preservados em
-`.superpowers/sdd/d5b2b-verification-logs/`.
+`.worktrees/d5b2b-verification-logs/` no checkout principal após integração.
 Testes locais não significam aprovação editorial de campanha real ou PROVIDER_VERIFIED.
 
 ## Decisões de execução
@@ -104,6 +104,16 @@ Minor adiado (não alterado nesta etapa):
   orientação genérica em vez do estado retornado.
 
 ## Limites / próximo passo
+
+Integração autorizada pelo usuário em 2026-10-11: fast-forward de main
+`d9d0db3 → d89edd7`, incluindo design/plano e cinco commits de implementação/fix.
+Gate completo fresco no checkout main: **19/19 PASS**, exit 0; frontend
+**401 passed / 24 arquivos** (37,71 s), Python **2.093 passed / 28 skipped**
+(1.060,85 s). Ruff, mypy src125/tests144, schemas sem drift, build, deps,
+audit e whitespace aprovados em uma execução full. Mesmos avisos moderados
+transitivos e runtimes opcionais ausentes; nenhum upgrade fora do escopo.
+Log bruto: `.worktrees/d5b2b-verification-logs/d5b2b-main-verification.log`.
+Push solicitado pelo usuário; Actions deste slice ainda não confirmado.
 
 Uso pessoal/local, decisão definitiva sem edição/revogação, escuta é declaração
 humana e não prova de playback. Política de áudio/texto mantém limites D5B.1.

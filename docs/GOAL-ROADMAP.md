@@ -72,7 +72,7 @@ D5A.1 Local Renderer                         IMPLEMENTED, LOCAL_VERIFIED (Window
 D5A.2 Render Jobs/API/UI                      IMPLEMENTED, LOCAL_VERIFIED (Windows)
 D5B.1 Final QC backend/CLI                    IMPLEMENTED, LOCAL_VERIFIED (Windows)
 D5B.2A Human Review backend/CLI              IMPLEMENTED, LOCAL_VERIFIED (Windows; main)
-D5B.2B QC / Human Review API/UI              IMPLEMENTED, LOCAL_VERIFIED (Windows; branch local)
+D5B.2B QC / Human Review API/UI              IMPLEMENTED, LOCAL_VERIFIED (Windows; main)
 D5B.3 Approved Master Delivery              PLANNED
 D6  End-to-End Personal Pilot
 ```
@@ -634,10 +634,12 @@ Sem HTTP/React, Jobs, SQL, entrega, provider ou dependências novas.
 
 ### D5B.2B — QC / Human Review API/UI
 
-**Status:** `IMPLEMENTED`, `LOCAL_VERIFIED` (Windows) em branch local
-`feat/d5b2b-qc-review-ui`, ainda sem merge/push. Pós-fix: 19 checks aprovados
+**Status:** `IMPLEMENTED`, `LOCAL_VERIFIED` (Windows), integrado em `main`
+por fast-forward até `d89edd7`. Pós-fix na branch: 19 checks aprovados
 (audit retomado após falha de rede), 401 frontend, 2.093 Python / 28 skips
 (1.001,47 s). Revisão independente concluída: dois Important corrigidos, dois Minor adiados.
+Gate fresco pós-merge: 19/19, 401 frontend, 2.093 Python / 28 skips
+(1.060,85 s), exit 0. CI deste slice ainda não confirmado.
 QC explícito por output bem-sucedido do Job/plano salvo, player nativo e decisão
 definitiva readonly. Operação edit_qc reutiliza fila/worker locais; GET verificado
 sem FFmpeg recupera QC/review/execuções após reload. Respostas perdidas exigem consulta,
