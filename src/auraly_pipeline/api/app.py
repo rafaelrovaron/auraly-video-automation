@@ -91,7 +91,11 @@ def create_app(settings: ApiSettings) -> FastAPI:
     errors: dict[int | str, dict[str, Any]] = {code: {"model": ErrorBody} for code in (400, 404, 405, 409, 422, 500, 503)}
     app = FastAPI(title="Auraly Local Operational API", version="1", lifespan=lifespan,
                   responses=errors, redoc_url=None, debug=False)
-    app.add_middleware(TrustedHostMiddleware, allowed_hosts=["localhost", "127.0.0.1"], www_redirect=False)
+    app.add_middleware(
+        TrustedHostMiddleware,
+        allowed_hosts=["localhost", "127.0.0.1", "auto.rrova.site"],
+        www_redirect=False,
+    )
 
     @app.exception_handler(RequestValidationError)
     async def validation_error(request: Request, error: RequestValidationError) -> JSONResponse:

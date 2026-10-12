@@ -128,6 +128,7 @@ def test_http_host_restricted(tmp_path: Path) -> None:
             assert response.status_code == 400
             assert response.json()["error"]["code"] == "invalid_request"
         assert client.get("/health", headers={"host": "localhost:8000"}).status_code == 200
+        assert client.get("/health", headers={"host": "auto.rrova.site"}).status_code == 200
 
 
 def test_http_startup_and_shutdown(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
