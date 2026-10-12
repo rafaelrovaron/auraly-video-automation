@@ -116,6 +116,10 @@ jobs:
           tests/test_review_discovery.py
           tests/test_api_final_review.py
           tests/test_web_final_review_e2e.py
+          tests/test_delivery_service.py
+          tests/test_delivery_cli.py
+          tests/test_api_delivery.py
+          tests/test_web_delivery_e2e.py
           tests/test_render_domain.py
           tests/test_render_text.py
           tests/test_render_media.py

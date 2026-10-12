@@ -1,6 +1,6 @@
 # Auraly Delivery-First Goal Roadmap
 
-**Roadmap vigente:** 2026-10-11
+**Roadmap vigente:** 2026-10-12
 
 Este documento é a ordem operacional dos próximos Goals. O PRD define o produto; este roadmap
 define como chegar a ele sem transformar cada Goal em um projeto grande demais.
@@ -73,7 +73,7 @@ D5A.2 Render Jobs/API/UI                      IMPLEMENTED, LOCAL_VERIFIED (Windo
 D5B.1 Final QC backend/CLI                    IMPLEMENTED, LOCAL_VERIFIED (Windows)
 D5B.2A Human Review backend/CLI              IMPLEMENTED, LOCAL_VERIFIED (Windows; main)
 D5B.2B QC / Human Review API/UI              IMPLEMENTED, LOCAL_VERIFIED (Windows; main)
-D5B.3 Approved Master Delivery              PLANNED
+D5B.3 Approved Master Delivery              IMPLEMENTED (local branch; verification evidence below)
 D6  End-to-End Personal Pilot
 ```
 
@@ -564,8 +564,8 @@ Rascunho/preview não alteram plano; nova execução pode reutilizar outputs sem
 imagem, voz ou HeyGen. Sem timeline, frame-perfect, migration ou dependência nova.
 E2E real local com três headlines + download/full decode + reload/reuso preservando upstream.
 Evidência: `docs/superpowers/2026-10-08-d5a2-verification.md`.
-Próximo recorte após integrar D5B.2B: D5B.3 entrega dos masters aprovados,
-com design aprovado antes da execução.
+Após integrar D5B.2B, D5B.3 foi implementado em branch local; próximo recorte
+de produto é D6, piloto pessoal, conforme o checkpoint de entrega abaixo.
 
 ### Objetivo
 
@@ -650,8 +650,17 @@ Evidência: `docs/superpowers/2026-10-11-d5b2b-verification.md`.
 
 ### D5B.3 — Approved Master Delivery
 
-**Status:** `PLANNED`. Copiar apenas master aprovado para pasta de entrega,
-verificar hashes origem/destino e registrar entrega separadamente de upload cloud.
+**Status:** `IMPLEMENTED` na branch local `feat/d5b3-approved-delivery`, sem
+merge/push/CI deste slice. Verificação completa/revisão em
+`docs/superpowers/2026-10-12-d5b3-verification.md`.
+API/CLI/UI copiam apenas master aprovado para pasta configurada, sem novo encode/
+provider/worker/SQL. SHA/tamanho origem/destino verificados, receipt com UTC e
+SHA das evidências; replay/concurrency preservam original. GET revalida e bloqueia
+órfão/corrupção; POST explícito pode reconciliar somente MP4 órfão idêntico.
+Nenhum overwrite, pasta escolhida por HTTP, retry automático ou upload cloud.
+Destino padrão work/deliveries, override AURALY_DELIVERY_ROOT/CLI --delivery-root.
+Próximo recorte de produto: D6 piloto real; baseline D5B.2B main71480f2,
+Actions38168870581 Linux/Windows success, não CI da branch nova.
 
 ### Objetivo
 
@@ -661,7 +670,7 @@ Fechar o ciclo local do render até entrega.
 
 - QC de streams, duração, resolução, FPS, loudness e risco de pico (D5B.1);
 - bounds de headline/captions;
-- proxy/contact sheet;
+- player nativo para review (proxy/contact sheet fora do MVP);
 - approve/reject com comentário;
 - master aprovado imutável;
 - cópia para pasta de entrega com hash origem/destino.

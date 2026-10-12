@@ -65,6 +65,18 @@ def test_corrupt_destination_no_overwrite(review_case: Any, component: str) -> N
         assert path.read_bytes() == b"private-corrupt-marker"
 
 
+def test_receipt_without_master_is_not_absence(review_case: Any) -> None:
+    service, request = delivery_case(review_case)
+    record = service.deliver(request)
+    master = service.delivery_root / record.path
+    receipt = master.with_name("delivery.json").read_bytes()
+    master.unlink()
+    for operation in (service.get, service.deliver):
+        with pytest.raises(EditingError):
+            operation(request)
+    assert not master.exists() and master.with_name("delivery.json").read_bytes() == receipt
+
+
 @pytest.mark.parametrize("equal", [True, False])
 def test_equal_or_conflicting_orphan_recovery(review_case: Any, equal: bool) -> None:
     service, request = delivery_case(review_case)
@@ -124,14 +136,18 @@ def test_failed_publication_cleanup(review_case: Any, monkeypatch: pytest.Monkey
     assert service.deliver(request) == service.get(request)
 
 
-def test_evidence_changed_during_copy(review_case: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("component", ["master", "review", "qc"])
+def test_evidence_changed_during_copy(review_case: Any, monkeypatch: pytest.MonkeyPatch, component: str) -> None:
     import auraly_pipeline.editing.delivery_service as module
     service, request = delivery_case(review_case)
-    reviews, body, _ = review_case
+    reviews, body, report = review_case
     copy = module.shutil.copyfileobj
     def change(source: Any, destination: Any, *args: Any) -> None:
         copy(source, destination, *args)
-        qc_path(reviews, body).write_bytes(b"changed")
+        path = {"master": reviews.work_root / report.master_path,
+                "review": review_path(reviews, body, request.review_key),
+                "qc": qc_path(reviews, body)}[component]
+        path.write_bytes(b"changed")
     monkeypatch.setattr(module.shutil, "copyfileobj", change)
     with pytest.raises(EditingError):
         service.deliver(request)
@@ -146,14 +162,16 @@ def test_root_boundaries(review_case: Any) -> None:
             DeliveryService(project_root=reviews.project_root, work_root=reviews.work_root, delivery_root=root)
 
 
-def test_symlink_no_follow(review_case: Any, tmp_path: Path) -> None:
+@pytest.mark.parametrize("broken", [False, True])
+def test_symlink_no_follow(review_case: Any, tmp_path: Path, broken: bool) -> None:
     service, request = delivery_case(review_case)
     outside = tmp_path / "outside"
     outside.mkdir()
+    target = outside / "missing" if broken else outside
     service.delivery_root.mkdir()
     link = service.delivery_root / request.campaign_id
     try:
-        link.symlink_to(outside, target_is_directory=True)
+        link.symlink_to(target, target_is_directory=True)
     except OSError:
         pytest.skip("symlink privilege unavailable")
     with pytest.raises(EditingError):

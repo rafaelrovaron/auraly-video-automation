@@ -11,6 +11,19 @@ entrega.
 
 ### Entregue hoje
 
+Checkpoint D5B.3 (2026-10-12), implementado na branch local
+`feat/d5b3-approved-delivery`, ainda sem merge/push: entrega do master aprovado
+pela UI, API e CLI para pasta local configurada. Revalida aprovação/QC/recibos,
+copia os bytes existentes e verifica SHA/tamanho; replay preserva o recibo original.
+Sem encode, worker, tabela, dependência ou provider novos. Verificação completa e
+revisão registradas em [evidência D5B.3](docs/superpowers/2026-10-12-d5b3-verification.md).
+O próximo recorte é D6, piloto pessoal real; testes sintéticos não ampliam
+`PROVIDER_VERIFIED`. Histórico técnico abaixo preserva o estado de cada checkpoint.
+
+D5B.2B já está em main até `71480f2`; Actions Linux/Windows do
+[run 38168870581](https://github.com/rafaelrovaron/auraly-video-automation/actions/runs/38168870581)
+passaram. Este resultado não é CI da nova branch D5B.3.
+
 Checkpoint D5B.2B (2026-10-11), integrado em `main` por fast-forward até `d89edd7`:
 QC explícito por output na tela de render, player nativo do master e decisão humana
 definitiva. Reutiliza `api.local.operation` / `local_operations`; GET revalida evidências
@@ -21,7 +34,7 @@ Código `IMPLEMENTED`, `LOCAL_VERIFIED` (Windows): 19 checks aprovados pós-fix
 (audit retomado após falha de rede), 401 frontend, 2.093 Python / 28 skips
 (1.001,47 s). Revisão independente concluída: dois Important corrigidos, dois Minor adiados.
 Gate fresco pós-merge em main: 19/19, 401 frontend, 2.093 Python / 28 skips
-(1.060,85 s), exit 0. CI deste slice ainda não confirmado.
+(1.060,85 s), exit 0. CI confirmado no run 38168870581.
 Evidência: `docs/superpowers/2026-10-11-d5b2b-verification.md`.
 
 Histórico D5B.2A:
@@ -139,8 +152,41 @@ Evidência: [verificação D4B.3b](docs/superpowers/2026-10-07-d4b3b-verificatio
 
 ### Não entregue ainda
 
-- D5B.3: entrega dos masters aprovados (D5B.2B implementado na branch local, aguardando integração);
+- integração/publicação da branch D5B.3 (entrega local implementada, ainda não em main);
 - piloto end-to-end operável pela interface (o preview aproximado já foi entregue).
+
+### Entrega local do master aprovado (D5B.3)
+
+Após QC e aprovação humana, use **Entregar master aprovado** no output escolhido.
+Só copia esse master; nenhuma irmã é entregue automaticamente. **Consultar entrega**
+verifica o destino e recupera o recibo original. Resposta perdida exige consulta;
+não há POST automático, polling ou sucesso exibido após erro de integridade.
+
+O destino padrão é `<work-root>/deliveries`. Para outra pasta, defina
+`AURALY_DELIVERY_ROOT` antes de iniciar a API. A requisição HTTP não aceita destino.
+Na CLI, `--delivery-root` tem prioridade sobre a variável e o padrão:
+
+```powershell
+uv run auraly edit deliver --request delivery-request.json --project-root <project> --work-root <work> --delivery-root <exports>
+uv run auraly edit delivery-get --request delivery-request.json --project-root <project> --work-root <work> --delivery-root <exports>
+```
+
+`delivery-request.json` usa `schemaVersion: "1.0"`, `campaignId`, `videoId`,
+`planHash`, `outputVariantId`, `renderKey` e `reviewKey` da aprovação exata.
+Contratos em `schemas/delivery-{request,record,state}.schema.json`.
+Arquivos: `<exports>/<campaignId>/<outputVariantId>/<reviewKey>/master.mp4`
+e `delivery.json`. Recibo guarda UTC, path relativo, tamanho e SHA do master,
+render receipt, QC e review. Não é upload cloud nem atestação contra operador hostil.
+
+Não usa a raiz do filesystem, work root/ancestrais ou outros subdiretórios de work;
+no work, somente `deliveries` e seus descendentes. Symlinks/reparse points são recusados.
+É preciso um filesystem local que suporte hard links; não há fallback de overwrite.
+Uma entrega íntegra é readonly/idempotente. Arquivo conflitante ou recibo corrompido
+exige inspeção manual; nunca é apagado/reparado automaticamente. Se só o MP4 exato
+ficou após falha de publicação, GET aponta integridade inválida; repetir explicitamente
+`edit deliver` com a mesma request pode publicar o recibo faltante, sem recodificar.
+Somente recibo sem MP4 não é ausência. Caminhos longos Windows são suportados pela
+aplicação; ferramentas externas podem precisar de uma pasta curta.
 
 ### Render local de um plano salvo (D5A.1)
 
