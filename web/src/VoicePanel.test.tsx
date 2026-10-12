@@ -196,6 +196,15 @@ const voice: VoiceSummary = {voiceMasterId: 'voice-one', campaignId: 'campaign-o
   durationSeconds: 1.2, transcriptMatchStatus: 'matched', headlineSpoken: false, qcFindings: [], approvedAt: null, approvedBy: null,
   approvalReviewReason: null, rejectedAt: null, rejectedBy: null, rejectionReason: null};
 const reviewProps = (v = voice) => ({...props(), voices: state({items: [v, {...v, voiceMasterId: 'voice-two'}]})});
+it('shows voice context instead of full identifiers in the normal review view', () => {
+  fakeApi(); wrapReads(); render(<VoicePanel {...reviewProps()} />);
+  const select = screen.getByLabelText('Voice Master para revisar') as HTMLSelectElement;
+  expect(select.options[1].value).toBe('voice-one');
+  expect(select.options[1].textContent).not.toContain('voice-one');
+  fireEvent.change(select, {target: {value: 'voice-one'}});
+  expect(screen.getAllByText(/Áudio principal · copy v1/).find(node => node.tagName === 'P')?.textContent).not.toContain('voice-one');
+  expect(screen.getByText('voice-one').closest('details')?.querySelector('summary')?.textContent).toBe('Detalhes técnicos');
+});
 async function fillReview() {
   fireEvent.change(screen.getByLabelText('Voice Master para revisar'), {target: {value: 'voice-one'}});
   fireEvent.change(screen.getByLabelText('Responsável pela revisão de voz'), {target: {value: 'reviewer'}});

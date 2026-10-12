@@ -125,6 +125,7 @@ def test_editorial_draft_does_not_change_saved_render_target(panel_servers: Pane
     expect(preview.get_by_text('Preview aproximado', exact=False)).to_be_visible()
     page.get_by_role('link', name='Finalização', exact=True).click()
     render = page.get_by_role('region', name='Render final', exact=True)
+    render.get_by_text('Detalhes técnicos', exact=True).first.click()
     expect(render.get_by_text(plan['planHash'], exact=False)).to_be_visible()
     render.get_by_role('button', name='Renderizar', exact=True).click()
     expect(render.get_by_text('Render concluído', exact=True)).to_be_visible(timeout=60000)

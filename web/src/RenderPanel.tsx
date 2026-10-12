@@ -92,18 +92,19 @@ function RenderFlow({campaignId,plan}:Props){
   };
   return <section aria-label="Render final">
     <h3>Render final</h3>
-    {plan?<p>Plano salvo para render: {plan.videoId} · {plan.planHash}</p>:<p>Salve ou consulte um plano confirmado para renderizar.</p>}
+    {plan?<><p>Plano salvo para render: pronto para produzir as variantes.</p>
+      <details><summary>Detalhes técnicos</summary><p>Vídeo: {plan.videoId}</p><p>Hash do plano: {plan.planHash}</p></details></>:<p>Salve ou consulte um plano confirmado para renderizar.</p>}
     <p>Usa somente o plano salvo, não o rascunho ou o preview. Processa sequencialmente as variantes; não gera voz, imagem ou HeyGen.</p>
     <p>Inicia editing_render para os Jobs deste tipo na campanha. Renderizado não significa aprovado ou entregue.</p>
     <button disabled={!plan||plan.campaignId!==campaignId||sending||!!pending||!!job&&active(job)} onClick={()=>{void submit();}}>{job&&!active(job)?'Nova execução':'Renderizar'}</button>
     <p>Podem ser reaproveitados masters válidos já existentes; nova execução não garante nova codificação.</p>
     <button disabled={!plan||listing} onClick={()=>{void inspect();}}>Consultar execuções</button>
     <label>Execução de render<select aria-label="Execução de render" value={job?.jobId??''} disabled={sending||!!pending} onChange={e=>choose(e.target.value)}>
-      <option value="">Selecione</option>{runs.map(v=><option key={v.jobId} value={v.jobId}>{v.jobId} · {statusLabel(v.status)}</option>)}
+      <option value="">Selecione</option>{runs.map(v=><option key={v.jobId} value={v.jobId}>Render {statusLabel(v.status).toLocaleLowerCase()} · {v.jobId.slice(0,8)}</option>)}
     </select></label>
     {pending&&<p>Execução enviada: {pending.executionId}. Consulte antes de decidir outra ação; nenhum reenvio automático.</p>}
     {(pending||job&&monitor&&active(job))&&<button disabled={sending||!!pending&&!pendingConsulted} onClick={abandon}>Abandonar acompanhamento do render</button>}
-    {job&&<><p>Job de render: {job.jobId} · {statusLabel(job.status)}</p>
+    {job&&<><p>Render: {statusLabel(job.status)}</p><details><summary>Detalhes técnicos</summary><p>{job.jobId}</p></details>
       {job.status==='queued'&&<button disabled={sending||workerUnknown} onClick={()=>{void startPending();}}>Iniciar render pendente</button>}
       {workerUnknown&&<button disabled={sending} onClick={()=>{void reconcileWorker();}}>Consultar worker de render</button>}
       <button disabled={sending} onClick={()=>{setMonitor(true);setReadId(n=>n+1);}}>Consultar render</button>

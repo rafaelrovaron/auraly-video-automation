@@ -30,7 +30,7 @@ export function App() {
   }, []);
   return <>
     <header><a href="#/campaigns" className="brand">Auraly <span>painel local</span></a>
-      <nav aria-label="Navegação principal"><a href="#/campaigns">Campanhas</a> · <a href="#/profiles">Profiles de edição</a></nav></header>
+      <nav aria-label="Navegação principal"><a href="#/campaigns">Campanhas</a> · <a href="#/profiles">Estilos de edição</a></nav></header>
     <main id="main">
       {route.page === 'profiles' ? <ProfilePanel /> : route.page === 'list' ? <CampaignList /> : route.page === 'detail' ?
         <CampaignDetailPanel key={route.campaignId} campaignId={route.campaignId} stage={route.stage} />

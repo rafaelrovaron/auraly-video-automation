@@ -20,6 +20,17 @@ beforeEach(()=>{
   vi.mocked(submitRender).mockResolvedValue({...body,jobId});
   vi.mocked(startRenderWorker).mockResolvedValue({state:'running',campaignId:plan.campaignId,kind:'editing_render',errorCode:null});
 });
+it('shows a readable render summary and keeps job identifiers in technical details',async()=>{
+  vi.mocked(listRenders).mockResolvedValue({items:[queued]});
+  render(<RenderPanel campaignId={plan.campaignId} plan={plan}/>);
+  expect(screen.getByText(/Plano salvo para render:/).textContent).not.toContain(plan.planHash);
+  fireEvent.click(screen.getByRole('button',{name:'Consultar execuções'}));
+  await screen.findByText(/Render na fila/);
+  const select=screen.getByLabelText('Execução de render') as HTMLSelectElement;
+  expect(select.options[1].textContent).not.toContain(jobId);
+  fireEvent.change(select,{target:{value:jobId}});
+  expect(screen.getByText(jobId).closest('details')?.querySelector('summary')?.textContent).toBe('Detalhes técnicos');
+});
 it('requires a confirmed plan and freezes one double-click submission',async()=>{
   const view=render(<RenderPanel campaignId={plan.campaignId} plan={null}/>);
   expect(screen.getByRole('button',{name:'Renderizar'}).hasAttribute('disabled')).toBe(true);
@@ -61,7 +72,7 @@ it('shows partial outcomes, safe media links and explicit new execution',async()
 it('reload lists persisted runs and abandoning observation never cancels',async()=>{
   vi.mocked(listRenders).mockResolvedValue({items:[queued]});
   render(<RenderPanel campaignId={plan.campaignId} plan={plan}/>);
-  await screen.findByRole('option',{name:new RegExp(jobId)});
+  await screen.findByRole('option',{name:'Render na fila · 22222222'});
   fireEvent.change(screen.getByLabelText('Execução de render'),{target:{value:jobId}});
   await waitFor(()=>expect(getRender).toHaveBeenCalledOnce());
   fireEvent.click(screen.getByRole('button',{name:'Abandonar acompanhamento do render'}));

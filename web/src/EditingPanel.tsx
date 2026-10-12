@@ -1,6 +1,6 @@
 import {useEffect,useId,useRef,useState} from 'react';
 import {ApiError} from './api';
-import type {Items} from './api';
+import type {Items,SceneVariant} from './api';
 import type {HeyGenRenderView} from './heygenApi';
 import type {RemoteState} from './usePolling';
 import {getProfile,listProfiles} from './profileApi';
@@ -13,14 +13,15 @@ import {useUnsavedChanges} from './useUnsavedChanges';
 import {EditPreview,previewSettings} from './EditPreview';
 import {RenderPanel} from './RenderPanel';
 
-type Props={campaignId:string;renders:RemoteState<Items<HeyGenRenderView>>;onRenderPlanChange?:(plan:EditBatchPlan|null)=>void};
+type Props={campaignId:string;renders:RemoteState<Items<HeyGenRenderView>>;scenes?:SceneVariant[];onRenderPlanChange?:(plan:EditBatchPlan|null)=>void};
 type Variant={row:number;key:string;label:string;draft:OverrideDraft};
 type Validated={request:EditBatchRequest;plan:EditBatchPlan;render:HeyGenRenderView};
 type Submission={request:EditBatchRequest;render:HeyGenRenderView;plan:EditBatchPlan|null;persist:boolean;jobId?:string};
 const initialVariant=():Variant=>({row:1,key:'a',label:'A',draft:newOverrideDraft()});
 function PlanDetails({plan}:{plan:EditBatchPlan}){
-  return <div><p>{plan.outputCount} saídas planejadas · limite {plan.maxOutputs} · {plan.planHash}</p>
-    <p>Copy vinculada: {plan.copyRef.id} · v{plan.copyRef.version}. Legendas não substituem a copy aprovada.</p>
+  return <div><p>{plan.outputCount} saídas planejadas · limite {plan.maxOutputs}</p>
+    <p>Roteiro v{plan.copyRef.version} vinculado. Legendas não substituem o roteiro aprovado.</p>
+    <details><summary>Detalhes técnicos</summary><p>Hash do plano: {plan.planHash}</p><p>ID do roteiro: {plan.copyRef.id}</p></details>
     {plan.outputs.map(output=><article key={output.key}><h4>{output.key} · {output.label}</h4><p>{output.manifest.headline.text}</p>
       <p>Legendas: {output.captionState==='timing_missing'?'Timing pendente':output.captionState==='disabled'?'Desabilitadas':'Timing fornecido; qualidade não aprovada automaticamente'}</p>
       <p>Saída planejada: {output.filename}. Nenhum MP4 final foi renderizado.</p>
@@ -29,7 +30,7 @@ function PlanDetails({plan}:{plan:EditBatchPlan}){
   </div>;
 }
 export function EditingPanel(props:Props){return <EditorialFlow key={props.campaignId} {...props}/>;}
-function EditorialFlow({campaignId,renders,onRenderPlanChange}:Props){
+function EditorialFlow({campaignId,renders,scenes,onRenderPlanChange}:Props){
   const [profiles,setProfiles]=useState<ProfileView[]>([]),[plans,setPlans]=useState<PlanSummary[]>([]);
   const [listError,setListError]=useState<string|null>(null),[listsLoading,setListsLoading]=useState(true);
   const [renderId,setRenderId]=useState(''),[profileKey,setProfileKey]=useState(''),[profile,setProfile]=useState<ProfileView|null>(null);
@@ -46,6 +47,17 @@ function EditorialFlow({campaignId,renders,onRenderPlanChange}:Props){
   const lock=useRef(false),sent=useRef<Submission|null>(null),timer=useRef<ReturnType<typeof setTimeout>|undefined>(undefined),queryController=useRef<AbortController|null>(null);
   const form=useRef<HTMLFormElement>(null),errorId=useId();const clearUnsaved=useUnsavedChanges(dirty);
   const selectedRender=renders.data?.items.find(r=>r.renderId===renderId&&r.status==='ready'&&r.source!==null)??null;
+  const fileName=(path:string)=>path.split(/[\\/]/).at(-1)||path;
+  const renderLabel=(render:HeyGenRenderView)=>{
+    const scene=scenes?.find(item=>item.sceneVariantId===render.sceneVariantId)?.location||fileName(render.source?.path||'Vídeo');
+    const repeated=renders.data?.items.filter(item=>item.status==='ready'&&item.source&&item.sceneVariantId===render.sceneVariantId).length??0;
+    return `Vídeo · ${scene}${repeated>1?` · ${render.renderId.slice(-8)}`:''}`;
+  };
+  const planLabel=(plan:PlanSummary)=>{
+    const base=`${fileName(plan.source.path)} · ${plan.outputCount} ${plan.outputCount===1?'variação':'variações'}`;
+    const duplicate=plans.filter(other=>fileName(other.source.path)===fileName(plan.source.path)&&other.outputCount===plan.outputCount).length>1;
+    return `${base}${duplicate?` · ${plan.planHash.slice(0,8)}`:''}`;
+  };
   const latestRender=useRef(selectedRender);latestRender.current=selectedRender;
   const busy=submission!==null;
   const refresh=async()=>{
@@ -171,12 +183,14 @@ function EditorialFlow({campaignId,renders,onRenderPlanChange}:Props){
     <form ref={form} noValidate onSubmit={e=>{e.preventDefault();void submit(false);}}>
       <fieldset disabled={busy}><legend>Fonte e configuração</legend>
         <label>MP4 HeyGen para edição<select aria-label="MP4 HeyGen para edição" name="renderId" value={renderId} onChange={e=>chooseRender(e.target.value)}>
-          <option value="">Selecione</option>{renders.data?.items.filter(r=>r.status==='ready'&&r.source).map(r=><option key={r.renderId} value={r.renderId}>{r.renderId} · {r.sceneVariantId}</option>)}</select></label>
-        {selectedRender?.source&&<p>MP4 (work root): {selectedRender.source.path} · {selectedRender.source.sha256} · {selectedRender.source.probe.durationSec}s</p>}
+          <option value="">Selecione</option>{renders.data?.items.filter(r=>r.status==='ready'&&r.source).map(r=><option key={r.renderId} value={r.renderId}>{renderLabel(r)}</option>)}</select></label>
+        {selectedRender?.source&&<><p>Arquivo: {fileName(selectedRender.source.path)} · {selectedRender.source.probe.durationSec}s</p>
+          <details><summary>Detalhes técnicos do MP4</summary><p>ID: {selectedRender.renderId}</p>
+            <p>Caminho: {selectedRender.source.path}</p><p>SHA-256: {selectedRender.source.sha256}</p></details></>}
         <label>Profile de edição<select aria-label="Profile de edição" name="profile" value={profileKey} onChange={e=>{void chooseProfile(e.target.value);}}>
-          <option value="">Selecione</option>{profiles.map(p=><option key={`${p.profile.profileId}/${p.profile.version}`} value={`${p.profile.profileId}/${p.profile.version}`}>{p.profile.profileId} · v{p.profile.version}</option>)}</select></label>
+          <option value="">Selecione</option>{profiles.map(p=><option key={`${p.profile.profileId}/${p.profile.version}`} value={`${p.profile.profileId}/${p.profile.version}`}>{p.profile.name} · v{p.profile.version}</option>)}</select></label>
         {profileLoading&&<p role="status">Consultando profile…</p>}
-        <label>ID do vídeo editorial<input name="videoId" value={videoId} onChange={e=>{change();setVideoId(e.target.value);}}/></label>
+        <details><summary>Código técnico da edição</summary><label>ID do vídeo editorial<input name="videoId" value={videoId} onChange={e=>{change();setVideoId(e.target.value);}}/></label></details>
         <label>Headline base<input name="headlineText" value={headline} onChange={e=>{change();setHeadline(e.target.value);}}/></label>
         <label>Limite de saídas<input name="maxOutputs" type="number" value={maxOutputs} onChange={e=>{change();setMaxOutputs(e.target.value);}}/></label>
         <label>Aceito o uso da música nesta edição<input type="checkbox" checked={musicAccepted} onChange={e=>{change();setMusicAccepted(e.target.checked);}}/></label>
@@ -215,7 +229,7 @@ function EditorialFlow({campaignId,renders,onRenderPlanChange}:Props){
     {busy&&<button onClick={abandon}>Abandonar acompanhamento editorial</button>}
     {validated&&!busy&&!saved&&<PlanDetails plan={validated.plan}/>} {saved&&<PlanDetails plan={saved}/>}
     <label>Consultar plano salvo<select aria-label="Consultar plano salvo" onChange={e=>{void inspect(e.target.value);}} defaultValue=""><option value="">Selecione</option>
-      {plans.map(p=><option key={`${p.videoId}/${p.planHash}`} value={`${p.videoId}/${p.planHash}`}>{p.videoId} · {p.outputCount} saídas · {p.planHash}</option>)}</select></label>
+      {plans.map(p=><option key={`${p.videoId}/${p.planHash}`} value={`${p.videoId}/${p.planHash}`}>{planLabel(p)}</option>)}</select></label>
     {viewLoading&&<p role="status">Consultando plano salvo…</p>}{view&&<PlanDetails plan={view}/>}
     {!onRenderPlanChange&&<RenderPanel campaignId={campaignId} plan={renderPlan}/>}
   </div>;

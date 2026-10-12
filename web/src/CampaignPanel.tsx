@@ -7,7 +7,7 @@ import type { HeyGenRenderView } from './heygenApi';
 import { usePolling } from './usePolling';
 import type { RemoteState } from './usePolling';
 import { WorkerControls } from './WorkerControls';
-import { CampaignCreateForm, CopyVersionForm } from './CampaignForms';
+import { CampaignCreateForm, CampaignNameForm, CopyVersionForm } from './CampaignForms';
 import { ImageImportPanel } from './ImageImportPanel';
 import { VoicePanel } from './VoicePanel';
 import { HeyGenPanel } from './HeyGenPanel';
@@ -33,6 +33,12 @@ function Facts({ entries }: { entries: [string, ReactNode][] }) {
   return <dl>{entries.map(([label, value]) => <div className="fact" key={label}><dt>{label}</dt><dd>{value ?? 'Não disponível'}</dd></div>)}</dl>;
 }
 
+function TechnicalDetails({ entries }: { entries: [string, ReactNode][] }) {
+  return <details><summary>Detalhes técnicos</summary><Facts entries={entries} /></details>;
+}
+
+function fileName(path: string): string { return path.split(/[\\/]/).at(-1) || path; }
+
 function ErrorCode({ code }: { code: string | null }) {
   return code ? <p role="status">Erro: {code}. {/oauth|auth|credential|account/i.test(code) && 'Conecte o HeyGen pelo fluxo OAuth existente da CLI.'}</p> : null;
 }
@@ -44,11 +50,15 @@ export function CampaignList() {
     <p>Consulte o andamento da produção. Nenhuma ação paga é iniciada ao abrir o painel.</p><Updated state={state} />
     {state.data?.items.length === 0 && <p>Nenhuma campanha. Use Criar campanha abaixo.</p>}
     <details><summary>Criar campanha</summary><CampaignCreateForm onCreated={campaignId => { window.location.hash = `#/campaigns/${encodeURIComponent(campaignId)}`; }} /></details>
-    <div className="campaign-list">{state.data?.items.map(item => <article key={item.campaignId}>
-      <h2><a href={`#/campaigns/${encodeURIComponent(item.campaignId)}`}>{item.campaignId}</a></h2>
+    <div className="campaign-list">{state.data?.items.map(item => {
+      const duplicateName = item.displayName && state.data?.items.some(other =>
+        other.campaignId !== item.campaignId && other.displayName?.trim().toLocaleLowerCase() === item.displayName?.trim().toLocaleLowerCase());
+      return <article key={item.campaignId}>
+      <h2><a href={`#/campaigns/${encodeURIComponent(item.campaignId)}`}>{item.displayName || item.campaignId}{duplicateName && ` · ${item.campaignId.slice(-8)}`}</a></h2>
       <p>{item.character}</p><p>{item.sceneCount} cenas · {statusLabel(item.operationalStatus)}</p>
       <p>{item.nextPending ? pendingLabel(item.nextPending) : 'Sem pendência informada'}</p>
-    </article>)}</div>
+      {item.displayName && <details><summary>Detalhes técnicos</summary><p>{item.campaignId}</p></details>}
+    </article>;})}</div>
   </>;
 }
 
@@ -93,7 +103,7 @@ export function CampaignDetailPanel({ campaignId, stage }: { campaignId: string;
   }, [fingerprint, detail.refresh, images.refresh, voices.refresh, renders.refresh]);
   const refresh = () => { detail.refresh(); status.refresh(); jobs.refresh(); worker.refresh(); images.refresh(); voices.refresh(); renders.refresh(); };
   return <>
-    <a href="#/campaigns">← Campanhas</a><div className="section-heading"><h1>{campaignId}</h1><button onClick={refresh}>Atualizar</button></div>
+    <a href="#/campaigns">← Campanhas</a><div className="section-heading"><h1>{detail.data?.displayName || campaignId}</h1><button onClick={refresh}>Atualizar</button></div>
     {stage && <>
       <nav className="campaign-stage-nav" aria-label="Etapas da campanha">
         {campaignStages.map(([slug, label]) => <a key={slug} href={campaignStagePath(campaignId, slug)} aria-current={stage === slug ? 'page' : undefined}>{label}</a>)}
@@ -107,62 +117,85 @@ export function CampaignDetailPanel({ campaignId, stage }: { campaignId: string;
     <Section title="Resumo" state={status} hidden={!!stage && stage !== 'overview'}>
       <p>{detail.data?.character} · {status.data && statusLabel(status.data.operationalStatus)}</p>
       <p>{status.data?.nextPending ? pendingLabel(status.data.nextPending) : 'Sem pendência informada'}</p>
+      {detail.data && <details><summary>{detail.data.displayName ? 'Alterar nome da campanha' : 'Adicionar nome à campanha'}</summary>
+        <CampaignNameForm key={campaignId} campaignId={campaignId} currentName={detail.data.displayName ?? null} onSaved={detail.refresh} />
+      </details>}
       {status.data && <Facts entries={[
         ['Cenas', status.data.sceneCount], ['Copies aprovadas', status.data.approvedCopyCount], ['Vozes aprovadas', status.data.approvedVoiceCount],
         ['Imagens aprovadas', status.data.approvedImageCount], ['Renders disponíveis', status.data.readyRenderCount], ['Planos existentes', status.data.planCount],
       ]} />}
     </Section>
     <Section title="Copy e cenas" state={detail} hidden={!!stage && stage !== 'script'}>
-      {detail.data?.copyMasters.map(copy => <article key={copy.copyMasterId}><h3>{copy.copyMasterId} · v{copy.version}</h3>
-        <p>{statusLabel(copy.approvalState)}</p><p>{copy.headline}</p><p>{copy.hook}</p><p>{copy.body}</p><p>{copy.cta}</p></article>)}
+      {detail.data?.copyMasters.map(copy => <article key={copy.copyMasterId}><h3>Roteiro v{copy.version}</h3>
+        <p>{statusLabel(copy.approvalState)}</p><p>{copy.headline}</p><p>{copy.hook}</p><p>{copy.body}</p><p>{copy.cta}</p>
+        <TechnicalDetails entries={[["ID do roteiro", copy.copyMasterId], ["SHA-256", copy.sha256]]} /></article>)}
       <details><summary>Nova versão de copy</summary><CopyVersionForm key={campaignId} campaignId={campaignId} detail={detail} /></details>
       {detail.data?.sceneVariants.map(scene => {
         const live = status.data?.scenes.find(item => item.sceneVariantId === scene.sceneVariantId);
-        return <article key={scene.sceneVariantId}><h3>{scene.variantId} · {scene.location}</h3><p>{scene.action}</p>
+        return <article key={scene.sceneVariantId}><h3>Cena · {scene.location}</h3><p>{scene.action}</p>
           <Facts entries={[
-            ['Cena', scene.sceneVariantId], ['Copy', live?.currentCopyId], ['Voz', live?.currentVoiceId], ['Imagem', live?.approvedImageId],
-            ['Renders', live?.readyRenderIds.join(', ') || null], ['Planos', live?.planHashes.join(', ') || null],
-          ]} />{live?.pending.map(item => <p key={`${item.code}:${item.entityId}`}>{pendingLabel(item)} ({item.code})</p>)}</article>;
+            ['Roteiro', live?.currentCopyId ? 'Disponível' : 'Pendente'], ['Voz', live?.currentVoiceId ? 'Disponível' : 'Pendente'],
+            ['Imagem', live?.approvedImageId ? 'Aprovada' : 'Pendente'], ['Vídeos', live?.readyRenderIds.length ?? 0], ['Planos', live?.planHashes.length ?? 0],
+          ]} /><TechnicalDetails entries={[
+            ['ID da cena', scene.sceneVariantId], ['Código da variante', scene.variantId], ['ID do roteiro', live?.currentCopyId],
+            ['ID da voz', live?.currentVoiceId], ['ID da imagem', live?.approvedImageId],
+            ['IDs dos vídeos', live?.readyRenderIds.join(', ') || null], ['Hashes dos planos', live?.planHashes.join(', ') || null],
+          ]} />{live?.pending.map(item => <p key={`${item.code}:${item.entityId}`}>{pendingLabel(item)}</p>)}</article>;
       })}
     </Section>
     <Section title="Imagens" state={images} hidden={!!stage && stage !== 'images'}>
       <ImageImportPanel key={campaignId} campaignId={campaignId} detail={detail} images={images} jobs={jobs} />
       {images.data?.items.flatMap(scene => scene.items.map(image => <article key={image.imageCandidateId}>
-        <h3>{image.imageCandidateId}</h3><Facts entries={[
-          ['Cena', image.sceneVariantId], ['Review', statusLabel(image.reviewStatus)], ['Origem', image.sourceKind], ['Arquivo', image.sourcePath],
-          ['Dimensões', `${image.width} × ${image.height}`], ['Bytes', image.sizeBytes], ['Formato', image.format], ['SHA256', image.sha256], ['Rejeição', image.rejectionReason],
+        <h3>Imagem · {detail.data?.sceneVariants.find(item => item.sceneVariantId === image.sceneVariantId)?.location || 'Cena'} · {fileName(image.sourcePath)}</h3>
+        <Facts entries={[
+          ['Estado', statusLabel(image.reviewStatus)], ['Origem', image.sourceKind],
+          ['Dimensões', `${image.width} × ${image.height}`], ['Tamanho', `${(image.sizeBytes / 1024).toFixed(1)} KB`],
+          ['Rejeição', image.rejectionReason],
+        ]} /><TechnicalDetails entries={[
+          ['ID da imagem', image.imageCandidateId], ['ID da cena', image.sceneVariantId], ['Caminho', image.sourcePath],
+          ['Bytes', image.sizeBytes], ['Formato', image.format], ['SHA-256', image.sha256],
         ]} /></article>))}
       {images.data && images.data.items.every(scene => scene.items.length === 0) && <p>Nenhuma imagem importada.</p>}
     </Section>
     <Section title="Voice Masters" state={voices} hidden={!!stage && stage !== 'voice'}>
       <VoicePanel campaignId={campaignId} detail={detail} voices={voices} jobs={jobs} />
-      {voices.data?.items.map(voice => <article key={voice.voiceMasterId}><h3>{voice.voiceMasterId}</h3><Facts entries={[
-        ['Copy', `${voice.copyMasterId} · v${voice.copyMasterVersion}`], ['Provider', voice.provider], ['Status', statusLabel(voice.status)], ['WAV processado', voice.processedAudioPath],
+      {voices.data?.items.map(voice => <article key={voice.voiceMasterId}><h3>Áudio principal · roteiro v{voice.copyMasterVersion} · geração {voice.generation}</h3><Facts entries={[
+        ['Origem', voice.provider], ['Estado', statusLabel(voice.status)],
         ['Duração (s)', voice.durationSeconds], ['Transcrição', voice.transcriptMatchStatus], ['Headline falada', voice.headlineSpoken === null ? null : voice.headlineSpoken ? 'Sim' : 'Não'],
         ['QC', voice.qcFindings.join(', ') || 'Sem findings'], ['Review', voice.approvalReviewReason ?? voice.rejectionReason],
-        ['Geração', voice.generation], ['SHA256 processado', voice.processedSha256], ['Aprovada em', voice.approvedAt], ['Aprovada por', voice.approvedBy],
+        ['Aprovada em', voice.approvedAt], ['Aprovada por', voice.approvedBy],
         ['Motivo da aprovação', voice.approvalReviewReason], ['Rejeitada em', voice.rejectedAt], ['Rejeitada por', voice.rejectedBy], ['Motivo da rejeição', voice.rejectionReason],
+      ]} /><TechnicalDetails entries={[
+        ['ID da voz', voice.voiceMasterId], ['ID do roteiro', voice.copyMasterId], ['WAV processado', voice.processedAudioPath],
+        ['SHA-256 processado', voice.processedSha256],
       ]} /></article>)}
       {voices.data?.items.length === 0 && <p>Nenhum Voice Master.</p>}
     </Section>
     <Section title="HeyGen" state={renders} hidden={!!stage && stage !== 'videos'}>
       <HeyGenPanel campaignId={campaignId} detail={detail} status={status} images={images} voices={voices} jobs={jobs} renders={renders} />
-      {renders.data?.items.map(render => <article key={render.renderId}><h3>{render.renderId}</h3><Facts entries={[
-        ['Status', statusLabel(render.status)], ['Cena', render.sceneVariantId], ['Imagem', render.imageCandidateId], ['Voz', render.voiceMasterId],
-        ['Job', render.jobId], ['Vídeo remoto', render.remoteVideoId], ['MP4 local', render.source?.path],
-        ['Vínculo manual', render.manualBinding ? 'Sim' : 'Não'], ['SHA256 imagem', render.imageSha256], ['SHA256 áudio', render.audioSha256],
-        ['Criado em', render.createdAt], ['Atualizado em', render.updatedAt], ['SHA256 MP4', render.source?.sha256], ['Bytes MP4', render.source?.sizeBytes],
+      {renders.data?.items.map(render => <article key={render.renderId}>
+        <h3>Vídeo · {detail.data?.sceneVariants.find(item => item.sceneVariantId === render.sceneVariantId)?.location || 'Cena'}</h3><Facts entries={[
+        ['Estado', statusLabel(render.status)], ['Vínculo manual', render.manualBinding ? 'Sim' : 'Não'],
+        ['Criado em', new Date(render.createdAt).toLocaleString('pt-BR')],
+        ['Atualizado em', new Date(render.updatedAt).toLocaleString('pt-BR')],
+        ['Tamanho MP4', render.source && `${(render.source.sizeBytes / 1024 / 1024).toFixed(1)} MB`],
         ['Duração MP4 (s)', render.source?.probe.durationSec], ['Codec vídeo', render.source?.probe.video.codec],
         ['Dimensões MP4', render.source && `${render.source.probe.video.width} × ${render.source.probe.video.height}`],
         ['FPS', render.source?.probe.video.fps], ['Áudio MP4', render.source && (render.source.probe.audio
           ? `${render.source.probe.audio.codec} · ${render.source.probe.audio.sampleRate} Hz · ${render.source.probe.audio.channels} canais` : 'Sem áudio')],
         ['Avisos MP4', render.source?.probe.warnings.join(', ') || null],
+      ]} /><TechnicalDetails entries={[
+        ['ID do vídeo', render.renderId], ['ID da cena', render.sceneVariantId], ['ID da imagem', render.imageCandidateId],
+        ['ID da voz', render.voiceMasterId], ['ID da tarefa', render.jobId], ['Vídeo remoto', render.remoteVideoId],
+        ['MP4 local', render.source?.path], ['SHA-256 MP4', render.source?.sha256], ['Bytes MP4', render.source?.sizeBytes],
+        ['SHA-256 imagem', render.imageSha256], ['SHA-256 áudio', render.audioSha256],
       ]} />{render.source && <p>Caminho relativo ao work root. Abra o MP4 pelo Explorer; não há player ou download neste painel.</p>}
       <ErrorCode code={render.errorCode} /></article>)}
       {renders.data?.items.length === 0 && <p>Nenhum render HeyGen.</p>}
     </Section>
     <section aria-label="Edição e variantes" hidden={!!stage && stage !== 'editing'}><h2>Edição e variantes</h2>
-      <EditingPanel campaignId={campaignId} renders={renders} onRenderPlanChange={stage ? setFinalizationPlan : undefined}/>
+      <EditingPanel campaignId={campaignId} renders={renders} scenes={detail.data?.sceneVariants}
+        onRenderPlanChange={stage ? setFinalizationPlan : undefined}/>
     </section>
     {stage && <section aria-label="Finalização" hidden={stage !== 'finalization'}><h2>Finalização</h2>
       <FinalizationPanel campaignId={campaignId} active={stage === 'finalization'} preferredPlan={finalizationPlan}/>

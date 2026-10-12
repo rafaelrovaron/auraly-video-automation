@@ -34,6 +34,70 @@ function fakeApi(overrides: Record<string, unknown> = {}, renderGate?: Promise<v
   return calls;
 }
 
+it('shows a campaign name and keeps technical identity behind details', async () => {
+  vi.stubGlobal('fetch', async () => Response.json({ items: [{ ...summary, displayName: 'Piloto Soulmate' }] }));
+  render(<CampaignList />);
+  expect(await screen.findByRole('link', { name: 'Piloto Soulmate' })).toBeTruthy();
+  expect(screen.getByText('campaign-one').closest('details')?.open).toBe(false);
+});
+
+it('distinguishes campaigns that share the same visible name', async () => {
+  vi.stubGlobal('fetch', async () => Response.json({ items: [
+    { ...summary, campaignId: 'campaign-one', displayName: 'Piloto Soulmate' },
+    { ...summary, campaignId: 'campaign-two', displayName: 'Piloto Soulmate' },
+  ] }));
+  render(<CampaignList />);
+  const links = await screen.findAllByRole('link', { name: /Piloto Soulmate/ });
+  expect(links).toHaveLength(2);
+  expect(links[0].textContent).not.toBe(links[1].textContent);
+  expect(links.map(link => link.getAttribute('href'))).toEqual(['#/campaigns/campaign-one', '#/campaigns/campaign-two']);
+});
+
+it('uses the campaign name in the detail heading without changing its route', async () => {
+  fakeApi({ '': { ...detail, displayName: 'Piloto Soulmate' } });
+  render(<CampaignDetailPanel campaignId="campaign-one" stage="overview" />);
+  expect(await screen.findByRole('heading', { name: 'Piloto Soulmate' })).toBeTruthy();
+  expect(screen.getByRole('navigation', { name: 'Etapas da campanha' }).querySelector('a')?.getAttribute('href'))
+    .toBe('#/campaigns/campaign-one/overview');
+});
+
+it('lets an older campaign receive a name without changing its ID', async () => {
+  fakeApi();
+  const original = globalThis.fetch;
+  let savedName = ''; let submitted: { path: string; body: unknown } | null = null;
+  vi.stubGlobal('fetch', (path: string, options: RequestInit) => {
+    if (options.method === 'POST') {
+      submitted = { path, body: JSON.parse(options.body as string) };
+      savedName = 'Novo nome';
+      return Promise.resolve(Response.json({ ...detail, displayName: savedName }));
+    }
+    if (path === '/api/v1/campaigns/campaign-one') return Promise.resolve(Response.json({ ...detail, displayName: savedName || null }));
+    return original(path, options);
+  });
+  render(<CampaignDetailPanel campaignId="campaign-one" stage="overview" />);
+  fireEvent.click(await screen.findByText('Adicionar nome à campanha'));
+  fireEvent.change(screen.getByLabelText('Nome da campanha'), { target: { value: 'Novo nome' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Salvar nome' }));
+  expect(await screen.findByRole('heading', { name: 'Novo nome' })).toBeTruthy();
+  expect(submitted).toEqual({ path: '/api/v1/campaigns/campaign-one/name', body: { displayName: 'Novo nome' } });
+});
+
+it('uses scene context for media titles and keeps hashes in closed technical details', async () => {
+  fakeApi({ '/images': { items: [{ sceneVariantId: 'scene-one', items: [{
+    imageCandidateId: 'image-one', sceneVariantId: 'scene-one', reviewStatus: 'approved', sourceKind: 'manual',
+    sourcePath: 'imports/portrait.png', format: 'png', sha256: 'c'.repeat(64), width: 1080, height: 1920,
+    sizeBytes: 2048, rejectionReason: null,
+  }] }] } });
+  const view = render(<CampaignDetailPanel campaignId="campaign-one" stage="images" />);
+  const imageSection = await screen.findByRole('region', { name: 'Imagens' });
+  expect(within(imageSection).getByRole('heading', { name: /Imagem.*Room.*portrait.png/ })).toBeTruthy();
+  expect(within(imageSection).getByText('c'.repeat(64)).closest('details')?.open).toBe(false);
+  view.rerender(<CampaignDetailPanel campaignId="campaign-one" stage="voice" />);
+  expect(within(screen.getByRole('region', { name: 'Voice Masters' })).getByRole('heading', { name: /Áudio principal.*roteiro v1/ })).toBeTruthy();
+  view.rerender(<CampaignDetailPanel campaignId="campaign-one" stage="videos" />);
+  expect(await within(screen.getByRole('region', { name: 'HeyGen' })).findByRole('heading', { name: /Vídeo.*Room/ })).toBeTruthy();
+});
+
 it('shows real metadata, nulls and renderer pending without players or POST', async () => {
   const calls = fakeApi();
   const { container } = render(<CampaignDetailPanel campaignId="campaign-one" />);
@@ -220,14 +284,14 @@ it.each([
   {...renderItem, source: {...source, path: 'https://signed.invalid/video.mp4'}},
 ])('test_foreign_or_incomplete_render_snapshot_preserves_last_good %#', async invalid => {
   const overrides: Record<string, unknown> = {}; fakeApi(overrides); render(<CampaignDetailPanel campaignId="campaign-one" />);
-  await screen.findByRole('heading', {name: 'render-one'}); overrides['/heygen/renders'] = {items: [invalid]};
+  await screen.findByRole('heading', {name: 'Vídeo · Room'}); overrides['/heygen/renders'] = {items: [invalid]};
   fireEvent.click(screen.getByRole('button', {name: 'Atualizar'}));
   expect(await within(screen.getByRole('region', {name: 'HeyGen'})).findByText(/invalid_response.*Dados desatualizados/)).toBeTruthy();
-  expect(screen.getByRole('heading', {name: 'render-one'})).toBeTruthy();
+  expect(screen.getByRole('heading', {name: 'Vídeo · Room'})).toBeTruthy();
 });
 it('test_duplicate_render_ids_preserve_snapshot', async () => {
   const overrides: Record<string, unknown> = {}; fakeApi(overrides); render(<CampaignDetailPanel campaignId="campaign-one" />);
-  await screen.findByRole('heading', {name: 'render-one'}); overrides['/heygen/renders'] = {items: [renderItem, renderItem]};
+  await screen.findByRole('heading', {name: 'Vídeo · Room'}); overrides['/heygen/renders'] = {items: [renderItem, renderItem]};
   fireEvent.click(screen.getByRole('button', {name: 'Atualizar'}));
   expect(await within(screen.getByRole('region', {name: 'HeyGen'})).findByText(/invalid_response.*Dados desatualizados/)).toBeTruthy();
 });

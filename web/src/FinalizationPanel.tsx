@@ -45,15 +45,20 @@ export function FinalizationPanel({ campaignId, active, preferredPlan }: Props) 
   };
 
   const options = preferredPlan && !summaries.some(item => identity(item) === identity(preferredPlan))
-    ? [{ videoId: preferredPlan.videoId, planHash: preferredPlan.planHash, outputCount: preferredPlan.outputCount }, ...summaries]
+    ? [{ videoId: preferredPlan.videoId, planHash: preferredPlan.planHash, outputCount: preferredPlan.outputCount,
+      source: preferredPlan.source }, ...summaries]
     : summaries;
+  const description = (item: typeof options[number]) => {
+    const source = item.source.path.split(/[\\/]/).at(-1) || item.videoId;
+    return `${source} · ${item.outputCount} ${item.outputCount === 1 ? 'variação' : 'variações'}`;
+  };
   return <>
     <p>Escolha uma configuração salva para gerar e revisar os vídeos finais.</p>
     <label>Plano salvo para finalizar
       <select value={selected} onChange={event => { void choose(event.target.value); }}>
         <option value="">Selecione</option>
         {options.map(item => <option key={identity(item)} value={identity(item)}>
-          {item.videoId} · {item.outputCount} {item.outputCount === 1 ? 'variação' : 'variações'}
+          {description(item)}{options.filter(other => description(other) === description(item)).length > 1 ? ` · ${item.planHash.slice(0, 8)}` : ''}
         </option>)}
       </select>
     </label>

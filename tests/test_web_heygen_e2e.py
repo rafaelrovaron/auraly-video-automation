@@ -100,7 +100,7 @@ def test_heygen_panel_prepares_plans_submits_and_downloads(panel_servers: PanelS
     created = reserve_videos(panel_servers, panel_page)
     start_kind(panel_page, 'heygen_videos')
     for render_id in created:
-        article = panel_page.get_by_role('region', name='HeyGen', exact=True).locator('article').filter(has=panel_page.get_by_role('heading', name=render_id, exact=True))
+        article = panel_page.get_by_role('region', name='HeyGen', exact=True).locator('article').filter(has_text=render_id)
         expect(article.get_by_text('Disponível', exact=True)).to_be_visible(timeout=30000)
         expect(article.get_by_text('Caminho relativo ao work root.', exact=False)).to_be_visible()
     renders = [render for render in panel_servers.app.state.queries.list_renders('campaign-one') if render.render_id in created]
@@ -154,7 +154,7 @@ def test_heygen_panel_reconciliation_never_duplicates_dispatch(
     expect(panel_page.get_by_text('Reconciliação recebida; consulte o render e o Job atual.', exact=True)).to_be_visible(timeout=15000)
     assert panel_heygen_provider.events.count('create_video') == 3
     start_kind(panel_page, 'heygen_videos')
-    article = panel_page.get_by_role('region', name='HeyGen', exact=True).locator('article').filter(has=panel_page.get_by_role('heading', name=render_id, exact=True))
+    article = panel_page.get_by_role('region', name='HeyGen', exact=True).locator('article').filter(has_text=render_id)
     expect(article.get_by_text('Disponível', exact=True)).to_be_visible(timeout=30000)
     stored = next(render for render in panel_servers.app.state.queries.list_renders('campaign-one') if render.render_id == render_id)
     assert stored.remote_video_id == exact and stored.manual_binding and stored.source is not None

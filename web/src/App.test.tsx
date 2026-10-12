@@ -6,7 +6,7 @@ it('opens global profiles without a campaign',async()=>{
   window.location.hash='#/profiles';
   vi.stubGlobal('fetch',async()=>Response.json({items:[]}));
   render(<App/>);
-  expect(await screen.findByRole('heading',{name:'Profiles de edição'})).toBeTruthy();
+  expect(await screen.findByRole('heading',{name:'Estilos de edição'})).toBeTruthy();
   expect(parseRoute('#/profiles')).toEqual({page:'profiles'});
   expect(parseRoute('#/profiles/extra')).toEqual({page:'invalid'});
 });

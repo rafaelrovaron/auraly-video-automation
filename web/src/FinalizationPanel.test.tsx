@@ -44,3 +44,14 @@ it('clears loading when a pending plan selection is cancelled', async () => {
   fireEvent.change(select, { target: { value: '' } });
   expect(screen.queryByText('Consultando configuração salva…')).toBeNull();
 });
+
+it('distinguishes similar saved configurations without exposing full hashes', async () => {
+  const other = { ...summary, planHash: 'f'.repeat(64) };
+  vi.stubGlobal('fetch', async () => Response.json({ items: [summary, other] }));
+  render(<FinalizationPanel campaignId="campaign-one" active preferredPlan={null} />);
+  const choices = await screen.findAllByRole('option', { name: /variação/ });
+  expect(choices).toHaveLength(2);
+  expect(choices[0].textContent).toContain(summary.source.path.split('/').at(-1));
+  expect(choices[0].textContent).not.toContain(planHash);
+  expect(choices[0].textContent).not.toBe(choices[1].textContent);
+});

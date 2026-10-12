@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ApiError, campaignPath, jobSummary, object, post, read } from './api';
+import { ApiError, campaignPath, jobSummary, object, post, read, statusLabel } from './api';
 import type { CampaignDetail, Items, JobSummary, VoiceSummary } from './api';
 import { campaignBudgetView, voiceSubmission, voiceOperationView, permitsTranscriptReview } from './voiceApi';
 import type { CampaignBudgetView, VoiceOperationView } from './voiceApi';
@@ -237,12 +237,13 @@ function VoiceForms({campaignId, detail, voices, jobs}: Props) {
     <label>Voice Master para revisar <select value={selectedVoice} disabled={!connected || busy} onChange={event => {
       setSelectedVoice(event.target.value); setReviewActor(''); setReason(''); setListened(false); setRejectionConfirmed(false); setReviewNotice(''); markDirty('review');
     }}><option value="">Selecione uma voz persistida</option>{voices.data?.items.filter(item => item.campaignId === campaignId).map(item =>
-      <option key={item.voiceMasterId} value={item.voiceMasterId}>{item.voiceMasterId} · v{item.copyMasterVersion} · {item.status}</option>)}
+      <option key={item.voiceMasterId} value={item.voiceMasterId}>Áudio principal · copy v{item.copyMasterVersion} · geração {item.generation} · {statusLabel(item.status)} · {item.voiceMasterId.slice(-4)}</option>)}
     </select></label>
-    {reviewVoice && <div><p>Revisando {reviewVoice.voiceMasterId} · copy v{reviewVoice.copyMasterVersion} · {reviewVoice.provider} · {reviewVoice.status}</p>
-      <p>WAV: {reviewVoice.processedAudioPath ?? 'Não disponível'} · SHA256: {reviewVoice.processedSha256 ?? 'Não disponível'} · duração: {reviewVoice.durationSeconds ?? 'Não disponível'} s</p>
+    {reviewVoice && <div><p>Áudio principal · copy v{reviewVoice.copyMasterVersion} · geração {reviewVoice.generation} · {statusLabel(reviewVoice.status)}</p>
+      <p>WAV processado · duração: {reviewVoice.durationSeconds ?? 'Não disponível'} s</p>
+      <details><summary>Detalhes técnicos</summary><p>{reviewVoice.voiceMasterId}</p><p>{reviewVoice.provider}</p><p>WAV: {reviewVoice.processedAudioPath ?? 'Não disponível'}</p><p>SHA-256: {reviewVoice.processedSha256 ?? 'Não disponível'}</p></details>
       <p>Transcrição: {reviewVoice.transcriptMatchStatus ?? 'Não disponível'} · headline falada: {String(reviewVoice.headlineSpoken)} · QC: {reviewVoice.qcFindings.join('; ') || 'Sem findings'}</p>
-      <p>Ouça o WAV fora do painel: combine o caminho relativo acima com o work root configurado no servidor. A existência do arquivo não significa aprovação.</p>
+      <p>Ouça o WAV fora do painel: combine o caminho em Detalhes técnicos com o work root configurado no servidor. A existência do arquivo não significa aprovação.</p>
       {exception && <p>Exceção restrita: transcrição importada requer revisão humana. Motivo obrigatório; o backend mantém os gates de aprovação.</p>}
       <div><label>Responsável pela revisão de voz <input value={reviewActor} disabled={blocked} onChange={event => editReview(() => setReviewActor(event.target.value))} /></label>
         <label>Motivo da revisão de voz <textarea value={reason} disabled={blocked} onChange={event => editReview(() => setReason(event.target.value))} /></label>

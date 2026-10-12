@@ -1,7 +1,7 @@
 export type Items<T> = { items: T[] };
 export type PendingItem = { code: string; stage: string; entityId: string; message: string };
 export type CampaignSummary = {
-  campaignId: string; character: string; storedStatus: string; sceneCount: number;
+  campaignId: string; displayName?: string | null; character: string; storedStatus: string; sceneCount: number;
   createdAt: string; updatedAt: string; operationalStatus: string; nextPending: PendingItem | null;
 };
 export type CopyMaster = { copyMasterId: string; version: number; approvalState: string; approvedBy: string | null; sourceText: string; sha256: string; headline: string; hook: string; body: string; cta: string };
@@ -81,6 +81,7 @@ export function collection(value: unknown, accepts?: (item: unknown) => boolean)
 
 export function campaignSummary(value: unknown): boolean {
   return hasFields(value, ['campaignId', 'character', 'operationalStatus'], ['sceneCount'])
+    && (!object(value) || value.displayName === undefined || value.displayName === null || typeof value.displayName === 'string')
     && (value.nextPending === null || pending(value.nextPending));
 }
 
@@ -172,6 +173,7 @@ export function statusLabel(value: string): string {
     queued: 'Na fila', completed: 'Concluído', failed: 'Falhou', cancelled: 'Cancelado',
     retry_scheduled: 'Nova tentativa agendada', reconciliation_required: 'Requer reconciliação',
     approved: 'Aprovado', pending: 'Pendente', rejected: 'Rejeitado', ready: 'Disponível', draft: 'Rascunho',
+    review_required: 'Aguardando revisão',
   } as Record<string, string>)[value];
   return typeof label === 'string' ? label : value;
 }

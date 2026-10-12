@@ -24,10 +24,16 @@ function server(mode='ok') {
   return {stored,posts,setQueryMode:(v:string)=>{queryMode=v;}};
 }
 async function select(key='plain/1') {
-  await screen.findByRole('option',{name:/plain · v1/});
+  await screen.findByRole('option',{name:/Plain · v1/});
   fireEvent.change(screen.getByLabelText('Consultar profile e versão'),{target:{value:key}});
   await screen.findByRole('button',{name:'Criar nova versão'});
 }
+it('uses the style name in the selector and folds its fingerprint',async()=>{
+  server();render(<ProfilePanel/>);
+  expect(await screen.findByRole('option',{name:'Plain · v1'})).toBeTruthy();
+  await select();
+  expect(screen.getByText('a'.repeat(64)).closest('details')?.open).toBe(false);
+});
 async function version() {
   await select(); fireEvent.click(screen.getByRole('button',{name:'Criar nova versão'}));
   fireEvent.change(screen.getByLabelText('Nome do profile'),{target:{value:'Changed'}});
@@ -92,7 +98,7 @@ it('late_get_does_not_replace_selection',async()=>{
     if(path.endsWith('/plain/1'))return new Promise<Response>(resolve=>{finish=resolve;});
     return Response.json(b);
   });
-  render(<ProfilePanel/>);await screen.findByRole('option',{name:/plain · v1/});
+  render(<ProfilePanel/>);await screen.findByRole('option',{name:/Plain · v1/});
   fireEvent.change(screen.getByLabelText('Consultar profile e versão'),{target:{value:'plain/1'}});
   fireEvent.change(screen.getByLabelText('Consultar profile e versão'),{target:{value:'other/1'}});
   await screen.findByRole('button',{name:'Criar nova versão'});
@@ -113,7 +119,7 @@ it('successful_post_with_unconfirmed_get_stays_unknown',async()=>{
   expect(posts).toBe(1);
 });
 it('creates_new_profile_without_campaign',async()=>{
-  const s=server();render(<ProfilePanel/>);await screen.findByRole('option',{name:/plain · v1/});
+  const s=server();render(<ProfilePanel/>);await screen.findByRole('option',{name:/Plain · v1/});
   fireEvent.click(screen.getByRole('button',{name:'Novo profile'}));
   fireEvent.change(screen.getByLabelText('ID do profile'),{target:{value:'organic'}});
   fireEvent.change(screen.getByLabelText('Nome do profile'),{target:{value:'Organic'}});

@@ -29,7 +29,9 @@ def create_campaign(servers: PanelServers, page: Page, scene_count: int) -> str:
     page.goto(servers.ui_url)
     page.get_by_text('Criar campanha', exact=True).click()
     form = page.get_by_role('form', name='Criar campanha', exact=True)
-    for label, value in [('ID da campanha', campaign_id), ('Objeto de prova', 'cards'), ('Voice preset', 'voice'), ('Edit preset', 'edit')]:
+    form.get_by_text('Detalhes técnicos').click()
+    for label, value in [('Nome da campanha', 'Campanha de importação'), ('Código técnico', campaign_id),
+                         ('Objeto de prova', 'cards'), ('Voice preset', 'voice'), ('Edit preset', 'edit')]:
         form.get_by_label(label, exact=True).fill(value)
     fill_copy(form)
     for index in range(1, scene_count + 1):
@@ -38,7 +40,7 @@ def create_campaign(servers: PanelServers, page: Page, scene_count: int) -> str:
         for label, value in [('ID da variante', f'scene-{index}'), ('Localização', f'Room {index}'), ('Ação', 'Talk'), ('Prompt', 'Portrait')]:
             form.get_by_label(f'{label} {index}', exact=True).fill(value)
     form.get_by_role('button', name='Criar campanha com copy aprovada').click()
-    expect(page.get_by_role('heading', name=campaign_id, exact=True)).to_be_visible()
+    expect(page.get_by_role('heading', name='Campanha de importação', exact=True)).to_be_visible()
     page.get_by_role('link', name='Roteiro', exact=True).click()
     return campaign_id
 

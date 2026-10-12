@@ -273,6 +273,7 @@ def test_variant_fallback_collision_does_not_hang(panel_servers: PanelServers, p
 def test_editing_narrow_width(panel_servers: PanelServers, panel_page: Page, width: int) -> None:
     panel_page.set_viewport_size({'width': width, 'height': 844})
     panel = draft(panel_servers, panel_page)
+    panel.get_by_text('Código técnico da edição', exact=True).click()
     panel.get_by_label('ID do vídeo editorial', exact=True).fill('v' * 64)
     panel.get_by_label('Headline base', exact=True).fill('Long headline ' * 30)
     panel.get_by_role('button', name='Adicionar variante', exact=True).focus()

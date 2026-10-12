@@ -6,6 +6,14 @@ import {PROFILE} from './profileTestSupport';
 import type {EditBatchRequest,EditBatchPlan} from './editingApi';
 
 const renders={data:{items:[EDIT_RENDER,{...EDIT_RENDER,renderId:'render-two'}]},loading:false,error:null,lastSuccessAt:1,lastSuccessReadId:1,refresh:()=>1};
+it('labels source videos by scene and styles by name while keeping IDs as option values',async()=>{
+  server();
+  render(<EditingPanel campaignId="campaign-one" renders={renders}
+    scenes={[{sceneVariantId:EDIT_RENDER.sceneVariantId,variantId:'v1',location:'Sala azul',action:'Talk',prompt:'Portrait',timeAtmosphere:null,proofObject:null}]}/>);
+  const first=screen.getByRole('option',{name:/Sala azul.*one/}) as HTMLOptionElement;
+  expect(first.value).toBe('render-one');
+  expect(await screen.findByRole('option',{name:'Plain · v1'})).toBeTruthy();
+});
 type Call={request:EditBatchRequest;persist:boolean};
 function server(options:{trim?:boolean;lost?:boolean;queued?:boolean;failed?:boolean;getFail?:boolean;getDivergent?:boolean;wrongPersist?:boolean;saveHash?:boolean;wrongRender?:boolean;divergent?:boolean;postMalformed?:boolean;delay?:Promise<Response>}={}){
   const posts:Call[]=[];const saved:EditBatchPlan[]=[];let current:Call|null=null,queued=options.queued;
@@ -35,7 +43,7 @@ function server(options:{trim?:boolean;lost?:boolean;queued?:boolean;failed?:boo
   return {posts,saved,complete:()=>{queued=false;}};
 }
 async function draft(){
-  await screen.findByRole('option',{name:/plain.*v1/});
+  await screen.findByRole('option',{name:/Plain.*v1/});
   fireEvent.change(screen.getByLabelText('MP4 HeyGen para edição'),{target:{value:'render-one'}});
   fireEvent.change(screen.getByLabelText('Profile de edição'),{target:{value:'plain/1'}});
   await screen.findByLabelText('Headline base');fireEvent.change(screen.getByLabelText('Headline base'),{target:{value:'Base'}});

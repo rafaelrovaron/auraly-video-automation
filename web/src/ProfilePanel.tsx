@@ -100,8 +100,8 @@ export function ProfilePanel() {
       }else{setSubmission({...sent,state:'unknown'});setError(message(e));}
     }finally{locked.current=false;if(alive.current)setBusy(false);}
   }
-  return <section className="profile-panel" aria-label="Profiles de edição">
-    <h1>Profiles de edição</h1><p>Estilos reutilizáveis. Versões publicadas são imutáveis; alterações criam outra versão.</p>
+  return <section className="profile-panel" aria-label="Estilos de edição">
+    <h1>Estilos de edição</h1><p>Estilos reutilizáveis. Versões publicadas são imutáveis; alterações criam outra versão.</p>
     <div className="actions"><button onClick={()=>void refresh()} disabled={listLoading}>Atualizar profiles</button>
       <button onClick={create} disabled={busy}>Novo profile</button></div>
     {listLoading&&<p role="status">Carregando profiles…</p>}
@@ -110,7 +110,7 @@ export function ProfilePanel() {
     <label>Consultar profile e versão<select aria-label="Consultar profile e versão" value={selected} disabled={busy} onChange={e=>void select(e.target.value)}>
       <option value="">Selecione uma versão</option>
       {items.map(v=><option key={`${v.profile.profileId}/${v.profile.version}`} value={`${v.profile.profileId}/${v.profile.version}`}>
-        {v.profile.profileId} · v{v.profile.version} · {v.profile.name}
+        {v.profile.name} · v{v.profile.version}
       </option>)}
     </select></label>
     {loading&&<p role="status">Consultando versão…</p>}
@@ -126,7 +126,9 @@ export function ProfilePanel() {
       <button disabled={busy} onClick={()=>{if(discard()){reset();setDraft(null);}}}>Descartar rascunho</button>
       <ProfileForm key={draft.key} initial={draft.initial} creating={draft.creating} readOnly={false}
         disabled={busy||submission!==null} onSubmit={p=>void save(p)} onDirtyChange={setDirty}/></>:
-      view&&<><p>Versão publicada · Hash: <code>{view.profileHash}</code></p><button disabled={busy} onClick={version}>Criar nova versão</button>
+      view&&<><p>Versão publicada · {view.profile.name} · v{view.profile.version}</p>
+        <details><summary>Detalhes técnicos</summary><p>ID: {view.profile.profileId}</p><p>SHA-256: <code>{view.profileHash}</code></p></details>
+        <button disabled={busy} onClick={version}>Criar nova versão</button>
         <ProfileForm key={`${view.profile.profileId}/${view.profile.version}`} initial={view.profile} creating={false}
           readOnly={true} disabled={false} onSubmit={()=>{}} onDirtyChange={()=>{}}/></>}
   </section>;

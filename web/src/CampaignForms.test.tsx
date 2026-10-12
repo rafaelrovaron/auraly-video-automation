@@ -7,7 +7,7 @@ import type { RemoteState } from './usePolling';
 
 const copy = { headline: 'H', hook: 'K', body: 'B', cta: 'C' };
 const initial: CampaignDetail = {
-  campaignId: 'campaign-one', character: 'susan-smith', storedStatus: 'draft', sceneCount: 1,
+  campaignId: 'campaign-one', displayName: 'Piloto Soulmate', character: 'susan-smith', storedStatus: 'draft', sceneCount: 1,
   createdAt: '2026-10-04T00:00:00Z', updatedAt: '2026-10-04T00:00:00Z', operationalStatus: 'needs_input', nextPending: null,
   proofObject: 'cards', voicePreset: 'voice', editPreset: 'edit',
   copyMasters: [{ copyMasterId: 'old', version: 1, approvalState: 'approved', approvedBy: 'tester',
@@ -27,7 +27,7 @@ function fillCopy() {
 }
 function fillCreate() {
   fillCopy();
-  for (const [label, value] of Object.entries({ 'ID da campanha': 'campaign-one', 'Objeto de prova': 'cards',
+  for (const [label, value] of Object.entries({ 'Nome da campanha': 'Piloto Soulmate', 'Código técnico': 'campaign-one', 'Objeto de prova': 'cards',
     'Voice preset': 'voice', 'Edit preset': 'edit', 'ID da variante 1': 'first', 'Localização 1': 'Room',
     'Ação 1': 'Talk', 'Prompt 1': 'Portrait' })) fireEvent.change(screen.getByLabelText(label), { target: { value } });
 }
@@ -63,10 +63,30 @@ it('creates an approved campaign once, with initial scenes and empty config/budg
   await waitFor(() => expect(onCreated).toHaveBeenCalledWith('campaign-one'));
   expect(fetcher).toHaveBeenCalledTimes(1);
   expect(body).toMatchObject({ campaignId: 'campaign-one', status: 'draft', budget: {}, config: {},
+    displayName: 'Piloto Soulmate',
     copyMaster: { headline: 'H', hook: 'K', body: 'B', cta: 'C', approvalState: 'approved', approvedBy: 'tester',
       sourceText: 'Headline:\nH\n\nHook:\nK\n\nBody:\nB\n\nCTA:\nC' },
     sceneVariants: [{ variantId: 'first', location: 'Room', action: 'Talk', prompt: 'Portrait', status: 'not_started' }] });
   expect(JSON.stringify(body)).not.toContain('spokenText');
+});
+
+it('generates a stable campaign code while asking the user only for a name', async () => {
+  let sent: Record<string, unknown> | null = null;
+  const onCreated = vi.fn();
+  vi.stubGlobal('fetch', async (_path: string, options: RequestInit) => {
+    sent = JSON.parse(options.body as string);
+    return Response.json({ ...initial, campaignId: sent?.campaignId, copyMasters: [{ ...newCopy, version: 1 }] }, { status: 201 });
+  });
+  render(<CampaignCreateForm onCreated={onCreated} />);
+  fillCopy();
+  for (const [label, value] of Object.entries({ 'Nome da campanha': 'Piloto Soulmate', 'Objeto de prova': 'cards',
+    'Voice preset': 'voice', 'Edit preset': 'edit', 'ID da variante 1': 'first', 'Localização 1': 'Room',
+    'Ação 1': 'Talk', 'Prompt 1': 'Portrait' })) fireEvent.change(screen.getByLabelText(label), { target: { value } });
+  fireEvent.click(createButton());
+  await waitFor(() => expect(onCreated).toHaveBeenCalledTimes(1));
+  const submitted = sent as Record<string, unknown> | null;
+  expect(submitted?.campaignId).toMatch(/^campaign-[a-z0-9-]+$/);
+  expect(submitted?.displayName).toBe('Piloto Soulmate');
 });
 
 it.each(['same-id', 'same-location'])('rejects %s initial scenes without POST', problem => {

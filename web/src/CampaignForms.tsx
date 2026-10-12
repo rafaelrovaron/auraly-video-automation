@@ -36,7 +36,8 @@ type SceneDraft = { variantId: string; location: string; timeAtmosphere: string;
 const blankScene: SceneDraft = { variantId: '', location: '', timeAtmosphere: '', action: '', prompt: '', proofObject: '' };
 
 export function CampaignCreateForm({ onCreated }: { onCreated: (campaignId: string) => void }) {
-  const [campaignId, setId] = useState(''), [character, setCharacter] = useState('susan-smith');
+  const [campaignId, setId] = useState(() => `campaign-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`);
+  const [displayName, setDisplayName] = useState(''), [character, setCharacter] = useState('susan-smith');
   const [proofObject, setProof] = useState(''), [voicePreset, setVoice] = useState(''), [editPreset, setEdit] = useState('');
   const [copy, setCopy] = useState<CopyFields>(blankCopy), [actor, setActor] = useState(''), [approved, setApproved] = useState(false);
   const [scenes, setScenes] = useState<SceneDraft[]>([{ ...blankScene }]);
@@ -46,7 +47,7 @@ export function CampaignCreateForm({ onCreated }: { onCreated: (campaignId: stri
   const clearDirty = useUnsavedChanges(dirty);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
   function payload() {
-    return { campaignId: campaignId.trim(), character, proofObject: proofObject.trim(), voicePreset: voicePreset.trim(), editPreset: editPreset.trim(),
+    return { campaignId: campaignId.trim(), displayName: displayName.trim(), character, proofObject: proofObject.trim(), voicePreset: voicePreset.trim(), editPreset: editPreset.trim(),
       status: 'draft', budget: {}, config: {}, copyMaster: approvedCopy(copy, actor),
       sceneVariants: scenes.map(scene => ({ variantId: scene.variantId.trim(), location: scene.location.trim(), action: scene.action.trim(), prompt: scene.prompt.trim(),
         timeAtmosphere: scene.timeAtmosphere.trim() || null, proofObject: scene.proofObject.trim() || null, status: 'not_started' })) };
@@ -54,7 +55,7 @@ export function CampaignCreateForm({ onCreated }: { onCreated: (campaignId: stri
   function matches(value: unknown, body: ReturnType<typeof payload>): value is CampaignDetail {
     if (!campaignDetail(value)) return false;
     const result = value as CampaignDetail;
-    return result.campaignId === body.campaignId && result.character === body.character && result.proofObject === body.proofObject
+    return result.campaignId === body.campaignId && result.displayName === body.displayName && result.character === body.character && result.proofObject === body.proofObject
       && result.voicePreset === body.voicePreset && result.editPreset === body.editPreset
       && result.copyMasters.some(item => matchesCopy(item, body.copyMaster))
       && result.sceneVariants.length === body.sceneVariants.length && body.sceneVariants.every(scene => result.sceneVariants.some(
@@ -66,7 +67,7 @@ export function CampaignCreateForm({ onCreated }: { onCreated: (campaignId: stri
     event.preventDefault();
     if (lock.current || intent) return;
     const body = payload();
-    if (!approved || !actor.trim() || !idPattern.test(body.campaignId) || !proofObject.trim() || !voicePreset.trim() || !editPreset.trim()
+    if (!approved || !actor.trim() || !idPattern.test(body.campaignId) || !body.displayName || body.displayName.length > 120 || !proofObject.trim() || !voicePreset.trim() || !editPreset.trim()
       || Object.values(copy).some(value => !value.trim()) || scenes.some(scene => !idPattern.test(scene.variantId.trim()) || !scene.location.trim() || !scene.action.trim() || !scene.prompt.trim())) {
       setNotice('Preencha os campos obrigatórios e confirme a aprovação da copy.');
       event.currentTarget.querySelector<HTMLElement>('input:invalid, textarea:invalid')?.focus(); return;
@@ -102,7 +103,8 @@ export function CampaignCreateForm({ onCreated }: { onCreated: (campaignId: stri
   return <form aria-label="Criar campanha" onSubmit={send} onChange={() => setDirty(true)}>
     <fieldset disabled={busy || intent !== null}>
       <legend>Campanha e cenas iniciais</legend>
-      <label>ID da campanha<input required pattern="[a-z0-9]+(-[a-z0-9]+)*" value={campaignId} onChange={event => setId(event.target.value)} /></label>
+      <label>Nome da campanha<input required maxLength={120} value={displayName} onChange={event => setDisplayName(event.target.value)} /></label>
+      <details><summary>Detalhes técnicos</summary><label>Código técnico<input required pattern="[a-z0-9]+(-[a-z0-9]+)*" value={campaignId} onChange={event => setId(event.target.value)} /></label></details>
       <label>Personagem<select value={character} onChange={event => setCharacter(event.target.value)}><option value="susan-smith">Susan Smith</option><option value="soul-constellation">Soul Constellation</option></select></label>
       <label>Objeto de prova<input required value={proofObject} onChange={event => setProof(event.target.value)} /></label>
       <label>Voice preset<input required value={voicePreset} onChange={event => setVoice(event.target.value)} /></label>
@@ -119,6 +121,52 @@ export function CampaignCreateForm({ onCreated }: { onCreated: (campaignId: stri
     <p className="muted">Rascunhos não salvos se perdem ao sair. Presets são referências; nenhum gasto é autorizado aqui.</p>
     {notice && <p role="alert">{notice}</p>}
     {intent && <button type="button" disabled={busy} onClick={() => { void reconcile(); }}>Reconciliar criação</button>}
+  </form>;
+}
+
+export function CampaignNameForm({ campaignId, currentName, onSaved }: {
+  campaignId: string; currentName: string | null; onSaved: () => void;
+}) {
+  const [name, setName] = useState(currentName ?? '');
+  const [busy, setBusy] = useState(false);
+  const [unknown, setUnknown] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [dirty, setDirty] = useState(false);
+  const clearDirty = useUnsavedChanges(dirty);
+  const lock = useRef(false);
+  const save = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const displayName = name.trim();
+    if (lock.current || unknown || !displayName || displayName.length > 120) return;
+    lock.current = true; setBusy(true); setNotice(null);
+    try {
+      const result = await post<unknown>(campaignPath(campaignId, '/name'), { displayName });
+      if (!campaignDetail(result) || (result as CampaignDetail).campaignId !== campaignId
+        || (result as CampaignDetail).displayName !== displayName) throw new ApiError('command_unknown');
+      clearDirty(); setDirty(false); onSaved();
+    } catch (error) {
+      const safe = error instanceof ApiError ? error : new ApiError('command_unknown');
+      setNotice(safe.message);
+      if (safe.code === 'command_unknown') setUnknown(true);
+    } finally { setBusy(false); lock.current = false; }
+  };
+  const reconcile = async () => {
+    if (lock.current) return;
+    lock.current = true; setBusy(true);
+    try {
+      const result = await read<CampaignDetail>(campaignPath(campaignId), new AbortController().signal, campaignDetail);
+      if (result.campaignId === campaignId && result.displayName === name.trim()) {
+        setUnknown(false); clearDirty(); setDirty(false); onSaved();
+      } else setNotice('Nome não confirmado. Confira a campanha antes de tentar novamente.');
+    } catch (error) { setNotice(error instanceof ApiError ? error.message : 'Nome não confirmado.'); }
+    finally { setBusy(false); lock.current = false; }
+  };
+  return <form aria-label="Alterar nome da campanha" onSubmit={save}>
+    <label>Nome da campanha<input required maxLength={120} value={name} disabled={busy || unknown}
+      onChange={event => { setName(event.target.value); setDirty(true); }} /></label>
+    <button disabled={busy || unknown || !name.trim()} type="submit">Salvar nome</button>
+    {notice && <p role="status">{notice}</p>}
+    {unknown && <button type="button" disabled={busy} onClick={() => { void reconcile(); }}>Conferir nome</button>}
   </form>;
 }
 

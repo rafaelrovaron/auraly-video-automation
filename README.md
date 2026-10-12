@@ -488,6 +488,16 @@ música e source antes de produzir o plano. Consulte `/docs` para os bodies de c
 Use Node 22 (>=22.12) e instale o frontend com `npm --prefix web ci`.
 Com o banco da campanha já preparado pelos comandos CLI existentes, abra dois terminais:
 
+Ao atualizar um banco anterior para esta versão, faça backup do arquivo SQLite e aplique
+a migration com a CLI **antes** de iniciar a API nova:
+
+```powershell
+uv run python -m auraly_pipeline.cli campaign list --database CAMINHO_DO_BANCO
+```
+
+O nome de campanha é opcional nos registros antigos; o ID permanece imutável. Campanhas
+novas recebem nome visível no painel e um código técnico gerado automaticamente.
+
 ```powershell
 uv run python -m auraly_pipeline.cli api serve --port 8000
 ```

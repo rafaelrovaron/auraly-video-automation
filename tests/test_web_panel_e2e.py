@@ -39,7 +39,7 @@ def test_panel_read_navigation_is_non_mutating(panel_servers: PanelServers, pane
     panel_page.get_by_role('link', name='Vídeos', exact=True).click()
     expect(panel_page.get_by_role('region', name='HeyGen').get_by_text('Disponível', exact=True).first).to_be_visible()
     panel_page.get_by_role('link', name='Imagens', exact=True).click()
-    expect(panel_page.get_by_role('region', name='Imagens').get_by_text('png', exact=True).first).to_be_visible()
+    expect(panel_page.get_by_role('region', name='Imagens').get_by_role('heading', name='Imagem · studio · image-0.png')).to_be_visible()
     panel_page.reload()
     panel_page.get_by_role('link', name='Visão geral', exact=True).click()
     expect(panel_page.get_by_role('button', name='Iniciar worker', exact=True)).to_be_enabled()

@@ -96,7 +96,7 @@ def test_import_voice_two_workers_then_review_preserves_source(
     start_kind(panel_page, 'voice_import')
     expect(panel_page.get_by_text('voice.import · completed', exact=True)).to_be_visible(timeout=30000)
     panel_page.get_by_role('combobox', name='Voice Master para revisar', exact=True).select_option(voice.voice_master_id)
-    expect(panel_page.get_by_text(f'Revisando {voice.voice_master_id} · copy v1 · imported · review_required', exact=True)).to_be_visible(timeout=15000)
+    expect(panel_page.get_by_text('Áudio principal · copy v1 · geração 1 · Aguardando revisão', exact=True)).to_be_visible(timeout=15000)
     panel_page.get_by_label('Responsável pela revisão de voz', exact=True).fill('tester')
     panel_page.get_by_label('Ouvi o WAV processado e revisei os resultados', exact=True).check()
     panel_page.get_by_role('button', name='Enfileirar aprovação de voz', exact=True).click()
