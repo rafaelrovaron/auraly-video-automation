@@ -33,6 +33,10 @@ def draft(servers: PanelServers, page: Page) -> Locator:
     servers.release.set()
     page.goto(servers.ui_url)
     page.get_by_role('link', name='campaign-one', exact=True).click()
+    if page.viewport_size and page.viewport_size['width'] <= 700:
+        page.get_by_role('combobox', name='Etapa da campanha', exact=True).select_option('editing')
+    else:
+        page.get_by_role('link', name='Edição', exact=True).click()
     panel = page.get_by_role('region', name='Edição e variantes', exact=True)
     source = panel.get_by_label('MP4 HeyGen para edição', exact=True)
     expect(source.locator('option')).to_have_count(4)
@@ -228,7 +232,9 @@ def test_lost_save_response_never_reposts(panel_servers: PanelServers, panel_pag
     panel.get_by_role('button', name='Salvar plano', exact=True).click()
     expect(panel.get_by_text('Resultado editorial desconhecido. Nenhum POST será reenviado.', exact=True)).to_be_visible()
     start_kind(panel_page, 'local_operations')
+    panel_page.get_by_role('link', name='Visão geral', exact=True).click()
     expect(panel_page.get_by_role('button', name='Iniciar worker', exact=True)).to_be_enabled(timeout=15000)
+    panel_page.get_by_role('link', name='Edição', exact=True).click()
     panel.get_by_role('button', name='Consultar plano enviado', exact=True).click()
     expect(panel.get_by_text('Resultado editorial desconhecido. Artefato encontrado; isto não confirma autoria do POST perdido.', exact=True)).to_be_visible()
     expect(panel.get_by_role('button', name='Salvar plano', exact=True)).to_be_disabled()
@@ -246,8 +252,10 @@ def test_editing_navigation_and_back_cancel(panel_servers: PanelServers, panel_p
     panel.get_by_role('link', name='Gerenciar profiles de edição', exact=True).click()
     expect(panel.get_by_label('Headline base', exact=True)).to_have_value('Base')
     panel_page.go_back()
+    expect(panel_page.get_by_role('region', name='Resumo', exact=True)).to_be_visible()
+    panel_page.get_by_role('link', name='Edição', exact=True).click()
     expect(panel.get_by_label('Headline base', exact=True)).to_have_value('Base')
-    assert panel_page.url.endswith('#/campaigns/campaign-one')
+    assert panel_page.url.endswith('#/campaigns/campaign-one/editing')
 
 
 def test_variant_fallback_collision_does_not_hang(panel_servers: PanelServers, panel_page: Page) -> None:

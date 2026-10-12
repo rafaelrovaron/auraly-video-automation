@@ -45,6 +45,18 @@ it('shows real metadata, nulls and renderer pending without players or POST', as
   expect(calls.every(call => call.method === 'GET')).toBe(true);
 });
 
+it('shows one campaign stage with mobile navigation and separates finalization', async () => {
+  const calls = fakeApi();
+  const view = render(<CampaignDetailPanel campaignId="campaign-one" stage="voice" />);
+  expect(await screen.findByRole('region', { name: 'Voice Masters' })).toBeTruthy();
+  expect(screen.getByRole('navigation', { name: 'Etapas da campanha' })).toBeTruthy();
+  expect(screen.getByRole('combobox', { name: 'Etapa da campanha' })).toBeTruthy();
+  expect(view.container.querySelector('section[aria-label="Copy e cenas"]')?.hasAttribute('hidden')).toBe(true);
+  expect(view.container.querySelector('section[aria-label="Edição e variantes"]')?.hasAttribute('hidden')).toBe(true);
+  expect(view.container.querySelector('section[aria-label="Finalização"]')?.hasAttribute('hidden')).toBe(true);
+  expect(calls.every(call => call.method === 'GET')).toBe(true);
+});
+
 it('polls the list at 5000ms and live detail only at 2000ms', async () => {
   vi.useFakeTimers();
   const paths: string[] = [];

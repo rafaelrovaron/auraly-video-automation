@@ -32,3 +32,17 @@ it('refused popstate restores hash before the subsequent hashchange',()=>{
   fireEvent(window,new PopStateEvent('popstate'));
   expect(window.location.hash).toBe('#/campaigns/campaign-one');
 });
+
+it('keeps a campaign draft through stage navigation and guards leaving the campaign',()=>{
+  window.history.replaceState(null,'','#/campaigns/campaign-one/editing');
+  const confirm=vi.spyOn(window,'confirm').mockReturnValue(false);
+  render(<Draft/>);
+  window.history.replaceState(null,'','#/campaigns/campaign-one/finalization');
+  fireEvent(window,new HashChangeEvent('hashchange'));
+  expect(window.location.hash).toBe('#/campaigns/campaign-one/finalization');
+  expect(confirm).not.toHaveBeenCalled();
+  window.history.replaceState(null,'','#/campaigns');
+  fireEvent(window,new HashChangeEvent('hashchange'));
+  expect(window.location.hash).toBe('#/campaigns/campaign-one/finalization');
+  expect(confirm).toHaveBeenCalledTimes(1);
+});

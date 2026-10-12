@@ -12,6 +12,10 @@ import { ImageImportPanel } from './ImageImportPanel';
 import { VoicePanel } from './VoicePanel';
 import { HeyGenPanel } from './HeyGenPanel';
 import { EditingPanel } from './EditingPanel';
+import { FinalizationPanel } from './FinalizationPanel';
+import type { EditBatchPlan } from './editingApi';
+import { campaignStagePath, campaignStages } from './campaignStages';
+import type { CampaignStage } from './campaignStages';
 
 function Updated({ state }: { state: RemoteState<unknown> }) {
   return <>
@@ -21,8 +25,8 @@ function Updated({ state }: { state: RemoteState<unknown> }) {
   </>;
 }
 
-function Section({ title, state, children }: { title: string; state: RemoteState<unknown>; children: ReactNode }) {
-  return <section aria-label={title}><h2>{title}</h2><Updated state={state} />{state.data !== null && children}</section>;
+function Section({ title, state, children, hidden }: { title: string; state: RemoteState<unknown>; children: ReactNode; hidden?: boolean }) {
+  return <section aria-label={title} hidden={hidden}><h2>{title}</h2><Updated state={state} />{state.data !== null && children}</section>;
 }
 
 function Facts({ entries }: { entries: [string, ReactNode][] }) {
@@ -48,7 +52,7 @@ export function CampaignList() {
   </>;
 }
 
-export function CampaignDetailPanel({ campaignId }: { campaignId: string }) {
+export function CampaignDetailPanel({ campaignId, stage }: { campaignId: string; stage?: CampaignStage }) {
   const detail = usePolling(campaignPath(campaignId), signal => read<CampaignDetail>(campaignPath(campaignId), signal,
     value => campaignDetail(value) && object(value) && value.campaignId === campaignId
       && new Set((value.sceneVariants as CampaignDetail['sceneVariants']).map(scene => scene.sceneVariantId)).size === (value.sceneVariants as unknown[]).length), null);
@@ -74,6 +78,7 @@ export function CampaignDetailPanel({ campaignId }: { campaignId: string }) {
         && object(value) && new Set((value.items as HeyGenRenderView[]).map(render => render.renderId)).size === (value.items as HeyGenRenderView[]).length);
   }, null);
   const [selectedJob, setSelectedJob] = useState<string | null>(null);
+  const [finalizationPlan, setFinalizationPlan] = useState<EditBatchPlan | null>(null);
   const previousFingerprint = useRef<string | null>(null);
   const fingerprint = status.data && jobs.data ? JSON.stringify([
     status.data.operationalStatus, status.data.approvedCopyCount, status.data.approvedVoiceCount,
@@ -89,7 +94,17 @@ export function CampaignDetailPanel({ campaignId }: { campaignId: string }) {
   const refresh = () => { detail.refresh(); status.refresh(); jobs.refresh(); worker.refresh(); images.refresh(); voices.refresh(); renders.refresh(); };
   return <>
     <a href="#/campaigns">← Campanhas</a><div className="section-heading"><h1>{campaignId}</h1><button onClick={refresh}>Atualizar</button></div>
-    <Section title="Resumo" state={status}>
+    {stage && <>
+      <nav className="campaign-stage-nav" aria-label="Etapas da campanha">
+        {campaignStages.map(([slug, label]) => <a key={slug} href={campaignStagePath(campaignId, slug)} aria-current={stage === slug ? 'page' : undefined}>{label}</a>)}
+      </nav>
+      <label className="campaign-stage-picker">Etapa da campanha
+        <select value={stage} onChange={event => { window.location.hash = campaignStagePath(campaignId, event.target.value as CampaignStage); }}>
+          {campaignStages.map(([slug, label]) => <option key={slug} value={slug}>{label}</option>)}
+        </select>
+      </label>
+    </>}
+    <Section title="Resumo" state={status} hidden={!!stage && stage !== 'overview'}>
       <p>{detail.data?.character} · {status.data && statusLabel(status.data.operationalStatus)}</p>
       <p>{status.data?.nextPending ? pendingLabel(status.data.nextPending) : 'Sem pendência informada'}</p>
       {status.data && <Facts entries={[
@@ -97,7 +112,7 @@ export function CampaignDetailPanel({ campaignId }: { campaignId: string }) {
         ['Imagens aprovadas', status.data.approvedImageCount], ['Renders disponíveis', status.data.readyRenderCount], ['Planos existentes', status.data.planCount],
       ]} />}
     </Section>
-    <Section title="Copy e cenas" state={detail}>
+    <Section title="Copy e cenas" state={detail} hidden={!!stage && stage !== 'script'}>
       {detail.data?.copyMasters.map(copy => <article key={copy.copyMasterId}><h3>{copy.copyMasterId} · v{copy.version}</h3>
         <p>{statusLabel(copy.approvalState)}</p><p>{copy.headline}</p><p>{copy.hook}</p><p>{copy.body}</p><p>{copy.cta}</p></article>)}
       <details><summary>Nova versão de copy</summary><CopyVersionForm key={campaignId} campaignId={campaignId} detail={detail} /></details>
@@ -110,7 +125,7 @@ export function CampaignDetailPanel({ campaignId }: { campaignId: string }) {
           ]} />{live?.pending.map(item => <p key={`${item.code}:${item.entityId}`}>{pendingLabel(item)} ({item.code})</p>)}</article>;
       })}
     </Section>
-    <Section title="Imagens" state={images}>
+    <Section title="Imagens" state={images} hidden={!!stage && stage !== 'images'}>
       <ImageImportPanel key={campaignId} campaignId={campaignId} detail={detail} images={images} jobs={jobs} />
       {images.data?.items.flatMap(scene => scene.items.map(image => <article key={image.imageCandidateId}>
         <h3>{image.imageCandidateId}</h3><Facts entries={[
@@ -119,7 +134,7 @@ export function CampaignDetailPanel({ campaignId }: { campaignId: string }) {
         ]} /></article>))}
       {images.data && images.data.items.every(scene => scene.items.length === 0) && <p>Nenhuma imagem importada.</p>}
     </Section>
-    <Section title="Voice Masters" state={voices}>
+    <Section title="Voice Masters" state={voices} hidden={!!stage && stage !== 'voice'}>
       <VoicePanel campaignId={campaignId} detail={detail} voices={voices} jobs={jobs} />
       {voices.data?.items.map(voice => <article key={voice.voiceMasterId}><h3>{voice.voiceMasterId}</h3><Facts entries={[
         ['Copy', `${voice.copyMasterId} · v${voice.copyMasterVersion}`], ['Provider', voice.provider], ['Status', statusLabel(voice.status)], ['WAV processado', voice.processedAudioPath],
@@ -130,7 +145,7 @@ export function CampaignDetailPanel({ campaignId }: { campaignId: string }) {
       ]} /></article>)}
       {voices.data?.items.length === 0 && <p>Nenhum Voice Master.</p>}
     </Section>
-    <Section title="HeyGen" state={renders}>
+    <Section title="HeyGen" state={renders} hidden={!!stage && stage !== 'videos'}>
       <HeyGenPanel campaignId={campaignId} detail={detail} status={status} images={images} voices={voices} jobs={jobs} renders={renders} />
       {renders.data?.items.map(render => <article key={render.renderId}><h3>{render.renderId}</h3><Facts entries={[
         ['Status', statusLabel(render.status)], ['Cena', render.sceneVariantId], ['Imagem', render.imageCandidateId], ['Voz', render.voiceMasterId],
@@ -146,7 +161,13 @@ export function CampaignDetailPanel({ campaignId }: { campaignId: string }) {
       <ErrorCode code={render.errorCode} /></article>)}
       {renders.data?.items.length === 0 && <p>Nenhum render HeyGen.</p>}
     </Section>
-    <section aria-label="Edição e variantes"><h2>Edição e variantes</h2><EditingPanel campaignId={campaignId} renders={renders}/></section>
+    <section aria-label="Edição e variantes" hidden={!!stage && stage !== 'editing'}><h2>Edição e variantes</h2>
+      <EditingPanel campaignId={campaignId} renders={renders} onRenderPlanChange={stage ? setFinalizationPlan : undefined}/>
+    </section>
+    {stage && <section aria-label="Finalização" hidden={stage !== 'finalization'}><h2>Finalização</h2>
+      <FinalizationPanel campaignId={campaignId} active={stage === 'finalization'} preferredPlan={finalizationPlan}/>
+    </section>}
+    <div hidden={!!stage && stage !== 'overview'}>
     <Section title="Jobs" state={jobs}>
       {jobs.data?.items.map(job => <article key={job.jobId}><button onClick={() => setSelectedJob(job.jobId)}>Ver Job {job.jobId}</button>
         <p>{job.jobType} · {statusLabel(job.status)} · Tentativas {job.attemptCount}/{job.maxAttempts}</p>
@@ -164,6 +185,7 @@ export function CampaignDetailPanel({ campaignId }: { campaignId: string }) {
     <WorkerControls campaignId={campaignId} worker={worker}
       connected={Boolean(status.data && jobs.data && worker.data && !status.error && !jobs.error && !worker.error)}
       onRefresh={() => { status.refresh(); jobs.refresh(); }} />
+    </div>
   </>;
 }
 

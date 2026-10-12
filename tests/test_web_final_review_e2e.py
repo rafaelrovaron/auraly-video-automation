@@ -37,7 +37,8 @@ def prepare(servers: PanelServers, page: Page) -> tuple[Locator, dict[str, str],
     validate(page, panel)
     save(page, panel)
     plan = json.loads(next(servers.settings.work_root.rglob('plan.json')).read_bytes())
-    render = panel.get_by_role('region', name='Render final', exact=True)
+    page.get_by_role('link', name='Finalização', exact=True).click()
+    render = page.get_by_role('region', name='Render final', exact=True)
     render.get_by_role('button', name='Renderizar', exact=True).click()
     expect(render.get_by_text('Render concluído', exact=True)).to_be_visible(timeout=60000)
     view = latest(servers, plan['videoId'], plan['planHash'])
@@ -64,7 +65,7 @@ def decide(page: Page, review: Locator, decision: str, comment: str | None = Non
 
 def reload_render(page: Page, render: Locator, plan: dict[str, str], job_id: str) -> None:
     page.reload()
-    page.get_by_label('Consultar plano salvo', exact=True).select_option(f"{plan['videoId']}/{plan['planHash']}")
+    page.get_by_role('combobox', name='Plano salvo para finalizar', exact=True).select_option(f"{plan['videoId']}/{plan['planHash']}")
     render.get_by_label('Execução de render', exact=True).select_option(job_id)
     expect(render.get_by_text('Render concluído', exact=True)).to_be_visible()
 

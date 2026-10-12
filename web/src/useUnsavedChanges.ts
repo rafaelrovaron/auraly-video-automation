@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useRef } from 'react';
 
+function sameCampaign(from: string, to: string): boolean {
+  const campaign = (hash: string) => /^#\/campaigns\/([a-z0-9]+(?:-[a-z0-9]+)*)(?:\/[^/]+)?$/.exec(hash)?.[1];
+  const current = campaign(from);
+  return current !== undefined && current === campaign(to);
+}
+
 export function useUnsavedChanges(dirty: boolean): () => void {
   const unsaved = useRef(dirty);
   unsaved.current = dirty;
@@ -13,7 +19,8 @@ export function useUnsavedChanges(dirty: boolean): () => void {
     const click = (event: MouseEvent) => {
       if (!unsaved.current || event.defaultPrevented || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
       const link = event.target instanceof Element ? event.target.closest('a') : null;
-      if (!link || link.target || !link.getAttribute('href')?.startsWith('#') || link.hash === window.location.hash) return;
+      if (!link || link.target || !link.getAttribute('href')?.startsWith('#') || link.hash === window.location.hash
+        || sameCampaign(window.location.hash, link.hash)) return;
       if (!window.confirm(warning)) event.preventDefault();
       else queueMicrotask(() => {
         if (!event.defaultPrevented && window.location.hash === link.hash) {
@@ -23,6 +30,7 @@ export function useUnsavedChanges(dirty: boolean): () => void {
     };
     const hash = (event: Event) => {
       if (window.location.hash === acceptedHash) return;
+      if (sameCampaign(acceptedHash, window.location.hash)) { acceptedHash = window.location.hash; return; }
       if (unsaved.current && !window.confirm(warning)) {
         window.history.replaceState(null, '', acceptedHash || '#/campaigns');
         event.stopImmediatePropagation();

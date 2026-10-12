@@ -33,11 +33,15 @@ def test_panel_read_navigation_is_non_mutating(panel_servers: PanelServers, pane
     panel_page.goto(panel_servers.ui_url)
     panel_page.get_by_role('link', name='campaign-one', exact=True).click()
     expect(panel_page.get_by_role('heading', name='campaign-one', exact=True)).to_be_visible()
+    panel_page.get_by_role('link', name='Voz', exact=True).click()
     voices = panel_page.get_by_role('region', name='Voice Masters')
     expect(voices.get_by_text('elevenlabs', exact=True)).to_be_visible()
+    panel_page.get_by_role('link', name='Vídeos', exact=True).click()
     expect(panel_page.get_by_role('region', name='HeyGen').get_by_text('Disponível', exact=True).first).to_be_visible()
+    panel_page.get_by_role('link', name='Imagens', exact=True).click()
     expect(panel_page.get_by_role('region', name='Imagens').get_by_text('png', exact=True).first).to_be_visible()
     panel_page.reload()
+    panel_page.get_by_role('link', name='Visão geral', exact=True).click()
     expect(panel_page.get_by_role('button', name='Iniciar worker', exact=True)).to_be_enabled()
     # Wait for a second real polling response, not an arbitrary sleep.
     with panel_page.expect_response(lambda response: response.url.endswith('/status')):
@@ -104,6 +108,11 @@ def test_proxy_preserves_origin_boundary(panel_servers: PanelServers, origin: st
 def test_panel_accessible_at_narrow_width(panel_servers: PanelServers, panel_page: Page) -> None:
     panel_page.set_viewport_size({'width': 390, 'height': 844})
     panel_page.goto(panel_servers.ui_url + '#/campaigns/campaign-one')
+    selector = panel_page.get_by_role('combobox', name='Etapa da campanha', exact=True)
+    expect(selector).to_be_visible()
+    selector.select_option('images')
+    expect(panel_page.get_by_role('region', name='Imagens', exact=True)).to_be_visible()
+    selector.select_option('overview')
     button = panel_page.get_by_role('button', name='Iniciar worker', exact=True)
     expect(button).to_be_enabled()
     button.focus()

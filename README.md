@@ -229,9 +229,11 @@ Erro de integridade remove aprovação acionável; repare a evidência antes de 
 
 ### Render pela interface (D5A.2)
 
-Na seção **Edição e variantes**, valide e salve o plano, ou use **Consultar plano salvo**.
-O bloco **Render final** mostra videoId/planHash do alvo confirmado. Alterar o rascunho
-ou a origem do preview não altera esse alvo; selecionar outra fonte/profile o limpa.
+Na aba **Edição**, valide e salve o plano, ou use **Consultar plano salvo**.
+Abra a aba **Finalização** para escolher uma configuração salva e renderizar; ela também
+consulta planos após recarregar a página. Um novo plano salvo na Edição fica disponível
+na Finalização sem refazer voz, imagem ou HeyGen. Alterar o rascunho ou a origem do
+preview não altera o alvo confirmado.
 
 **Renderizar** enfileira uma execução e inicia somente `editing_render` nesta campanha.
 Se outro worker estiver ocupado, o Job permanece na fila: use **Iniciar render pendente**
@@ -496,6 +498,10 @@ npm run ui:dev
 
 Abra `http://127.0.0.1:5173`. Configure `--database`, `--project-root` e `--work-root`
 no comando da API quando necessário; o painel consulta o mesmo storage da CLI.
+Na campanha, as etapas aparecem como links no desktop e como seletor no celular:
+**Visão geral → Roteiro → Imagens → Voz → Vídeos → Edição → Finalização**.
+O link antigo `#/campaigns/ID` abre Visão geral. Trocar de etapa mantém os rascunhos
+na sessão; ao sair da campanha ou recarregar, alterações não salvas ainda exigem confirmação.
 As portas 8000/5173 são fixas nesta etapa. O proxy preserva Host/Origin loopback;
 não é necessário habilitar CORS nem expor a API na rede.
 

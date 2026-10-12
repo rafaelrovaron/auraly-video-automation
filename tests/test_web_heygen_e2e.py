@@ -57,7 +57,7 @@ def panel_heygen_provider(monkeypatch: pytest.MonkeyPatch, mp4: bytes, tmp_path:
 
 def prepare_assets(servers: PanelServers, page: Page) -> None:
     servers.release.set()
-    page.goto(servers.ui_url + '#/campaigns/campaign-one')
+    page.goto(servers.ui_url + '#/campaigns/campaign-one/videos')
     prepare = page.get_by_role('button', name='Preparar assets HeyGen', exact=True)
     expect(prepare).to_be_enabled()
     prepare.click()
@@ -162,7 +162,7 @@ def test_heygen_panel_reconciliation_never_duplicates_dispatch(
 
 
 def test_lost_heygen_response_does_not_repost(panel_servers: PanelServers, panel_page: Page) -> None:
-    panel_page.goto(panel_servers.ui_url + '#/campaigns/campaign-one')
+    panel_page.goto(panel_servers.ui_url + '#/campaigns/campaign-one/videos')
     posts: list[str] = []
 
     def lost(route: Route) -> None:
@@ -190,7 +190,7 @@ def test_lost_heygen_response_does_not_repost(panel_servers: PanelServers, panel
 @pytest.mark.parametrize('width', [320, 390])
 def test_heygen_panel_narrow_width(panel_servers: PanelServers, panel_page: Page, width: int) -> None:
     panel_page.set_viewport_size({'width': width, 'height': 844})
-    panel_page.goto(panel_servers.ui_url + '#/campaigns/campaign-one')
+    panel_page.goto(panel_servers.ui_url + '#/campaigns/campaign-one/videos')
     expect(panel_page.get_by_role('button', name='Preparar assets HeyGen', exact=True)).to_be_enabled()
     assert panel_page.evaluate('document.documentElement.scrollWidth <= window.innerWidth'), panel_page.evaluate(
         'Array.from(document.querySelectorAll("select,input,button")).filter(el => el.getBoundingClientRect().right > innerWidth).map(el => ({tag:el.tagName,label:el.closest("label")?.textContent}))')

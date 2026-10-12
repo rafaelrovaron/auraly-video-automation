@@ -13,7 +13,7 @@ import {useUnsavedChanges} from './useUnsavedChanges';
 import {EditPreview,previewSettings} from './EditPreview';
 import {RenderPanel} from './RenderPanel';
 
-type Props={campaignId:string;renders:RemoteState<Items<HeyGenRenderView>>};
+type Props={campaignId:string;renders:RemoteState<Items<HeyGenRenderView>>;onRenderPlanChange?:(plan:EditBatchPlan|null)=>void};
 type Variant={row:number;key:string;label:string;draft:OverrideDraft};
 type Validated={request:EditBatchRequest;plan:EditBatchPlan;render:HeyGenRenderView};
 type Submission={request:EditBatchRequest;render:HeyGenRenderView;plan:EditBatchPlan|null;persist:boolean;jobId?:string};
@@ -29,7 +29,7 @@ function PlanDetails({plan}:{plan:EditBatchPlan}){
   </div>;
 }
 export function EditingPanel(props:Props){return <EditorialFlow key={props.campaignId} {...props}/>;}
-function EditorialFlow({campaignId,renders}:Props){
+function EditorialFlow({campaignId,renders,onRenderPlanChange}:Props){
   const [profiles,setProfiles]=useState<ProfileView[]>([]),[plans,setPlans]=useState<PlanSummary[]>([]);
   const [listError,setListError]=useState<string|null>(null),[listsLoading,setListsLoading]=useState(true);
   const [renderId,setRenderId]=useState(''),[profileKey,setProfileKey]=useState(''),[profile,setProfile]=useState<ProfileView|null>(null);
@@ -40,6 +40,7 @@ function EditorialFlow({campaignId,renders}:Props){
   const [unknown,setUnknown]=useState(false),[notice,setNotice]=useState<string|null>(null),[error,setError]=useState<string|null>(null),[saved,setSaved]=useState<EditBatchPlan|null>(null);
   const [view,setView]=useState<EditBatchPlan|null>(null),[viewLoading,setViewLoading]=useState(false);
   const [renderPlan,setRenderPlan]=useState<EditBatchPlan|null>(null);
+  useEffect(()=>{onRenderPlanChange?.(renderPlan);},[onRenderPlanChange,renderPlan]);
   const [previewOrigin,setPreviewOrigin]=useState('draft'),[previewRow,setPreviewRow]=useState(1),[previewKey,setPreviewKey]=useState('a');
   const alive=useRef(true),generation=useRef(0),listGeneration=useRef(0),profileGeneration=useRef(0),viewGeneration=useRef(0),nextRow=useRef(2);
   const lock=useRef(false),sent=useRef<Submission|null>(null),timer=useRef<ReturnType<typeof setTimeout>|undefined>(undefined),queryController=useRef<AbortController|null>(null);
@@ -216,6 +217,6 @@ function EditorialFlow({campaignId,renders}:Props){
     <label>Consultar plano salvo<select aria-label="Consultar plano salvo" onChange={e=>{void inspect(e.target.value);}} defaultValue=""><option value="">Selecione</option>
       {plans.map(p=><option key={`${p.videoId}/${p.planHash}`} value={`${p.videoId}/${p.planHash}`}>{p.videoId} · {p.outputCount} saídas · {p.planHash}</option>)}</select></label>
     {viewLoading&&<p role="status">Consultando plano salvo…</p>}{view&&<PlanDetails plan={view}/>}
-    <RenderPanel campaignId={campaignId} plan={renderPlan}/>
+    {!onRenderPlanChange&&<RenderPanel campaignId={campaignId} plan={renderPlan}/>}
   </div>;
 }

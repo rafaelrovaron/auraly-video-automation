@@ -39,18 +39,36 @@ def create_campaign(servers: PanelServers, page: Page, scene_count: int) -> str:
             form.get_by_label(f'{label} {index}', exact=True).fill(value)
     form.get_by_role('button', name='Criar campanha com copy aprovada').click()
     expect(page.get_by_role('heading', name=campaign_id, exact=True)).to_be_visible()
+    page.get_by_role('link', name='Roteiro', exact=True).click()
     return campaign_id
 
 
-def start_local_worker(page: Page) -> None:
+def start_local_worker(page: Page, kind: str | None = None) -> None:
+    stage = page.locator('.campaign-stage-picker select').input_value()
+    mobile = bool(page.viewport_size and page.viewport_size['width'] <= 700)
+    if stage != 'overview':
+        if mobile:
+            page.get_by_role('combobox', name='Etapa da campanha', exact=True).select_option('overview')
+        else:
+            page.get_by_role('link', name='Visão geral', exact=True).click()
+    if kind is not None:
+        page.get_by_role('combobox', name='Tipo de worker', exact=True).select_option(kind)
     start = page.get_by_role('button', name='Iniciar worker', exact=True)
     expect(start).to_be_enabled(timeout=15000)
     start.click()
     page.get_by_role('button', name='Confirmar início', exact=True).click()
+    if stage != 'overview':
+        names = {'script': 'Roteiro', 'images': 'Imagens', 'voice': 'Voz', 'videos': 'Vídeos',
+                 'editing': 'Edição', 'finalization': 'Finalização'}
+        if mobile:
+            page.get_by_role('combobox', name='Etapa da campanha', exact=True).select_option(stage)
+        else:
+            page.get_by_role('link', name=names[stage], exact=True).click()
 
 
 def prepare_and_validate(servers: PanelServers, page: Page, count: int) -> list[tuple[Path, bytes]]:
     servers.release.set()
+    page.get_by_role('link', name='Imagens', exact=True).click()
     panel = page.get_by_role('region', name='Importação manual de imagens')
     panel.get_by_label('Pasta de importação (relativa ao work root)', exact=True).fill('browser inbox')
     panel.get_by_role('button', name='Preparar pasta', exact=True).click()

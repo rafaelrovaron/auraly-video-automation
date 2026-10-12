@@ -57,6 +57,13 @@ it('opens a direct hash after reload', () => {
   expect(screen.getByRole('heading', { name: 'campaign-one' })).toBeTruthy();
 });
 
+it('routes a campaign stage directly while preserving the legacy overview link', () => {
+  expect(parseRoute('#/campaigns/campaign-one')).toEqual({ page: 'detail', campaignId: 'campaign-one', stage: 'overview' });
+  expect(parseRoute('#/campaigns/campaign-one/images')).toEqual({ page: 'detail', campaignId: 'campaign-one', stage: 'images' });
+  expect(parseRoute('#/campaigns/campaign-one/finalization')).toEqual({ page: 'detail', campaignId: 'campaign-one', stage: 'finalization' });
+  expect(parseRoute('#/campaigns/campaign-one/other')).toEqual({ page: 'invalid' });
+});
+
 it('renders server text as text rather than HTML', async () => {
   vi.stubGlobal('fetch', async () => Response.json({ items: [{ ...campaign, character: '<img src=x onerror=alert(1)>' }] }));
   const { container } = render(<App />);

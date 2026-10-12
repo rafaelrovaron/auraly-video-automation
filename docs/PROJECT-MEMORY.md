@@ -10,7 +10,8 @@ do produto planejado para impedir que roadmap seja confundido com capacidade exi
 
 Feedback explícito de Rafael: UI/UX pouco amigável, muitos hashes/IDs expostos,
 necessidade de separar etapas em abas e funcionar bem no celular. O próximo recorte
-planejado passa a ser D4C, antes de concluir D6. D4C ainda não está implementado.
+planejado passa a ser D4C, antes de concluir D6. D4C.1 foi implementado na branch
+`feat/d4c1-navigation`; D4C.2–4 seguem planejados.
 
 Direção: nomes/contexto legíveis, dados técnicos recolhidos, navegação por etapa,
 formulários guiados e mobile desde o primeiro slice. Preservar IDs/contratos,
@@ -18,6 +19,12 @@ aprovações, idempotência e reuso de assets; trocar de aba não perde rascunho
 Plano e critérios: `docs/superpowers/plans/2026-10-12-d4c-usability-roadmap.md`.
 Ordem: D4C.1 navegação → D4C.2 nomes → D4C.3 operação/assets → D4C.4 validação.
 Este registro substitui indicações anteriores de D6 como próximo recorte imediato.
+
+Checkpoint D4C.1 (branch, ainda sem merge/push): campanha separada em Visão geral,
+Roteiro, Imagens, Voz, Vídeos, Edição e Finalização; navegação compacta no mobile,
+sem perder rascunhos ao alternar etapas. Finalização recupera o plano salvo para
+render/revisão. Verificação focada: 424 testes frontend, build, mypy dos testes,
+Ruff/mypy de produção e 41 E2E web passaram; gate completo de integração pendente.
 
 D5B.3 e o ajuste de host remoto foram integrados/enviados a main no merge `c8c3cab`.
 O resultado de CI desse merge não foi reconsultado neste planejamento; os checkpoints

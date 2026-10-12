@@ -8,7 +8,8 @@ define como chegar a ele sem transformar cada Goal em um projeto grande demais.
 **Prioridade atual (2026-10-12): D4C — Usabilidade, etapas e mobile**, antes de concluir
 o piloto D6. O feedback de uso apontou excesso de IDs/hashes, página extensa e dificuldade
 de operação no celular. [Plano de execução por slices](superpowers/plans/2026-10-12-d4c-usability-roadmap.md).
-É trabalho `PLANNED`, sem mudança de capacidade entregue ou nova verificação de provider.
+D4C.1 está implementado na branch `feat/d4c1-navigation`; os demais slices seguem
+`PLANNED`. Ainda não houve merge, push ou nova verificação de provider.
 
 ## 1. Regra de execução
 
@@ -79,7 +80,7 @@ D5B.1 Final QC backend/CLI                    IMPLEMENTED, LOCAL_VERIFIED (Windo
 D5B.2A Human Review backend/CLI              IMPLEMENTED, LOCAL_VERIFIED (Windows; main)
 D5B.2B QC / Human Review API/UI              IMPLEMENTED, LOCAL_VERIFIED (Windows; main)
 D5B.3 Approved Master Delivery              IMPLEMENTED, LOCAL_VERIFIED (Windows; main)
-D4C.1 Campaign Stage Navigation             PLANNED — próxima implementação
+D4C.1 Campaign Stage Navigation             IMPLEMENTED (branch; gate completo pendente)
 D4C.2 Human-readable Names & Details        PLANNED
 D4C.3 Guided Operations & Asset Selection   PLANNED
 D4C.4 Mobile Usability Verification         PLANNED

@@ -1,17 +1,21 @@
 import { useEffect, useState } from 'react';
 import { CampaignDetailPanel, CampaignList } from './CampaignPanel';
 import { ProfilePanel } from './ProfilePanel';
+import { campaignStages } from './campaignStages';
+import type { CampaignStage } from './campaignStages';
 
-type Route = { page: 'list' } | { page: 'detail'; campaignId: string } | { page: 'profiles' } | { page: 'invalid' };
+type Route = { page: 'list' } | { page: 'detail'; campaignId: string; stage: CampaignStage } | { page: 'profiles' } | { page: 'invalid' };
 
 export function parseRoute(hash: string): Route {
   if (hash === '' || hash === '#/campaigns') return { page: 'list' };
   if (hash === '#/profiles') return { page: 'profiles' };
-  const match = /^#\/campaigns\/([^/]+)$/.exec(hash);
+  const match = /^#\/campaigns\/([^/]+)(?:\/([^/]+))?$/.exec(hash);
   if (match) {
     try {
       const campaignId = decodeURIComponent(match[1]);
-      if (/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(campaignId)) return { page: 'detail', campaignId };
+      const stage = match[2] ?? 'overview';
+      if (/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(campaignId)
+        && campaignStages.some(([slug]) => slug === stage)) return { page: 'detail', campaignId, stage: stage as CampaignStage };
     } catch { /* malformed hashes never reach the API */ }
   }
   return { page: 'invalid' };
@@ -29,7 +33,7 @@ export function App() {
       <nav aria-label="Navegação principal"><a href="#/campaigns">Campanhas</a> · <a href="#/profiles">Profiles de edição</a></nav></header>
     <main id="main">
       {route.page === 'profiles' ? <ProfilePanel /> : route.page === 'list' ? <CampaignList /> : route.page === 'detail' ?
-        <CampaignDetailPanel key={route.campaignId} campaignId={route.campaignId} />
+        <CampaignDetailPanel key={route.campaignId} campaignId={route.campaignId} stage={route.stage} />
         : <><h1>Rota inválida</h1><a href="#/campaigns">Voltar às campanhas</a></>}
     </main>
   </>;

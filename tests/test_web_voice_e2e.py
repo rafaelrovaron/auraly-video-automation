@@ -35,14 +35,14 @@ def save_budget(page: Page) -> None:
 
 
 def start_kind(page: Page, kind: str) -> None:
-    page.get_by_role('combobox', name='Tipo de worker', exact=True).select_option(kind)
-    start_local_worker(page)
+    start_local_worker(page, kind)
 
 
 def test_generate_voice_from_new_campaign_without_auto_start(
     panel_servers: PanelServers, panel_page: Page, panel_speech_provider: FakeElevenLabs,
 ) -> None:
     campaign_id = create_campaign(panel_servers, panel_page, 1)
+    panel_page.get_by_role('link', name='Voz', exact=True).click()
     commands = panel_servers.app.state.commands
     assert commands._speech_provider is panel_speech_provider, 'Never start a voice worker without the fake provider.'
     before_jobs = panel_servers.app.state.queries.list_jobs(campaign_id)
@@ -78,6 +78,7 @@ def test_import_voice_two_workers_then_review_preserves_source(
     panel_servers: PanelServers, panel_page: Page, panel_speech_provider: FakeElevenLabs,
 ) -> None:
     campaign_id = create_campaign(panel_servers, panel_page, 1)
+    panel_page.get_by_role('link', name='Voz', exact=True).click()
     assert panel_servers.app.state.commands._transcriber is not None, 'Never run a real transcriber in this suite.'
     source = panel_servers.settings.project_root / 'voice-source.wav'
     make_audio(source)
@@ -111,6 +112,7 @@ def test_import_voice_two_workers_then_review_preserves_source(
 
 def test_budget_saved_with_response_503_is_observed_without_repost(panel_servers: PanelServers, panel_page: Page) -> None:
     campaign_id = create_campaign(panel_servers, panel_page, 1)
+    panel_page.get_by_role('link', name='Voz', exact=True).click()
     posts: list[str] = []
 
     def lost_response(route: Route) -> None:
