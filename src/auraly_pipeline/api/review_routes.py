@@ -7,10 +7,22 @@ from auraly_pipeline.api.action_routes import Commands, matching
 from auraly_pipeline.api.app import CampaignId, EditId, JobId
 from auraly_pipeline.api.review_contracts import FinalReviewState
 from auraly_pipeline.editing.review_domain import HumanReviewRecord, HumanReviewRequest
+from auraly_pipeline.editing.delivery_domain import DeliveryRecord, DeliveryRequest, DeliveryState
 
 
 def register_review_routes(app: FastAPI) -> None:
     prefix = "/api/v1/campaigns/{campaignId}/editing/renders/{jobId}/outputs/{outputVariantId}"
+
+    @app.get(prefix + "/delivery")
+    def delivery_state(campaignId: CampaignId, jobId: JobId, outputVariantId: EditId,
+                       commands: Commands, response: Response) -> DeliveryState:
+        response.headers["Cache-Control"] = "no-store"
+        return commands.editorial_reviews.delivery_state(campaignId, jobId, outputVariantId)
+
+    @app.post(prefix + "/delivery")
+    def delivery(campaignId: CampaignId, jobId: JobId, outputVariantId: EditId,
+                 body: DeliveryRequest, commands: Commands) -> DeliveryRecord:
+        return commands.editorial_reviews.delivery(campaignId, jobId, outputVariantId, body)
 
     @app.get(prefix + "/review-state")
     def state(campaignId: CampaignId, jobId: JobId, outputVariantId: EditId,

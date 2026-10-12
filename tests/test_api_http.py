@@ -47,7 +47,7 @@ def test_all_spec_get_routes_and_openapi(tmp_path: Path, mp4: bytes) -> None:
         assert client.get("/api/v1/editing/profiles/plain/1").status_code == 200
         assert client.get("/docs").status_code == 200
         schema = client.get("/openapi.json").json()
-        assert sum("get" in path for path in schema["paths"].values()) == 21
+        assert sum("get" in path for path in schema["paths"].values()) == 22
         for name, path in schema["paths"].items():
             if "get" not in path:
                 continue

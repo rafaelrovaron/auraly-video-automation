@@ -35,6 +35,7 @@ from auraly_pipeline.api.render_commands import RenderCommands
 from auraly_pipeline.api.review_commands import ReviewCommands
 from auraly_pipeline.editing.qc_service import QcService
 from auraly_pipeline.editing.review_service import HumanReviewService
+from auraly_pipeline.editing.delivery_service import DeliveryService
 from auraly_pipeline.editing.domain import EditingError, EditingArtifactNotFoundError, EditProfile, relative_path
 from auraly_pipeline.editing.resolver import profile_hash
 from auraly_pipeline.editing.service import validate_editing_path, EditingService
@@ -99,7 +100,8 @@ class ApiCommands:
         self.editorial_reviews = ReviewCommands(renders=self.editorial_renders,
             qc=QcService(project_root=settings.project_root, work_root=settings.work_root),
             reviews=HumanReviewService(project_root=settings.project_root, work_root=settings.work_root),
-            jobs=self.jobs, get_operation=self.get_operation)
+            jobs=self.jobs, get_operation=self.get_operation,
+            deliveries=DeliveryService(project_root=settings.project_root, work_root=settings.work_root))
         self.voices = VoiceMasterService(
             engine, work_root=settings.work_root, provider=speech_provider, transcriber=transcriber,
         )
