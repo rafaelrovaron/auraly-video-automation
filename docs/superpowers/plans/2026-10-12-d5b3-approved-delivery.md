@@ -37,18 +37,18 @@ validate_editing_path/publish_editing_json. Produces DeliveryRequest/Record/Stat
 DeliveryService(*, project_root:Path, work_root:Path, delivery_root:Path|None=None);
 deliver(request:DeliveryRequest)->DeliveryRecord; get(request:DeliveryRequest)->DeliveryRecord|None.
 
-- [ ] Write tests: approved_copy_replay (source/destination SHA equal; original UTC replay),
+- [x] Write tests: approved_copy_replay (source/destination SHA equal; original UTC replay),
   unapproved_no_writes (missing/rejected), corrupt_destination_no_overwrite,
   malformed_receipt_not_absence, equal_orphan_recovery, conflicting_orphan_preserved,
   stale_source_review_qc, symlink_no_follow, concurrent_original_winner,
   failed_publication_cleanup, evidence_changed_during_copy, root_boundaries.
-- [ ] Run `rtk proxy uv run pytest tests/test_delivery_service.py -q`.
+- [x] Run `rtk proxy uv run pytest tests/test_delivery_service.py -q`.
   Expected: missing module/service RED; fix fixture errors if any before implementation.
-- [ ] Implement exact signatures/contracts above and spec root/copy/publication rules.
-- [ ] Run `rtk proxy uv run python scripts/verify.py fast --pytest tests/test_delivery_service.py`.
+- [x] Implement exact signatures/contracts above and spec root/copy/publication rules.
+- [x] Run `rtk proxy uv run python scripts/verify.py fast --pytest tests/test_delivery_service.py`.
   Expected: 3/3 PASS.
-- [ ] Commit feat(delivery): copy verified approved masters without overwrite.
-- [ ] task-done uses the same fast command.
+- [x] Commit feat(delivery): copy verified approved masters without overwrite.
+- [x] task-done uses the same fast command.
 
 ### Task 2: HTTP/CLI and generated schemas
 
@@ -60,22 +60,22 @@ test_verify_harness.py; schemas/delivery-{request,record,state}.schema.json.
 POST DeliveryRecord at existing output prefix + /delivery, CLI edit deliver and
 edit delivery-get --request JSON [--delivery-root], same roots flags as review.
 
-- [ ] Write tests HTTP approved delivery/reload/replay, foreign body, unknown field,
+- [x] Write tests HTTP approved delivery/reload/replay, foreign body, unknown field,
   no approval and corrupted destination sanitized; CLI deliver/get/replay/invalid,
   env override, schemas validate real records. Route inventory now POST25/GET22.
-- [ ] Run `rtk proxy uv run pytest tests/test_api_delivery.py tests/test_delivery_cli.py -q`.
+- [x] Run `rtk proxy uv run pytest tests/test_api_delivery.py tests/test_delivery_cli.py -q`.
   Expected RED missing routes/CLI/schema.
-- [ ] Compose DeliveryService alongside reviews in ApiCommands. Add public
+- [x] Compose DeliveryService alongside reviews in ApiCommands. Add public
   ReviewCommands.delivery(campaign_id,job_id,output_variant_id,request)->DeliveryRecord
   and delivery_state(campaign_id,job_id,output_variant_id)->DeliveryState.
   Derive current approved review for GET; body must match exact reviewKey/consumer.
   Map no approval to operation_not_allowed, integrity errors to artifact_invalid.
   Export three delivery schemas, add to full generated registry; update inventory
   and registry expectations. No changing existing FinalReviewState contract.
-- [ ] Run `rtk proxy uv run python scripts/verify.py fast --pytest tests/test_api_delivery.py tests/test_delivery_cli.py tests/test_api_http.py tests/test_api_actions_http.py tests/test_verify_harness.py`.
+- [x] Run `rtk proxy uv run python scripts/verify.py fast --pytest tests/test_api_delivery.py tests/test_delivery_cli.py tests/test_api_http.py tests/test_api_actions_http.py tests/test_verify_harness.py`.
   Expected 3/3 PASS; schemas generated and drift-free.
-- [ ] Commit feat(delivery): expose local delivery through API and CLI.
-- [ ] task-done same fast command.
+- [x] Commit feat(delivery): expose local delivery through API and CLI.
+- [x] task-done same fast command.
 
 ### Task 3: Explicit local delivery UI
 
@@ -84,19 +84,19 @@ Modify web/src/ReviewPanel.tsx and test mocks only as needed.
 **Interfaces:** consumes Task2 typed HTTP. DeliveryPanel({target:ReviewTarget,
 review:HumanReviewRecord}); only mounted for approved review.
 
-- [ ] Write tests adapter validation (context/reviewKey/hash/path/time/schema),
+- [x] Write tests adapter validation (context/reviewKey/hash/path/time/schema),
   no automatic POST, approved copy explicit, original GET reload, unknown POST
   consulta-before-retry, corruption clears success and blocks sends, late GET
   cannot undo POST and target change/unmount aborts.
-- [ ] Run `rtk proxy npm --prefix web test -- deliveryApi.test.ts DeliveryPanel.test.tsx`.
+- [x] Run `rtk proxy npm --prefix web test -- deliveryApi.test.ts DeliveryPanel.test.tsx`.
   Expected RED missing imports.
-- [ ] Implement small panel, fixed sanitized notices, relative path/UTC/SHA,
+- [x] Implement small panel, fixed sanitized notices, relative path/UTC/SHA,
   configuration instructions work/deliveries / AURALY_DELIVERY_ROOT, no cloud claim.
   Reuse api.read/post; lock/ref/abort/version, no automatic retry/polling.
-- [ ] Run `rtk proxy npm --prefix web test` and
+- [x] Run `rtk proxy npm --prefix web test` and
   `rtk proxy npm --prefix web run build`; Expected all PASS.
-- [ ] Commit feat(delivery): deliver approved masters from local review panel.
-- [ ] task-done UI tests command.
+- [x] Commit feat(delivery): deliver approved masters from local review panel.
+- [x] task-done UI tests command.
 
 ### Task 4: End-to-end delivery and readiness
 
@@ -104,18 +104,18 @@ review:HumanReviewRecord}); only mounted for approved review.
 README, PROJECT-MEMORY, GOAL-ROADMAP, PRD; evidence docs/superpowers/2026-10-12-d5b3-verification.md.
 **Interfaces:** consumes Task3 panel and Task2 configured service.
 
-- [ ] Write browser E2E using existing synthetic review fixtures: prepare/render/QC/
+- [x] Write browser E2E using existing synthetic review fixtures: prepare/render/QC/
   approve/deliver, destination hash matches immutable master, reload original receipt,
   tamper destination => no delivered badge/retry; other output not delivered;
   upstream hashes and provider events/budget unchanged.
-- [ ] Run `rtk proxy uv run pytest tests/test_web_delivery_e2e.py -q`.
+- [x] Run `rtk proxy uv run pytest tests/test_web_delivery_e2e.py -q`.
   Expected integration PASS (UI already shipped by Task3); any failure gets focused
   RED→GREEN, never relax production approval/integrity checks.
-- [ ] Add service/API/CLI/E2E tests once each to Windows CI. Document configuration,
+- [x] Add service/API/CLI/E2E tests once each to Windows CI. Document configuration,
   output tree, limitations, no overwrite/orphan recovery and implemented vs planned.
-- [ ] Run `rtk proxy uv run python scripts/verify.py full`. Expected 19/19 PASS.
-- [ ] Commit test(delivery): verify approved local delivery end to end.
-- [ ] task-done E2E command; full gate already run/read.
-- [ ] Dispatch one fresh whole-branch reviewer; fix Important/Critical in one TDD
+- [x] Run `rtk proxy uv run python scripts/verify.py full`. Expected 19/19 PASS.
+- [x] Commit test(delivery): verify approved local delivery end to end.
+- [x] task-done E2E command; full gate already run/read.
+- [x] Dispatch one fresh whole-branch reviewer; fix Important/Critical in one TDD
   pass with full gate again, ledger/defer Minor; no re-review.
-- [ ] Commit evidence, preserve logs and keep feature branch; no merge/push.
+- [x] Commit evidence, preserve logs and keep feature branch; no merge/push.
