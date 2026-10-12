@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+from datetime import timedelta
 import hashlib
 from pathlib import Path
 from typing import Any
@@ -34,7 +35,7 @@ def test_approved_copy_replay(review_case: Any, monkeypatch: pytest.MonkeyPatch)
     assert record.master_sha256 == hashlib.sha256(before).hexdigest()
     assert record.path == f"{request.campaign_id}/{request.output_variant_id}/{request.review_key}/master.mp4"
     original = destination.with_name("delivery.json").read_bytes()
-    assert record.delivered_at.utcoffset().total_seconds() == 0
+    assert record.delivered_at.utcoffset() == timedelta(0)
     assert service.deliver(request) == record == service.get(request)
     assert destination.with_name("delivery.json").read_bytes() == original
 
