@@ -54,6 +54,13 @@ def valid_campaign_data() -> dict:
     }
 
 
+@pytest.mark.parametrize("name", ["   ", "A\nB", "x" * 121])
+def test_campaign_display_name_rejects_blank_multiline_or_oversized(name: str) -> None:
+    data = valid_campaign_data() | {"displayName": name}
+    with pytest.raises(ValidationError):
+        CampaignCreate.model_validate(data)
+
+
 def test_copy_master_spoken_text_excludes_visual_headline() -> None:
     content = CopyMasterContent(
         source_text="Original canonical source",

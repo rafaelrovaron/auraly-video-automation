@@ -41,6 +41,21 @@ def test_campaign_persists_across_application_restart(tmp_path: Path) -> None:
     }
 
 
+def test_campaign_display_name_survives_restart_and_legacy_falls_back(tmp_path: Path) -> None:
+    database_path = tmp_path / "auraly.db"
+    service = CampaignService.for_database(database_path)
+    legacy = service.create_campaign(CampaignCreate.model_validate(valid_campaign_data()))
+    assert legacy.display_name is None
+    named = service.rename_campaign(legacy.campaign_id, "  Piloto Soulmate  ")
+    assert named.display_name == "Piloto Soulmate"
+    service.close()
+
+    restarted = CampaignService.for_database(database_path)
+    assert restarted.get_campaign(legacy.campaign_id).display_name == "Piloto Soulmate"
+    assert restarted.get_campaign(legacy.campaign_id).campaign_id == legacy.campaign_id
+    restarted.close()
+
+
 def test_approved_copy_change_creates_new_immutable_version(tmp_path: Path) -> None:
     service = CampaignService.for_database(tmp_path / "auraly.db")
     original = service.create_campaign(CampaignCreate.model_validate(valid_campaign_data()))

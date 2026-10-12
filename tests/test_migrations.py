@@ -75,7 +75,30 @@ def test_migrations_are_idempotent_and_application_enables_foreign_keys(tmp_path
         assert connection.execute(text("PRAGMA busy_timeout")).scalar_one() == 5000
         assert connection.execute(text("PRAGMA synchronous")).scalar_one() == 1
         assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == (
-            "0011_voice_reason_whitespace"
+            "0012_campaign_display_name"
+        )
+    engine.dispose()
+
+
+def test_existing_campaign_gains_nullable_display_name_without_rekeying(tmp_path: Path) -> None:
+    database_path = tmp_path / "legacy.db"
+    config = Config("alembic.ini")
+    config.set_main_option("sqlalchemy.url", sqlite_url(database_path))
+    command.upgrade(config, "0011_voice_reason_whitespace")
+    engine = create_engine(sqlite_url(database_path))
+    with engine.begin() as connection:
+        connection.execute(text("""INSERT INTO campaigns
+            (id, character, proof_object, voice_preset, edit_preset, budget_json, config_json,
+             status, created_at, updated_at)
+            VALUES ('legacy-campaign', 'susan-smith', 'card', 'voice', 'edit', '{}', '{}',
+                    'draft', '2026-01-01', '2026-01-01')"""))
+    engine.dispose()
+
+    migrate_database(database_path)
+    engine = create_engine(sqlite_url(database_path))
+    with engine.connect() as connection:
+        assert connection.execute(text("SELECT id, display_name FROM campaigns")).one() == (
+            "legacy-campaign", None,
         )
     engine.dispose()
 
@@ -105,6 +128,6 @@ def test_direct_alembic_upgrade_creates_parent_and_enables_wal(tmp_path: Path) -
     with engine.connect() as connection:
         assert connection.execute(text("PRAGMA journal_mode")).scalar_one().casefold() == "wal"
         assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == (
-            "0011_voice_reason_whitespace"
+            "0012_campaign_display_name"
         )
     engine.dispose()

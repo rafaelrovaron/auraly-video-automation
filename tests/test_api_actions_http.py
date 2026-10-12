@@ -22,14 +22,27 @@ pytest_plugins = ["tests.test_heygen_video_media"]
 PREFIX = "/api/v1/campaigns/campaign-one"
 
 
-def test_action_openapi_has_all_25_posts_and_typed_results(tmp_path: Path) -> None:
+def test_campaign_name_is_optional_then_renamable_without_changing_id(tmp_path: Path) -> None:
+    with client_for(create_api_fixture(tmp_path)) as client:
+        before = client.get(PREFIX).json()
+        assert before["displayName"] is None
+        response = client.post(PREFIX + "/name", json={"displayName": "  Campanha Soulmate  "})
+        assert response.status_code == 200, response.text
+        assert response.json()["displayName"] == "Campanha Soulmate"
+        assert response.json()["campaignId"] == "campaign-one"
+        assert client.get("/api/v1/campaigns").json()["items"][0]["displayName"] == "Campanha Soulmate"
+        assert client.post(PREFIX + "/name", json={"displayName": "   "}).status_code == 422
+        assert client.get(PREFIX).json()["displayName"] == "Campanha Soulmate"
+
+
+def test_action_openapi_has_all_26_posts_and_typed_results(tmp_path: Path) -> None:
     with client_for(create_api_fixture(tmp_path)) as client:
         paths = client.get("/openapi.json").json()["paths"]
         posts = {path: data["post"] for path, data in paths.items() if "post" in data}
-        assert len(posts) == 25
+        assert len(posts) == 26
         for path, endpoint in posts.items():
             status = "201" if path.endswith(("/campaigns", "/copies", "/profiles", "/versions")) else (
-                "200" if path.endswith(("/review", "/delivery", "/cancel", "/resume", "/stop", "/budget"))
+                "200" if path.endswith(("/review", "/delivery", "/cancel", "/resume", "/stop", "/budget", "/name"))
                 and "/voices/" not in path else "202"
             )
             assert endpoint["responses"][status]["content"]["application/json"]["schema"]

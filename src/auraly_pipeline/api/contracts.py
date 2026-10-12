@@ -146,6 +146,7 @@ class CampaignStatus(ContractModel):
 
 class CampaignSummary(ContractModel):
     campaign_id: str
+    display_name: str | None = None
     character: Literal["susan-smith", "soul-constellation"]
     stored_status: str
     scene_count: int

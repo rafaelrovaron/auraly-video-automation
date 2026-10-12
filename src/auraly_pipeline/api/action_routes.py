@@ -17,7 +17,7 @@ from auraly_pipeline.api.app import CampaignId, EditId, JobId, Version
 from auraly_pipeline.api.commands import ApiCommands
 from auraly_pipeline.api.contracts import CampaignDetail, ImageSummary, JobSummary, ProfileView, QueryError
 from auraly_pipeline.api.worker import LocalApiWorker
-from auraly_pipeline.campaigns.domain import CampaignCreate, CopyMasterCreate, CampaignBudgetSetup, CampaignBudgetView
+from auraly_pipeline.campaigns.domain import CampaignCreate, CampaignRename, CopyMasterCreate, CampaignBudgetSetup, CampaignBudgetView
 from auraly_pipeline.campaigns.persistence import validate_api_database
 from auraly_pipeline.editing.domain import EditProfile
 from auraly_pipeline.voices.domain import VoiceGenerateRequest
@@ -50,6 +50,10 @@ def register_action_routes(app: FastAPI) -> None:
     @app.post("/api/v1/campaigns", status_code=201)
     def create_campaign(body: CampaignCreate, commands: Commands) -> CampaignDetail:
         return commands.create_campaign(body)
+
+    @app.post(prefix + "/name")
+    def rename_campaign(campaignId: CampaignId, body: CampaignRename, commands: Commands) -> CampaignDetail:
+        return commands.rename_campaign(campaignId, body)
 
     @app.post(prefix + "/copies", status_code=201)
     def add_copy(campaignId: CampaignId, body: CopyMasterCreate, commands: Commands) -> CampaignDetail:

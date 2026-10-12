@@ -3,9 +3,9 @@ from __future__ import annotations
 import hashlib
 import json
 from datetime import datetime
-from typing import Literal, Self
+from typing import Annotated, Literal, Self
 
-from pydantic import ConfigDict, Field, JsonValue, ValidationError, computed_field, field_validator, model_validator
+from pydantic import AfterValidator, ConfigDict, Field, JsonValue, ValidationError, computed_field, field_validator, model_validator
 
 from auraly_pipeline.metadata_security import validate_goal_1_campaign_metadata
 from auraly_pipeline.models import ContractModel
@@ -13,6 +13,15 @@ from auraly_pipeline.models import ContractModel
 
 class CampaignContract(ContractModel):
     model_config = ConfigDict(str_strip_whitespace=True)
+
+
+def _single_line_name(value: str) -> str:
+    if not value.isprintable():
+        raise ValueError("campaign display name must be printable on one line")
+    return value
+
+
+DisplayName = Annotated[str, Field(min_length=1, max_length=120), AfterValidator(_single_line_name)]
 
 
 class CampaignBudgetSetup(ContractModel):
@@ -111,6 +120,7 @@ class SceneVariantCreate(CampaignContract):
 
 class CampaignCreate(CampaignContract):
     campaign_id: str = Field(pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+    display_name: DisplayName | None = None
     character: Literal["susan-smith", "soul-constellation"]
     proof_object: str = Field(min_length=1)
     voice_preset: str = Field(min_length=1)
@@ -160,6 +170,7 @@ class SceneVariant(SceneVariantCreate):
 
 class Campaign(CampaignContract):
     campaign_id: str
+    display_name: str | None = None
     character: Literal["susan-smith", "soul-constellation"]
     proof_object: str
     voice_preset: str
@@ -171,3 +182,7 @@ class Campaign(CampaignContract):
     updated_at: datetime
     copy_masters: list[CopyMaster]
     scene_variants: list[SceneVariant]
+
+
+class CampaignRename(CampaignContract):
+    display_name: DisplayName

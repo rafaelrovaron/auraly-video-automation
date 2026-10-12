@@ -49,7 +49,7 @@ class ApiQueries:
         campaign = self.campaign(campaign_id)
         status = self.get_status(campaign_id)
         return CampaignDetail(
-            campaign_id=campaign.campaign_id, character=campaign.character,
+            campaign_id=campaign.campaign_id, display_name=campaign.display_name, character=campaign.character,
             stored_status=campaign.status, scene_count=len(campaign.scene_variants),
             created_at=campaign.created_at, updated_at=campaign.updated_at,
             proof_object=campaign.proof_object, voice_preset=campaign.voice_preset,

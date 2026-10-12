@@ -34,6 +34,7 @@ class CampaignRow(Base):
     __table_args__ = (CheckConstraint("status = 'draft'", name="campaign_status"),)
 
     id: Mapped[str] = mapped_column(String(80), primary_key=True)
+    display_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
     character: Mapped[str] = mapped_column(String(40))
     proof_object: Mapped[str] = mapped_column(String(255))
     voice_preset: Mapped[str] = mapped_column(String(120))

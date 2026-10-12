@@ -16,6 +16,7 @@ from auraly_pipeline.campaigns.domain import (
     CampaignBudgetSetup,
     CampaignBudgetView,
     CampaignCreate,
+    CampaignRename,
     CopyMaster,
     CopyMasterCreate,
     SceneVariant,
@@ -72,6 +73,7 @@ class CampaignService:
                 raise CampaignAlreadyExistsError
             campaign = CampaignRow(
                 id=request.campaign_id,
+                display_name=request.display_name,
                 character=request.character,
                 proof_object=request.proof_object,
                 voice_preset=request.voice_preset,
@@ -112,6 +114,18 @@ class CampaignService:
             campaign = CampaignRepository(session).get(campaign_id)
             if campaign is None:
                 raise CampaignNotFoundError
+            return self._to_domain(campaign)
+
+    def rename_campaign(self, campaign_id: str, display_name: str) -> Campaign:
+        name = CampaignRename(display_name=display_name).display_name
+        with self._sessions() as session:
+            campaign = CampaignRepository(session).get(campaign_id)
+            if campaign is None:
+                raise CampaignNotFoundError
+            if campaign.display_name != name:
+                campaign.display_name = name
+                campaign.updated_at = datetime.now(UTC)
+                session.commit()
             return self._to_domain(campaign)
 
     def configure_budget(self, campaign_id: str, request: CampaignBudgetSetup) -> CampaignBudgetView:
@@ -218,6 +232,7 @@ class CampaignService:
         ]
         return Campaign(
             campaign_id=row.id,
+            display_name=row.display_name,
             character=cast(Literal["susan-smith", "soul-constellation"], row.character),
             proof_object=row.proof_object,
             voice_preset=row.voice_preset,
