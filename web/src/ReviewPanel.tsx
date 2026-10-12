@@ -3,6 +3,7 @@ import {ApiError,readWorker,statusLabel} from './api';
 import {getReviewState,startQcWorker,submitQc,submitReview} from './reviewApi';
 import type {EditQcOperation,FinalReviewState,HumanReviewRequest,ReviewTarget} from './reviewApi';
 import {renderMediaUrl} from './renderApi';
+import {DeliveryPanel} from './DeliveryPanel';
 const active=(status:string)=>['queued','running','retry_scheduled'].includes(status);
 const safe=(e:unknown)=>e instanceof ApiError?e:new ApiError('connection_lost');
 const uncertain=(e:ApiError)=>['command_unknown','invalid_response','connection_lost','operation_conflict'].includes(e.code);
@@ -88,7 +89,8 @@ function ReviewFlow({target}:{target:ReviewTarget}){
       {report.audio&&<p>Volume: {report.audio.integratedLoudnessLufs??'não mensurável'} LUFS · Pico: {report.audio.truePeakDbtp??'não mensurável'} dBTP</p>}
       <p>Texto medido no layout do manifest, não nos frames gravados.</p></>}
     {state?.review?<><p>Decisão definitiva: {statusLabel(state.review.decision)}</p><p>Revisor: {state.review.reviewedBy} · {state.review.reviewedAt} (UTC)</p><p>Comentário: {state.review.comment??'—'}</p>
-      {state.review.decision==='rejected'&&<p>Edite e salve outro plano para renderizar e revisar uma nova versão.</p>}<p>Somente leitura; sem edição ou revogação.</p></>:<>
+      {state.review.decision==='rejected'&&<p>Edite e salve outro plano para renderizar e revisar uma nova versão.</p>}<p>Somente leitura; sem edição ou revogação.</p>
+      {state.review.decision==='approved'&&<DeliveryPanel target={target} review={state.review}/>}</>:<>
       <label>Nome do revisor<input aria-label="Nome do revisor" value={name} disabled={busy||!!pendingReview} onChange={e=>setName(e.target.value)}/></label>
       <label>Comentário<textarea aria-label="Comentário" value={comment} disabled={busy||!!pendingReview} onChange={e=>setComment(e.target.value)}/></label>
       <label><input type="checkbox" checked={watched} disabled={busy||!!pendingReview} onChange={e=>setWatched(e.target.checked)}/>Assisti e ouvi este master</label>
