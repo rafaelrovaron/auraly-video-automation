@@ -5,6 +5,11 @@
 Este documento é a ordem operacional dos próximos Goals. O PRD define o produto; este roadmap
 define como chegar a ele sem transformar cada Goal em um projeto grande demais.
 
+**Prioridade atual (2026-10-12): D4C — Usabilidade, etapas e mobile**, antes de concluir
+o piloto D6. O feedback de uso apontou excesso de IDs/hashes, página extensa e dificuldade
+de operação no celular. [Plano de execução por slices](superpowers/plans/2026-10-12-d4c-usability-roadmap.md).
+É trabalho `PLANNED`, sem mudança de capacidade entregue ou nova verificação de provider.
+
 ## 1. Regra de execução
 
 Cada Goal significativo segue:
@@ -73,7 +78,11 @@ D5A.2 Render Jobs/API/UI                      IMPLEMENTED, LOCAL_VERIFIED (Windo
 D5B.1 Final QC backend/CLI                    IMPLEMENTED, LOCAL_VERIFIED (Windows)
 D5B.2A Human Review backend/CLI              IMPLEMENTED, LOCAL_VERIFIED (Windows; main)
 D5B.2B QC / Human Review API/UI              IMPLEMENTED, LOCAL_VERIFIED (Windows; main)
-D5B.3 Approved Master Delivery              IMPLEMENTED, LOCAL_VERIFIED (Windows; local branch)
+D5B.3 Approved Master Delivery              IMPLEMENTED, LOCAL_VERIFIED (Windows; main)
+D4C.1 Campaign Stage Navigation             PLANNED — próxima implementação
+D4C.2 Human-readable Names & Details        PLANNED
+D4C.3 Guided Operations & Asset Selection   PLANNED
+D4C.4 Mobile Usability Verification         PLANNED
 D6  End-to-End Personal Pilot
 ```
 
@@ -565,7 +574,7 @@ imagem, voz ou HeyGen. Sem timeline, frame-perfect, migration ou dependência no
 E2E real local com três headlines + download/full decode + reload/reuso preservando upstream.
 Evidência: `docs/superpowers/2026-10-08-d5a2-verification.md`.
 Após integrar D5B.2B, D5B.3 foi implementado em branch local; próximo recorte
-de produto é D6, piloto pessoal, conforme o checkpoint de entrega abaixo.
+de produto passa a ser D4C, usabilidade, antes de concluir o piloto D6.
 
 ### Objetivo
 
@@ -650,8 +659,9 @@ Evidência: `docs/superpowers/2026-10-11-d5b2b-verification.md`.
 
 ### D5B.3 — Approved Master Delivery
 
-**Status:** `IMPLEMENTED`, `LOCAL_VERIFIED` (Windows), na branch local `feat/d5b3-approved-delivery`, sem
-merge/push/CI deste slice. Verificação completa/revisão em
+**Status:** `IMPLEMENTED`, `LOCAL_VERIFIED` (Windows), integrado e enviado a `main`
+no merge `c8c3cab`, incluindo a correção de host Cloudflare `77fffb9`.
+O resultado do Actions desse merge não foi reconsultado neste planejamento. Verificação completa/revisão em
 `docs/superpowers/2026-10-12-d5b3-verification.md`.
 Gate19/19,418 frontend,2.116 Python/30 skips; revisão sem achados bloqueantes.
 API/CLI/UI copiam apenas master aprovado para pasta configurada, sem novo encode/
@@ -660,7 +670,7 @@ SHA das evidências; replay/concurrency preservam original. GET revalida e bloqu
 órfão/corrupção; POST explícito pode reconciliar somente MP4 órfão idêntico.
 Nenhum overwrite, pasta escolhida por HTTP, retry automático ou upload cloud.
 Destino padrão work/deliveries, override AURALY_DELIVERY_ROOT/CLI --delivery-root.
-Próximo recorte de produto: D6 piloto real; baseline D5B.2B main71480f2,
+Próximo recorte de produto: D4C usabilidade, seguido de D6 piloto real; baseline D5B.2B main71480f2,
 Actions38168870581 Linux/Windows success, não CI da branch nova.
 
 ### Objetivo
@@ -684,9 +694,52 @@ Fechar o ciclo local do render até entrega.
 - delivery é distinguido de upload cloud;
 - UI exibe QC e decisão.
 
+## D4C — Usabilidade, navegação por etapas e mobile
+
+**Status:** `PLANNED`. Prioridade introduzida pelo feedback do usuário em 2026-10-12.
+Capacidades mecânicas D1–D5 permanecem entregues; esta melhoria de experiência ainda não foi implementada.
+
+### Objetivo e desenho proposto
+
+Permitir uso por uma pessoa sem conhecimento dos identificadores internos, no desktop e celular.
+Organizar a campanha nas abas **Visão geral, Roteiro, Imagens, Voz, Vídeos, Edição e Finalização**.
+No celular, seletor compacto para as mesmas etapas. Estilos de edição permanecem acessíveis globalmente.
+Atividade e detalhes técnicos são secundários; IDs/hashes continuam íntegros internamente.
+
+### Ordem e entregáveis
+
+| Slice | Entrega | Critério principal |
+|---|---|---|
+| D4C.1 | Rotas por etapa, shell responsivo e Finalização separada da Edição | Links diretos/Back/refresh funcionam; troca de aba preserva rascunhos e não envia ações. |
+| D4C.2 | Nomes/contexto legíveis, vocabulário humano, detalhes técnicos recolhidos | Selecionar entidades sem interpretar hashes; registros antigos e IDs persistidos preservados. |
+| D4C.3 | Formulários guiados, seleção de assets e processamento contextual | Fluxo comum sem digitar SHA-256; erros orientam próxima ação; respostas desconhecidas não provocam reenvio. |
+| D4C.4 | Consistência visual e validação integrada em mobile/desktop | Fluxo local completo usável em telas estreitas, com evidência visual e regressões aprovadas. |
+
+Mobile faz parte de todos os slices; D4C.4 consolida a validação, não inicia a adaptação.
+Reutilizar o stack e serviços atuais. Mudanças de backend limitadas a nomes de apresentação
+compatíveis e resolução/serving de assets autorizados quando necessários à experiência.
+
+### Critérios de saída
+
+- 320/390/768/1440 px sem overflow horizontal da página; toque, teclado, foco e zoom utilizáveis;
+- nomes de cenas, arquivos, estilos e variantes visíveis; identidades exatas em detalhe técnico;
+- bloqueios, progresso e próximo passo compreensíveis, sem percentuais/custos inventados;
+- imagens/voz/HeyGen reaproveitados ao variar headlines; nenhuma aprovação removida;
+- navegação não perde rascunho na mesma campanha nem duplica envio/polling;
+- fluxo fake local cobre criação até entrega; inspeção real em Safari/iPhone registrada separadamente da emulação;
+- validação humana de usabilidade e gate determinístico registrado antes do fechamento.
+
+Plano detalhado, arquivos impactados e verificações:
+[D4C — Melhoria da experiência do painel](superpowers/plans/2026-10-12-d4c-usability-roadmap.md).
+Fora do escopo: timeline, frame-perfect, novo framework de UI, uploads do celular,
+cloud delivery e redesenho dos serviços de geração.
+
 ## D6 — End-to-End Personal Pilot
 
 **Status:** `PLANNED`, requer paid-action approval.
+
+D4C precede o fechamento deste piloto. Os arquivos e a campanha existentes podem ser reutilizados
+para testes locais de usabilidade; isso não conclui o piloto real nem autoriza novas cobranças.
 
 ### Objetivo
 

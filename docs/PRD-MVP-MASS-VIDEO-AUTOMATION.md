@@ -17,6 +17,11 @@ genérico e não terá timeline estilo CapCut ou preview frame-perfect.
 
 ## 2. Separação entre presente e alvo
 
+Atualização de prioridade em 2026-10-12: D5B.3 integrado/enviado a main no merge
+`c8c3cab`; checkpoints anteriores abaixo são históricos. Antes de concluir D6,
+executar D4C (usabilidade, etapas e mobile), ainda `PLANNED`, conforme seção 10.0
+e `docs/superpowers/plans/2026-10-12-d4c-usability-roadmap.md`.
+
 ### 2.1 Capacidade entregue
 
 Checkpoint D5B.3 (2026-10-12): `IMPLEMENTED`, `LOCAL_VERIFIED` (Windows), na branch local
@@ -576,6 +581,28 @@ Masters aprovados são copiados para uma pasta configurada e verificados por has
 - render final é a referência autoritativa.
 
 ## 10. Interface local
+
+### 10.0 Experiência de uso — alvo D4C (`PLANNED`)
+
+- Abas de campanha: Visão geral, Roteiro, Imagens, Voz, Vídeos, Edição e Finalização;
+  seletor compacto das mesmas etapas no celular, links diretos e Back/Forward.
+- Nomes de apresentação e contexto nos títulos/seletores; hashes, IDs completos,
+  caminhos e códigos internos em detalhes técnicos recolhidos. Identidades internas
+  permanecem intactas; campanhas antigas continuam válidas.
+- Finalização acessível sem atravessar o formulário de edição. Trocar de etapa
+  preserva rascunhos na sessão; sair/recarregar mantém aviso de perda de dados não salvos.
+- Ação principal, progresso real, motivo de bloqueio e próximo passo claros.
+  Nenhum envio automático ao navegar; confirmação explícita de ações pagas/aprovações.
+- Seleção de assets locais com resolução/revalidação do hash pelo servidor;
+  fluxo comum sem digitar SHA-256. Celular controla os arquivos da máquina local;
+  upload do telefone não faz parte deste recorte.
+- Layout utilizável em 320/390/768/1440 px, sem overflow horizontal de página;
+  alvos de toque de 44 px, campos com fonte mínima de 16 px, foco/teclado/zoom úteis.
+- Reaproveitar componentes, API e serviços. Sem timeline, preview frame-perfect,
+  novo framework de UI ou reescrita do pipeline.
+
+O plano D4C detalha slices e critérios verificáveis; requisitos abaixo descrevem
+as capacidades por área, não exigem que todas apareçam na mesma página.
 
 ### 10.1 Campaigns
 

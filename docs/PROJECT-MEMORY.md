@@ -6,7 +6,24 @@
 Este documento guarda decisões duráveis e fatos verificados. O estado entregue aparece separado
 do produto planejado para impedir que roadmap seja confundido com capacidade existente.
 
-## Checkpoint local: D5B.3 — Approved Master Delivery (2026-10-12)
+## Decisão vigente: D4C — Usabilidade antes do fechamento do piloto (2026-10-12)
+
+Feedback explícito de Rafael: UI/UX pouco amigável, muitos hashes/IDs expostos,
+necessidade de separar etapas em abas e funcionar bem no celular. O próximo recorte
+planejado passa a ser D4C, antes de concluir D6. D4C ainda não está implementado.
+
+Direção: nomes/contexto legíveis, dados técnicos recolhidos, navegação por etapa,
+formulários guiados e mobile desde o primeiro slice. Preservar IDs/contratos,
+aprovações, idempotência e reuso de assets; trocar de aba não perde rascunhos.
+Plano e critérios: `docs/superpowers/plans/2026-10-12-d4c-usability-roadmap.md`.
+Ordem: D4C.1 navegação → D4C.2 nomes → D4C.3 operação/assets → D4C.4 validação.
+Este registro substitui indicações anteriores de D6 como próximo recorte imediato.
+
+D5B.3 e o ajuste de host remoto foram integrados/enviados a main no merge `c8c3cab`.
+O resultado de CI desse merge não foi reconsultado neste planejamento; os checkpoints
+abaixo preservam a evidência disponível em suas datas.
+
+## Histórico local: D5B.3 — Approved Master Delivery (2026-10-12, antes do merge)
 
 `IMPLEMENTED`, `LOCAL_VERIFIED` (Windows), na branch `feat/d5b3-approved-delivery`, ainda sem merge/push/CI
 deste slice. Serviço único de entrega reutiliza HumanReviewService, master aberto
