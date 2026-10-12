@@ -47,7 +47,7 @@ def test_all_spec_get_routes_and_openapi(tmp_path: Path, mp4: bytes) -> None:
         assert client.get("/api/v1/editing/profiles/plain/1").status_code == 200
         assert client.get("/docs").status_code == 200
         schema = client.get("/openapi.json").json()
-        assert sum("get" in path for path in schema["paths"].values()) == 21
+        assert sum("get" in path for path in schema["paths"].values()) == 22
         for name, path in schema["paths"].items():
             if "get" not in path:
                 continue
@@ -128,6 +128,7 @@ def test_http_host_restricted(tmp_path: Path) -> None:
             assert response.status_code == 400
             assert response.json()["error"]["code"] == "invalid_request"
         assert client.get("/health", headers={"host": "localhost:8000"}).status_code == 200
+        assert client.get("/health", headers={"host": "auto.rrova.site"}).status_code == 200
 
 
 def test_http_startup_and_shutdown(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -8,6 +8,8 @@ from auraly_pipeline.api.contracts import QueryError
 from auraly_pipeline.api.render_commands import RenderCommands
 from auraly_pipeline.api.review_contracts import FinalReviewState, QcRunView, ReviewTarget
 from auraly_pipeline.editing.domain import EditingError
+from auraly_pipeline.editing.delivery_domain import DeliveryRequest, DeliveryRecord, DeliveryState
+from auraly_pipeline.editing.delivery_service import DeliveryService
 from auraly_pipeline.editing.qc_domain import QcRequest, QcTarget
 from auraly_pipeline.editing.qc_service import QcService
 from auraly_pipeline.editing.review_domain import HumanReviewRecord, HumanReviewRequest
@@ -17,9 +19,38 @@ from auraly_pipeline.jobs.service import JobService
 
 class ReviewCommands:
     def __init__(self, *, renders: RenderCommands, qc: QcService, reviews: HumanReviewService,
-                 jobs: JobService, get_operation: Callable[[str, str], OperationView]) -> None:
+                 jobs: JobService, get_operation: Callable[[str, str], OperationView],
+                 deliveries: DeliveryService) -> None:
         self.renders, self.qc, self.reviews = renders, qc, reviews
         self.jobs, self.get_operation = jobs, get_operation
+        self.deliveries = deliveries
+
+    def _delivery_request(self, campaign_id: str, job_id: str, output_variant_id: str) -> DeliveryRequest:
+        target = self._target(campaign_id, job_id, output_variant_id)
+        try:
+            review = self.reviews.find_review(campaign_id, target.video_id, target.plan_hash,
+                                              output_variant_id, target.render_key)
+            if review is None or review.decision != "approved":
+                raise QueryError("operation_not_allowed")
+            return DeliveryRequest(**{name: getattr(review, name) for name in DeliveryRequest.model_fields})
+        except EditingError:
+            raise QueryError("artifact_invalid") from None
+
+    def delivery_state(self, campaign_id: str, job_id: str, output_variant_id: str) -> DeliveryState:
+        request = self._delivery_request(campaign_id, job_id, output_variant_id)
+        try:
+            return DeliveryState(request=request, record=self.deliveries.get(request))
+        except EditingError:
+            raise QueryError("artifact_invalid") from None
+
+    def delivery(self, campaign_id: str, job_id: str, output_variant_id: str,
+                 request: DeliveryRequest) -> DeliveryRecord:
+        if self._delivery_request(campaign_id, job_id, output_variant_id) != request:
+            raise QueryError("invalid_request")
+        try:
+            return self.deliveries.deliver(request)
+        except EditingError:
+            raise QueryError("artifact_invalid") from None
 
     def _target(self, campaign_id: str, job_id: str, output_variant_id: str) -> ReviewTarget:
         view = self.renders.get(campaign_id, job_id)

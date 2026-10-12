@@ -24,6 +24,8 @@ from auraly_pipeline.editing.qc_domain import QcRequest, QcTarget
 from auraly_pipeline.editing.qc_service import QcService
 from auraly_pipeline.editing.review_domain import HumanReviewRecord, HumanReviewRequest
 from auraly_pipeline.editing.review_service import HumanReviewService
+from auraly_pipeline.editing.delivery_domain import DeliveryRequest, DeliveryRecord, DeliveryState
+from auraly_pipeline.editing.delivery_service import DeliveryService
 
 
 ProjectRoot = Annotated[Path | None, typer.Option("--project-root")]
@@ -45,7 +47,7 @@ def _errors() -> Iterator[None]:
             CaptionTimingInput, CopyRef, EditBatchPlan, EditBatchRequest,
             EditPlannedOutput, EditVariant, ResolvedCaptionCue, RenderBatchResult,
             RenderError, RenderOutputResult, RenderReceipt, RenderRuntime, QcRequest, QcTarget,
-            HumanReviewRequest, HumanReviewRecord))
+            HumanReviewRequest, HumanReviewRecord, DeliveryRequest, DeliveryRecord, DeliveryState))
         typer.echo(f"{field}: invalid field", err=True)
         raise typer.Exit(1) from None
     except (OSError, ValueError):
@@ -68,6 +70,28 @@ def _load(path: Path) -> object:
 def register_editing_commands(app: typer.Typer) -> None:
     edit = typer.Typer(help="Resolve editing plans and render local vertical masters.", no_args_is_help=True)
     app.add_typer(edit, name="edit")
+
+    @edit.command("deliver")
+    def deliver(request: RequestFile, project_root: ProjectRoot = None, work_root: WorkRoot = None,
+                delivery_root: Annotated[Path | None, typer.Option("--delivery-root")] = None) -> None:
+        """Copy an approved master locally; never encode, overwrite or upload."""
+        with _errors():
+            payload = DeliveryRequest.model_validate(_load(request))
+            roots = _service(project_root, work_root)
+            result = DeliveryService(project_root=roots.project_root, work_root=roots.work_root,
+                                     delivery_root=delivery_root).deliver(payload)
+            typer.echo(result.model_dump_json(by_alias=True))
+
+    @edit.command("delivery-get")
+    def delivery_get(request: RequestFile, project_root: ProjectRoot = None, work_root: WorkRoot = None,
+                     delivery_root: Annotated[Path | None, typer.Option("--delivery-root")] = None) -> None:
+        """Verify original local receipt and bytes; never copy on a read."""
+        with _errors():
+            payload = DeliveryRequest.model_validate(_load(request))
+            roots = _service(project_root, work_root)
+            record = DeliveryService(project_root=roots.project_root, work_root=roots.work_root,
+                                     delivery_root=delivery_root).get(payload)
+            typer.echo(DeliveryState(request=payload, record=record).model_dump_json(by_alias=True))
 
     @edit.command("review")
     def review(request: RequestFile, project_root: ProjectRoot = None,

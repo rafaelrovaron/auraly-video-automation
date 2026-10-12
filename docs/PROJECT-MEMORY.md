@@ -1,12 +1,37 @@
 # Auraly Mass Video Pipeline — Memória do Projeto
 
-**Atualizado em:** 2026-10-11
+**Atualizado em:** 2026-10-12
 **Decisão vigente:** MVP delivery-first para uso local e pessoal
 
 Este documento guarda decisões duráveis e fatos verificados. O estado entregue aparece separado
 do produto planejado para impedir que roadmap seja confundido com capacidade existente.
 
-## Checkpoint local: D5B.2B — QC/review API/UI (2026-10-11)
+## Checkpoint local: D5B.3 — Approved Master Delivery (2026-10-12)
+
+`IMPLEMENTED`, `LOCAL_VERIFIED` (Windows), na branch `feat/d5b3-approved-delivery`, ainda sem merge/push/CI
+deste slice. Serviço único de entrega reutiliza HumanReviewService, master aberto
+e verificado, publicação exclusiva e revalidação das evidências. Só approved/QC
+passed; não herda aprovação entre planos. Sem encode/runtime novo, provider, Job,
+worker, SQL ou dependência. CLI `edit deliver|delivery-get`, GET/POST por output,
+UI pequena após aprovação com envio explícito e consulta após resposta desconhecida.
+
+Destino fixo por instância: argumento CLI, AURALY_DELIVERY_ROOT ou work/deliveries.
+Path público relativo; receipt imutável guarda UTC e SHA de todas as evidências.
+Copiar temp/fsync/verificar/revalidar/publicar sem overwrite; concorrência/replay
+retornam o vencedor original. GET órfão/corrupto não é ausência. POST explícito
+reconcilia apenas MP4 órfão de bytes iguais; conflito nunca é apagado.
+Root/ancestrais de work e symlinks/reparse recusados, filesystem precisa de hard links.
+Não é cloud delivery/attestation. Sem mídias reais ou créditos usados.
+Gate completo19/19,exit0:418 frontend,2.116 Python/30 skips (1.129,46s).
+Revisão independente sem Critical/Important/Minor a corrigir;2 skips novos de links
+exigem privilégio Windows, casos mantidos no CI Linux ainda não executado nesta branch.
+Resultados completos, revisão e decisões: `docs/superpowers/2026-10-12-d5b3-verification.md`.
+Próximo: D6 piloto pessoal end-to-end; não amplia PROVIDER_VERIFIED por fixtures.
+
+D5B.2B integrado em main até `71480f2`, Actions Linux/Windows run38168870581
+confirmados como success em 2026-10-12. É baseline, não CI de D5B.3.
+
+## Histórico: D5B.2B — QC/review API/UI (2026-10-11)
 
 `IMPLEMENTED`, `LOCAL_VERIFIED` (Windows), integrado em `main` por fast-forward
 até `d89edd7`. Pós-fix na branch: 19 checks aprovados (audit retomado após falha de rede),

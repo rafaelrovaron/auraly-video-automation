@@ -19,6 +19,24 @@ genérico e não terá timeline estilo CapCut ou preview frame-perfect.
 
 ### 2.1 Capacidade entregue
 
+Checkpoint D5B.3 (2026-10-12): `IMPLEMENTED`, `LOCAL_VERIFIED` (Windows), na branch local
+`feat/d5b3-approved-delivery`, ainda sem merge/push/CI deste slice.
+Entrega via API/CLI/UI reutiliza master aprovado e verificado, sem encode,
+provider, Job, worker, tabela, migration ou dependência novos. Destino configurado
+na inicialização: work/deliveries, AURALY_DELIVERY_ROOT ou --delivery-root na CLI.
+HTTP só recebe identidade da aprovação, nunca caminho de destino.
+Recibo relativo imutável com UTC/SHA/tamanho; replay preserva original e consulta
+revalida aprovação, master, QC, review e cópia. Órfãos/conflitos não são ausência;
+somente MP4 órfão exato pode ser reconciliado por POST explícito. Não há overwrite,
+upload cloud ou retry automático. UI remove sucesso e bloqueia envio após falha
+de consulta; mounts/reloads só consultam. Filesystem local precisa de hard links.
+Verificação e revisão em `docs/superpowers/2026-10-12-d5b3-verification.md`.
+Gate19/19,418 frontend,2.116 Python/30 skips; revisão sem achados bloqueantes.
+D6 piloto pessoal real é o próximo recorte, sem ampliar PROVIDER_VERIFIED por fixtures.
+
+Baseline: D5B.2B main `71480f2`, Actions Linux/Windows38168870581 success.
+Os checkpoints abaixo preservam o estado de suas datas, não são status da branch nova.
+
 Checkpoint D5B.2B (2026-10-11): `IMPLEMENTED`, `LOCAL_VERIFIED` (Windows),
 integrado em `main` por fast-forward até `d89edd7`. Pós-fix na branch: 19 checks aprovados
 (audit retomado após falha de rede), 401 frontend, 2.093 Python / 28 skips
@@ -522,7 +540,7 @@ Masters aprovados são copiados para uma pasta configurada e verificados por has
 - loudness, true peak e clipping;
 - voz audível;
 - bounds de headline/captions;
-- contact sheet/proxy.
+- player nativo do master para assistir/ouvir (contact sheet/proxy fora do MVP).
 
 ### FR-018 — Revisar e entregar
 

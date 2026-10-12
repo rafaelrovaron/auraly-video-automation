@@ -6,6 +6,7 @@ import {getReviewState,submitQc,submitReview,startQcWorker} from './reviewApi';
 import type {ReviewTarget,FinalReviewState,QcReport,HumanReviewRecord,HumanReviewRequest} from './reviewApi';
 vi.mock('./reviewApi',async original=>({...await original<typeof import('./reviewApi')>(),getReviewState:vi.fn(),submitQc:vi.fn(),submitReview:vi.fn(),startQcWorker:vi.fn()}));
 vi.mock('./api',async original=>({...await original<typeof import('./api')>(),readWorker:vi.fn()}));
+vi.mock('./DeliveryPanel',()=>({DeliveryPanel:()=> <p>Approved delivery controls</p>}));
 const target:ReviewTarget={schemaVersion:'1.0',campaignId:'campaign-one',videoId:'video-one',planHash:'a'.repeat(64),jobId:'22222222-2222-4222-8222-222222222222',outputVariantId:'variant-a',renderKey:'b'.repeat(64)};
 const executionId='11111111-1111-4111-8111-111111111111',qcJobId='33333333-3333-4333-8333-333333333333';
 const {jobId:_,...context}=target;
@@ -28,6 +29,12 @@ beforeEach(()=>{
   vi.spyOn(crypto,'randomUUID').mockReturnValue(executionId);vi.spyOn(window,'confirm').mockReturnValue(true);
 });
 async function mount(state=empty){vi.mocked(getReviewState).mockResolvedValue(state);const view=render(<ReviewPanel target={target}/>);await waitFor(()=>expect(screen.getByRole('button',{name:'Consultar QC e review'}).hasAttribute('disabled')).toBe(false));return view;}
+it('mounts delivery only for a definitive approved review',async()=>{
+  const approved=record({...context,qcKey:report.qcKey,decision:'approved',reviewedBy:'Tester',comment:null,watchedAndListened:true});
+  const view=await mount({...ready,review:approved});expect(screen.getByText('Approved delivery controls')).toBeTruthy();view.unmount();
+  await mount({...ready,review:{...approved,decision:'rejected',comment:'Change headline'}});
+  expect(screen.queryByText('Approved delivery controls')).toBeNull();
+});
 function fill(){fireEvent.change(screen.getByLabelText('Nome do revisor'),{target:{value:'Tester'}});fireEvent.click(screen.getByLabelText('Assisti e ouvi este master'));}
 it('qc_is_explicit_and_completed_error_is_not_passed',async()=>{
   await mount();expect(submitQc).not.toHaveBeenCalled();expect(startQcWorker).not.toHaveBeenCalled();
