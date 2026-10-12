@@ -73,7 +73,7 @@ D5A.2 Render Jobs/API/UI                      IMPLEMENTED, LOCAL_VERIFIED (Windo
 D5B.1 Final QC backend/CLI                    IMPLEMENTED, LOCAL_VERIFIED (Windows)
 D5B.2A Human Review backend/CLI              IMPLEMENTED, LOCAL_VERIFIED (Windows; main)
 D5B.2B QC / Human Review API/UI              IMPLEMENTED, LOCAL_VERIFIED (Windows; main)
-D5B.3 Approved Master Delivery              IMPLEMENTED (local branch; verification evidence below)
+D5B.3 Approved Master Delivery              IMPLEMENTED, LOCAL_VERIFIED (Windows; local branch)
 D6  End-to-End Personal Pilot
 ```
 
@@ -650,9 +650,10 @@ Evidência: `docs/superpowers/2026-10-11-d5b2b-verification.md`.
 
 ### D5B.3 — Approved Master Delivery
 
-**Status:** `IMPLEMENTED` na branch local `feat/d5b3-approved-delivery`, sem
+**Status:** `IMPLEMENTED`, `LOCAL_VERIFIED` (Windows), na branch local `feat/d5b3-approved-delivery`, sem
 merge/push/CI deste slice. Verificação completa/revisão em
 `docs/superpowers/2026-10-12-d5b3-verification.md`.
+Gate19/19,418 frontend,2.116 Python/30 skips; revisão sem achados bloqueantes.
 API/CLI/UI copiam apenas master aprovado para pasta configurada, sem novo encode/
 provider/worker/SQL. SHA/tamanho origem/destino verificados, receipt com UTC e
 SHA das evidências; replay/concurrency preservam original. GET revalida e bloqueia

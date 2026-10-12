@@ -11,11 +11,13 @@ entrega.
 
 ### Entregue hoje
 
-Checkpoint D5B.3 (2026-10-12), implementado na branch local
+Checkpoint D5B.3 (2026-10-12), `IMPLEMENTED`, `LOCAL_VERIFIED` (Windows), na branch local
 `feat/d5b3-approved-delivery`, ainda sem merge/push: entrega do master aprovado
 pela UI, API e CLI para pasta local configurada. Revalida aprovação/QC/recibos,
 copia os bytes existentes e verifica SHA/tamanho; replay preserva o recibo original.
-Sem encode, worker, tabela, dependência ou provider novos. Verificação completa e
+Sem encode, worker, tabela, dependência ou provider novos. Gate completo19/19:
+418 frontend,2.116 Python/30 skips; revisão independente sem achados bloqueantes.
+Verificação completa e
 revisão registradas em [evidência D5B.3](docs/superpowers/2026-10-12-d5b3-verification.md).
 O próximo recorte é D6, piloto pessoal real; testes sintéticos não ampliam
 `PROVIDER_VERIFIED`. Histórico técnico abaixo preserva o estado de cada checkpoint.

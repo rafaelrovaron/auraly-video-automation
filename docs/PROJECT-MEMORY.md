@@ -8,7 +8,7 @@ do produto planejado para impedir que roadmap seja confundido com capacidade exi
 
 ## Checkpoint local: D5B.3 — Approved Master Delivery (2026-10-12)
 
-Implementado na branch `feat/d5b3-approved-delivery`, ainda sem merge/push/CI
+`IMPLEMENTED`, `LOCAL_VERIFIED` (Windows), na branch `feat/d5b3-approved-delivery`, ainda sem merge/push/CI
 deste slice. Serviço único de entrega reutiliza HumanReviewService, master aberto
 e verificado, publicação exclusiva e revalidação das evidências. Só approved/QC
 passed; não herda aprovação entre planos. Sem encode/runtime novo, provider, Job,
@@ -22,6 +22,9 @@ retornam o vencedor original. GET órfão/corrupto não é ausência. POST expl�
 reconcilia apenas MP4 órfão de bytes iguais; conflito nunca é apagado.
 Root/ancestrais de work e symlinks/reparse recusados, filesystem precisa de hard links.
 Não é cloud delivery/attestation. Sem mídias reais ou créditos usados.
+Gate completo19/19,exit0:418 frontend,2.116 Python/30 skips (1.129,46s).
+Revisão independente sem Critical/Important/Minor a corrigir;2 skips novos de links
+exigem privilégio Windows, casos mantidos no CI Linux ainda não executado nesta branch.
 Resultados completos, revisão e decisões: `docs/superpowers/2026-10-12-d5b3-verification.md`.
 Próximo: D6 piloto pessoal end-to-end; não amplia PROVIDER_VERIFIED por fixtures.
 

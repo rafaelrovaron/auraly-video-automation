@@ -19,7 +19,7 @@ genérico e não terá timeline estilo CapCut ou preview frame-perfect.
 
 ### 2.1 Capacidade entregue
 
-Checkpoint D5B.3 (2026-10-12): `IMPLEMENTED` na branch local
+Checkpoint D5B.3 (2026-10-12): `IMPLEMENTED`, `LOCAL_VERIFIED` (Windows), na branch local
 `feat/d5b3-approved-delivery`, ainda sem merge/push/CI deste slice.
 Entrega via API/CLI/UI reutiliza master aprovado e verificado, sem encode,
 provider, Job, worker, tabela, migration ou dependência novos. Destino configurado
@@ -31,6 +31,7 @@ somente MP4 órfão exato pode ser reconciliado por POST explícito. Não há ov
 upload cloud ou retry automático. UI remove sucesso e bloqueia envio após falha
 de consulta; mounts/reloads só consultam. Filesystem local precisa de hard links.
 Verificação e revisão em `docs/superpowers/2026-10-12-d5b3-verification.md`.
+Gate19/19,418 frontend,2.116 Python/30 skips; revisão sem achados bloqueantes.
 D6 piloto pessoal real é o próximo recorte, sem ampliar PROVIDER_VERIFIED por fixtures.
 
 Baseline: D5B.2B main `71480f2`, Actions Linux/Windows38168870581 success.
