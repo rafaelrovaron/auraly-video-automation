@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { ApiError, campaignDetail, campaignPath, campaignStatus, campaignSummary, collection, jobSummary, object, operationView, pendingLabel, read, readWorker, sceneImages, statusLabel, voiceSummary } from './api';
-import type { CampaignDetail, CampaignStatus, CampaignSummary, Items, JobSummary, OperationView, SceneImages, VoiceSummary } from './api';
+import type { CampaignDetail, CampaignStatus, CampaignSummary, Items, JobSummary, OperationView, SceneImages, VoiceSummary, WorkerKind } from './api';
 import { heygenRenderView } from './heygenApi';
 import type { HeyGenRenderView } from './heygenApi';
 import { usePolling } from './usePolling';
@@ -110,6 +110,9 @@ export function CampaignDetailPanel({ campaignId, stage }: { campaignId: string;
     previousFingerprint.current = fingerprint;
   }, [fingerprint, detail.refresh, images.refresh, voices.refresh, renders.refresh]);
   const refresh = () => { detail.refresh(); status.refresh(); jobs.refresh(); worker.refresh(); images.refresh(); voices.refresh(); renders.refresh(); };
+  const workerConnected = Boolean(status.data && jobs.data && worker.data && !status.error && !jobs.error && !worker.error);
+  const stageWorkerKind: Record<CampaignStage, WorkerKind> = {overview: 'local_operations', script: 'local_operations', images: 'local_operations',
+    voice: 'voice_generate', videos: 'heygen_videos', editing: 'editing_render', finalization: 'local_operations'};
   return <>
     <a href="#/campaigns">← Campanhas</a><div className="section-heading"><h1>{detail.data?.displayName || campaignId}</h1><button onClick={refresh}>Atualizar</button></div>
     {stage && <>
@@ -209,6 +212,11 @@ export function CampaignDetailPanel({ campaignId, stage }: { campaignId: string;
     {stage && <section aria-label="Finalização" hidden={stage !== 'finalization'}><h2>Finalização</h2>
       <FinalizationPanel campaignId={campaignId} active={stage === 'finalization'} preferredPlan={finalizationPlan}/>
     </section>}
+    {stage && stage !== 'overview' && <section aria-label="Processamento desta etapa"><h2>Processamento desta etapa</h2>
+      <p>Escolha o tipo de tarefa desta etapa e consulte o andamento. Iniciar pode processar outras tarefas já na fila desta campanha; nada começa só por abrir a etapa.</p>
+      <WorkerControls key={stage} campaignId={campaignId} initialKind={stageWorkerKind[stage]} worker={worker} connected={workerConnected}
+        onRefresh={() => { status.refresh(); jobs.refresh(); }} />
+    </section>}
     <div hidden={!!stage && stage !== 'overview'}>
     <Section title="Jobs" state={jobs}>
       {jobs.data?.items.map(job => <article key={job.jobId}><button onClick={() => setSelectedJob(job.jobId)}>Ver tarefa · {taskLabel(job.jobType)} · {statusLabel(job.status)} · {job.jobId.slice(-4)}</button>
@@ -218,15 +226,15 @@ export function CampaignDetailPanel({ campaignId, stage }: { campaignId: string;
       {jobs.data?.items.length === 0 && <p>Nenhuma tarefa.</p>}
       {selectedJob && <JobDetail key={selectedJob} campaignId={campaignId} jobId={selectedJob} />}
     </Section>
-    <Section title="Worker" state={worker}>
+    <Section title="Processamento" state={worker}>
       <p>{worker.data?.scope === 'known' ? statusLabel(worker.data.value.state) : 'Estado desconhecido: worker não associado a esta campanha.'}</p>
-      {worker.data?.scope === 'known' && <Facts entries={[
+      {worker.data?.scope === 'known' && <TechnicalDetails entries={[
         ['Campanha', worker.data.value.campaignId], ['Tipo', worker.data.value.kind], ['Erro', worker.data.value.errorCode],
       ]} />}
       <p className="muted">Parado não significa que todos os Jobs terminaram. Nenhum worker inicia ao abrir esta página.</p>
     </Section>
     <WorkerControls campaignId={campaignId} worker={worker}
-      connected={Boolean(status.data && jobs.data && worker.data && !status.error && !jobs.error && !worker.error)}
+      connected={workerConnected}
       onRefresh={() => { status.refresh(); jobs.refresh(); }} />
     </div>
   </>;

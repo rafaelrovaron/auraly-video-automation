@@ -98,6 +98,15 @@ it('uses scene context for media titles and keeps hashes in closed technical det
   expect(await within(screen.getByRole('region', { name: 'HeyGen' })).findByRole('heading', { name: /Vídeo.*Room/ })).toBeTruthy();
 });
 
+it('places processing controls beside the video stage without starting them on navigation', async () => {
+  const calls = fakeApi();
+  render(<CampaignDetailPanel campaignId="campaign-one" stage="videos" />);
+  const section = await screen.findByRole('region', { name: 'Processamento desta etapa' });
+  expect((within(section).getByLabelText('Tipo de processamento') as HTMLSelectElement).value).toBe('heygen_videos');
+  expect(within(section).getByRole('button', { name: 'Iniciar processamento pendente' })).toBeTruthy();
+  expect(calls.every(call => call.method === 'GET')).toBe(true);
+});
+
 it('shows real metadata, nulls and renderer pending without players or POST', async () => {
   const calls = fakeApi();
   const { container } = render(<CampaignDetailPanel campaignId="campaign-one" />);
@@ -254,7 +263,7 @@ it.each([
   fireEvent.click(screen.getByRole('button', { name: 'Atualizar' }));
   expect(await within(section).findByText(/invalid_response.*Dados desatualizados/)).toBeTruthy();
   expect(screen.getByText('Copy hook')).toBeTruthy();
-  expect(screen.getByRole('heading', { name: 'Worker' })).toBeTruthy();
+  expect(screen.getByRole('heading', { name: 'Processamento' })).toBeTruthy();
 });
 
 it('rejects invalid list entry fields rather than rendering an object', async () => {

@@ -8,7 +8,7 @@ const kinds: WorkerKind[] = ['local_operations', 'voice_generate', 'voice_import
 function props(observation: WorkerObservation = { scope: 'known', value: { state: 'idle', campaignId: null, kind: null, errorCode: null } }): WorkerControlsProps {
   return { campaignId: 'campaign-one', worker: { data: observation, error: null, loading: false, lastSuccessAt: 1, lastSuccessReadId: 1, refresh: () => 2 }, connected: true, onRefresh: vi.fn() };
 }
-const start = () => fireEvent.click(screen.getByRole('button', { name: 'Iniciar worker' }));
+const start = () => fireEvent.click(screen.getByRole('button', { name: 'Iniciar processamento pendente' }));
 const confirm = () => fireEvent.click(screen.getByRole('button', { name: 'Confirmar início' }));
 
 it.each(kinds)('requires confirmation and sends exactly the selected campaign and kind %s', async kind => {
@@ -18,13 +18,30 @@ it.each(kinds)('requires confirmation and sends exactly the selected campaign an
     return Response.json({ state: 'running', campaignId: 'campaign-one', kind, errorCode: null }, { status: 202 });
   });
   render(<WorkerControls {...props()} />);
-  fireEvent.change(screen.getByLabelText('Tipo de worker'), { target: { value: kind } });
+  fireEvent.change(screen.getByLabelText('Tipo de processamento'), { target: { value: kind } });
   start();
-  expect(screen.getByText(/Jobs já enfileirados podem consumir créditos/)).toBeTruthy();
+  expect(screen.getByText(/Tarefas já enfileiradas podem consumir créditos/)).toBeTruthy();
   expect(requests).toHaveLength(0);
   confirm(); confirm();
   await act(async () => {});
   expect(requests).toEqual([{ path: '/api/v1/campaigns/campaign-one/worker/start', body: { campaignId: 'campaign-one', kind } }]);
+});
+
+it('opens stage processing with a human label while retaining the exact worker kind', async () => {
+  const requests: object[] = [];
+  vi.stubGlobal('fetch', async (_: string, options: RequestInit) => {
+    requests.push(JSON.parse(options.body as string));
+    return Response.json({ state: 'running', campaignId: 'campaign-one', kind: 'heygen_videos', errorCode: null });
+  });
+  render(<WorkerControls {...props()} initialKind="heygen_videos" />);
+  expect((screen.getByLabelText('Tipo de processamento') as HTMLSelectElement).value).toBe('heygen_videos');
+  expect(screen.getByRole('option', { name: 'Vídeos HeyGen' })).toBeTruthy();
+  expect(screen.queryByText(/\(heygen_videos\)/)).toBeNull();
+  start();
+  expect(screen.getByText(/Iniciar Vídeos HeyGen/)).toBeTruthy();
+  confirm();
+  await act(async () => {});
+  expect(requests).toEqual([{ campaignId: 'campaign-one', kind: 'heygen_videos' }]);
 });
 
 it('cancelled confirmation and navigation cannot submit the old campaign', () => {
@@ -39,10 +56,10 @@ it('cancelled confirmation and navigation cannot submit the old campaign', () =>
 
 it('does not stop an unassociated or foreign campaign worker', () => {
   const view = render(<WorkerControls {...props({ scope: 'unassociated' })} />);
-  expect((screen.getByRole('button', { name: 'Parar worker' }) as HTMLButtonElement).disabled).toBe(true);
-  expect((screen.getByRole('button', { name: 'Iniciar worker' }) as HTMLButtonElement).disabled).toBe(false);
+  expect((screen.getByRole('button', { name: 'Parar processamento' }) as HTMLButtonElement).disabled).toBe(true);
+  expect((screen.getByRole('button', { name: 'Iniciar processamento pendente' }) as HTMLButtonElement).disabled).toBe(false);
   view.rerender(<WorkerControls {...props({ scope: 'known', value: { state: 'running', campaignId: 'campaign-two', kind: 'heygen_videos', errorCode: null } })} />);
-  expect((screen.getByRole('button', { name: 'Parar worker' }) as HTMLButtonElement).disabled).toBe(true);
+  expect((screen.getByRole('button', { name: 'Parar processamento' }) as HTMLButtonElement).disabled).toBe(true);
 });
 
 it('stops only its running worker and describes draining without cancellation', async () => {
@@ -50,20 +67,21 @@ it('stops only its running worker and describes draining without cancellation', 
   vi.stubGlobal('fetch', async (_: string, options: RequestInit) => { requests.push(JSON.parse(options.body as string)); return Response.json({ state: 'stopping', campaignId: 'campaign-one', kind: 'local_operations', errorCode: null }); });
   const input = props({ scope: 'known', value: { state: 'running', campaignId: 'campaign-one', kind: 'local_operations', errorCode: null } });
   const view = render(<WorkerControls {...input} />);
-  fireEvent.click(screen.getByRole('button', { name: 'Parar worker' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Parar processamento' }));
   await act(async () => {});
   expect(requests).toEqual([{ campaignId: 'campaign-one' }]);
   expect(screen.getByText(/Não cancela/)).toBeTruthy();
   view.rerender(<WorkerControls {...props({ scope: 'known', value: { state: 'stopping', campaignId: 'campaign-one', kind: 'local_operations', errorCode: null } })} />);
-  expect((screen.getByRole('button', { name: 'Iniciar worker' }) as HTMLButtonElement).disabled).toBe(true);
-  expect((screen.getByRole('button', { name: 'Parar worker' }) as HTMLButtonElement).disabled).toBe(true);
+  expect((screen.getByRole('button', { name: 'Iniciar processamento pendente' }) as HTMLButtonElement).disabled).toBe(true);
+  expect((screen.getByRole('button', { name: 'Parar processamento' }) as HTMLButtonElement).disabled).toBe(true);
 });
 
 it('keeps 409 visible without falling back or retrying', async () => {
   let count = 0;
   vi.stubGlobal('fetch', async () => { count++; return Response.json({ error: { code: 'operation_conflict', field: null, message: 'private' } }, { status: 409 }); });
   render(<WorkerControls {...props()} />); start(); confirm();
-  expect(await screen.findByText(/operation_conflict/)).toBeTruthy();
+  expect(await screen.findByText(/Conflito|conflito|operação/i)).toBeTruthy();
+  expect(screen.getByText('operation_conflict').closest('details')).toBeTruthy();
   expect(count).toBe(1);
   expect(screen.queryByText('private')).toBeNull();
 });
@@ -74,9 +92,9 @@ it('does not retry a lost response and waits for a new read without claiming suc
   const input = props(); const view = render(<WorkerControls {...input} />);
   start(); confirm();
   expect(await screen.findByText(/Resultado do comando desconhecido/)).toBeTruthy();
-  expect((screen.getByRole('button', { name: 'Iniciar worker' }) as HTMLButtonElement).disabled).toBe(true);
+  expect((screen.getByRole('button', { name: 'Iniciar processamento pendente' }) as HTMLButtonElement).disabled).toBe(true);
   view.rerender(<WorkerControls {...input} worker={{ ...input.worker, lastSuccessAt: 2, lastSuccessReadId: 2 }} />);
-  expect((screen.getByRole('button', { name: 'Iniciar worker' }) as HTMLButtonElement).disabled).toBe(false);
+  expect((screen.getByRole('button', { name: 'Iniciar processamento pendente' }) as HTMLButtonElement).disabled).toBe(false);
   expect(screen.getByText(/Resultado do comando desconhecido/)).toBeTruthy();
   expect(screen.queryByText(/sucesso|concluído/i)).toBeNull();
   expect(attempts).toBe(1);
@@ -84,9 +102,9 @@ it('does not retry a lost response and waits for a new read without claiming suc
 
 it('disables writes while disconnected and recovers after pertinent reads succeed', () => {
   const view = render(<WorkerControls {...props()} connected={false} />);
-  expect((screen.getByRole('button', { name: 'Iniciar worker' }) as HTMLButtonElement).disabled).toBe(true);
+  expect((screen.getByRole('button', { name: 'Iniciar processamento pendente' }) as HTMLButtonElement).disabled).toBe(true);
   view.rerender(<WorkerControls {...props()} connected />);
-  expect((screen.getByRole('button', { name: 'Iniciar worker' }) as HTMLButtonElement).disabled).toBe(false);
+  expect((screen.getByRole('button', { name: 'Iniciar processamento pendente' }) as HTMLButtonElement).disabled).toBe(false);
 });
 
 it('discards a late command response even after navigating away and back to the same campaign', async () => {
@@ -112,10 +130,10 @@ it.each(['during POST', 'after POST'])('does not reconcile from a GET started be
   if (completion === 'during POST') view.rerender(<WorkerControls {...input} worker={earlierRead} />);
   await act(async () => reject(new TypeError('lost response')));
   if (completion === 'after POST') view.rerender(<WorkerControls {...input} worker={earlierRead} />);
-  expect((screen.getByRole('button', { name: 'Iniciar worker' }) as HTMLButtonElement).disabled).toBe(true);
+  expect((screen.getByRole('button', { name: 'Iniciar processamento pendente' }) as HTMLButtonElement).disabled).toBe(true);
   expect(input.worker.refresh).toHaveBeenCalledOnce();
   expect(fetcher).toHaveBeenCalledOnce();
   view.rerender(<WorkerControls {...input} worker={{ ...input.worker, lastSuccessAt: 3, lastSuccessReadId: 3 }} />);
-  expect((screen.getByRole('button', { name: 'Iniciar worker' }) as HTMLButtonElement).disabled).toBe(false);
+  expect((screen.getByRole('button', { name: 'Iniciar processamento pendente' }) as HTMLButtonElement).disabled).toBe(false);
   expect(screen.getByText(/Resultado do comando desconhecido/)).toBeTruthy();
 });
