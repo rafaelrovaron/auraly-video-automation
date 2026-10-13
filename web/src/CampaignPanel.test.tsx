@@ -192,6 +192,16 @@ it('labels a task by state and keeps its full identity in technical details', as
   expect(within(detailRegion).getByText('job-one', {selector: 'dd'}).closest('details')?.open).toBe(false);
 });
 
+it('shows an imported image through the verified campaign media route', async () => {
+  fakeApi({'/images': {items: [{sceneVariantId: 'scene-one', items: [{imageCandidateId: 'image-one', sceneVariantId: 'scene-one',
+    reviewStatus: 'pending', sourceKind: 'manual_import', sourcePath: 'campaigns/campaign-one/image.png', format: 'png',
+    sha256: 'c'.repeat(64), width: 1080, height: 1920, sizeBytes: 123, rejectionReason: null}]}]}});
+  render(<CampaignDetailPanel campaignId="campaign-one" stage="images" />);
+  const image = await screen.findByRole('img', {name: /Imagem.*Room/});
+  expect(image.getAttribute('src')).toBe(`/api/v1/campaigns/campaign-one/images/image-one/media/${'c'.repeat(64)}`);
+  expect(image.getAttribute('src')).not.toContain('campaigns/campaign-one/image.png');
+});
+
 it('refreshes assets when live counts change but not on unchanged polling', async () => {
   vi.useFakeTimers();
   const calls = fakeApi();

@@ -224,6 +224,14 @@ it('shows voice context instead of full identifiers in the normal review view', 
   expect(screen.getAllByText(/Áudio principal · copy v1/).find(node => node.tagName === 'P')?.textContent).not.toContain('voice-one');
   expect(screen.getByText('voice-one').closest('details')?.querySelector('summary')?.textContent).toBe('Detalhes técnicos');
 });
+it('plays the processed WAV from its verified media route while keeping approval explicit', () => {
+  fakeApi(); render(<VoicePanel {...reviewProps()} />);
+  fireEvent.change(screen.getByLabelText('Voice Master para revisar'), {target: {value: 'voice-one'}});
+  const player = screen.getByLabelText('Ouvir áudio principal') as HTMLAudioElement;
+  expect(player.getAttribute('src')).toBe(`/api/v1/campaigns/campaign-one/voices/voice-one/media/${'b'.repeat(64)}`);
+  expect(player.controls).toBe(true);
+  expect((screen.getByLabelText('Ouvi o WAV processado e revisei os resultados') as HTMLInputElement).checked).toBe(false);
+});
 async function fillReview() {
   fireEvent.change(screen.getByLabelText('Voice Master para revisar'), {target: {value: 'voice-one'}});
   fireEvent.change(screen.getByLabelText('Responsável pela revisão de voz'), {target: {value: 'reviewer'}});

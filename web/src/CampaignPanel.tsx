@@ -155,6 +155,7 @@ export function CampaignDetailPanel({ campaignId, stage }: { campaignId: string;
       <ImageImportPanel key={campaignId} campaignId={campaignId} detail={detail} images={images} jobs={jobs} />
       {images.data?.items.flatMap(scene => scene.items.map(image => <article key={image.imageCandidateId}>
         <h3>Imagem · {detail.data?.sceneVariants.find(item => item.sceneVariantId === image.sceneVariantId)?.location || 'Cena'} · {fileName(image.sourcePath)}</h3>
+        {image.sha256 && <img className="image-preview" loading="lazy" alt={`Imagem · ${detail.data?.sceneVariants.find(item => item.sceneVariantId === image.sceneVariantId)?.location || 'Cena'}`} src={campaignPath(campaignId, `/images/${encodeURIComponent(image.imageCandidateId)}/media/${image.sha256}`)} />}
         <Facts entries={[
           ['Estado', statusLabel(image.reviewStatus)], ['Origem', image.sourceKind],
           ['Dimensões', `${image.width} × ${image.height}`], ['Tamanho', `${(image.sizeBytes / 1024).toFixed(1)} KB`],

@@ -170,6 +170,16 @@ def create_app(settings: ApiSettings) -> FastAPI:
     def voices(campaignId: CampaignId, queries: Queries) -> Items[VoiceSummary]:
         return Items(items=queries.list_voices(campaignId))
 
+    @app.get('/api/v1/campaigns/{campaignId}/images/{imageId}/media/{sourceSha256}', response_class=Response)
+    def image_media(campaignId: CampaignId, imageId: EditId, sourceSha256: PlanHash, queries: Queries) -> Response:
+        content, media_type = queries.get_image_media(campaignId, imageId, sourceSha256)
+        return Response(content, media_type=media_type, headers={'Cache-Control': 'no-store'})
+
+    @app.get('/api/v1/campaigns/{campaignId}/voices/{voiceId}/media/{processedSha256}', response_class=Response)
+    def voice_media(campaignId: CampaignId, voiceId: EditId, processedSha256: PlanHash, queries: Queries) -> Response:
+        return Response(queries.get_voice_media(campaignId, voiceId, processedSha256), media_type='audio/wav',
+                        headers={'Cache-Control': 'no-store'})
+
     @app.get("/api/v1/campaigns/{campaignId}/heygen/renders")
     def renders(campaignId: CampaignId, queries: Queries) -> Items[RenderSummary]:
         return Items(items=queries.list_renders(campaignId))

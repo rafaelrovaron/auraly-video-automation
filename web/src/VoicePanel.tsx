@@ -243,9 +243,10 @@ function VoiceForms({campaignId, detail, voices, jobs}: Props) {
     </select></label>
     {reviewVoice && <div><p>Áudio principal · copy v{reviewVoice.copyMasterVersion} · geração {reviewVoice.generation} · {statusLabel(reviewVoice.status)}</p>
       <p>WAV processado · duração: {reviewVoice.durationSeconds ?? 'Não disponível'} s</p>
+      {reviewVoice.processedAudioPath && reviewVoice.processedSha256 && <audio aria-label="Ouvir áudio principal" controls preload="metadata" src={campaignPath(campaignId, `/voices/${encodeURIComponent(reviewVoice.voiceMasterId)}/media/${reviewVoice.processedSha256}`)} />}
       <details><summary>Detalhes técnicos</summary><p>{reviewVoice.voiceMasterId}</p><p>{reviewVoice.provider}</p><p>WAV: {reviewVoice.processedAudioPath ?? 'Não disponível'}</p><p>SHA-256: {reviewVoice.processedSha256 ?? 'Não disponível'}</p></details>
       <p>Transcrição: {reviewVoice.transcriptMatchStatus ?? 'Não disponível'} · headline falada: {String(reviewVoice.headlineSpoken)} · QC: {reviewVoice.qcFindings.join('; ') || 'Sem findings'}</p>
-      <p>Ouça o WAV fora do painel: combine o caminho em Detalhes técnicos com o work root configurado no servidor. A existência do arquivo não significa aprovação.</p>
+      <p>Ouça o WAV processado antes de revisar. Reproduzir o áudio não aprova a voz automaticamente.</p>
       {exception && <p>Exceção restrita: transcrição importada requer revisão humana. Motivo obrigatório; o backend mantém os gates de aprovação.</p>}
       <div><label>Responsável pela revisão de voz <input value={reviewActor} disabled={blocked} onChange={event => editReview(() => setReviewActor(event.target.value))} /></label>
         <label>Motivo da revisão de voz <textarea value={reason} disabled={blocked} onChange={event => editReview(() => setReason(event.target.value))} /></label>

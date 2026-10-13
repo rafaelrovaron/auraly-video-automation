@@ -94,6 +94,37 @@ class ApiQueries:
                 for voice in sorted(self.voices.list(campaign_id=campaign_id),
                                     key=lambda item: item.voice_master_id)]
 
+    def _verified_media(self, path: str, sha256: str, *, size: int | None = None) -> bytes:
+        root = self.editing.work_root
+        try:
+            source = validate_editing_path(root, root / relative_path(path))
+            if not source.is_file() or source.stat().st_size > 100 * 1024 * 1024:
+                raise QueryError('artifact_invalid')
+            data = source.read_bytes()
+            if (size is not None and len(data) != size) or hashlib.sha256(data).hexdigest() != sha256:
+                raise QueryError('artifact_invalid')
+            return data
+        except (EditingError, ValueError, OSError):
+            raise QueryError('artifact_invalid') from None
+
+    def get_image_media(self, campaign_id: str, image_id: str, sha256: str) -> tuple[bytes, str]:
+        image = next((item for scene in self.list_images(campaign_id) for item in scene.items
+                      if item.image_candidate_id == image_id), None)
+        if image is None:
+            raise QueryError('not_found')
+        media_type = {'png': 'image/png', 'jpeg': 'image/jpeg', 'jpg': 'image/jpeg', 'webp': 'image/webp'}.get(image.format)
+        if sha256 != image.sha256 or media_type is None:
+            raise QueryError('artifact_invalid')
+        return self._verified_media(image.source_path, image.sha256, size=image.size_bytes), media_type
+
+    def get_voice_media(self, campaign_id: str, voice_id: str, sha256: str) -> bytes:
+        voice = next((item for item in self.list_voices(campaign_id) if item.voice_master_id == voice_id), None)
+        if voice is None:
+            raise QueryError('not_found')
+        if not voice.processed_audio_path or not voice.processed_sha256 or sha256 != voice.processed_sha256:
+            raise QueryError('artifact_invalid')
+        return self._verified_media(voice.processed_audio_path, voice.processed_sha256)
+
     def list_renders(self, campaign_id: str) -> list[RenderSummary]:
         self.campaign(campaign_id)
         return [RenderSummary(
