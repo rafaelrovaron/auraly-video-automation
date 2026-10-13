@@ -1,6 +1,6 @@
 # Auraly Mass Video Pipeline — Memória do Projeto
 
-**Atualizado em:** 2026-10-12
+**Atualizado em:** 2026-10-13
 **Decisão vigente:** MVP delivery-first para uso local e pessoal
 
 Este documento guarda decisões duráveis e fatos verificados. O estado entregue aparece separado
@@ -11,7 +11,7 @@ do produto planejado para impedir que roadmap seja confundido com capacidade exi
 Feedback explícito de Rafael: UI/UX pouco amigável, muitos hashes/IDs expostos,
 necessidade de separar etapas em abas e funcionar bem no celular. O próximo recorte
 planejado passa a ser D4C, antes de concluir D6. D4C.1 foi implementado na branch
-`feat/d4c1-navigation`; D4C.2–4 seguem planejados.
+`feat/d4c2-human-labels`; D4C.2 está em execução e D4C.3–4 seguem planejados.
 
 Direção: nomes/contexto legíveis, dados técnicos recolhidos, navegação por etapa,
 formulários guiados e mobile desde o primeiro slice. Preservar IDs/contratos,
@@ -25,6 +25,13 @@ Roteiro, Imagens, Voz, Vídeos, Edição e Finalização; navegação compacta n
 sem perder rascunhos ao alternar etapas. Finalização recupera o plano salvo para
 render/revisão. Verificação focada: 424 testes frontend, build, mypy dos testes,
 Ruff/mypy de produção e 41 E2E web passaram; gate completo de integração pendente.
+
+Checkpoint D4C.2 (branch, ainda sem merge/push): nome opcional de campanha persistido,
+apresentação contextual de campanhas/cenas/variantes e detalhes técnicos recolhidos.
+HeyGen, QC, render e entrega agora priorizam estado e ação legíveis, preservando IDs
+originais nos payloads e detalhes. Verificação focada: 446 testes frontend e build
+passaram; E2E alterados passaram em execução separada. Outros painéis e validação
+integrada/mobile seguem pendentes; D4C.2 não é `LOCAL_VERIFIED`.
 
 D5B.3 e o ajuste de host remoto foram integrados/enviados a main no merge `c8c3cab`.
 O resultado de CI desse merge não foi reconsultado neste planejamento; os checkpoints

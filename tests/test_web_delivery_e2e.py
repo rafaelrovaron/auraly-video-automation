@@ -56,6 +56,8 @@ def test_approved_master_delivery_reload_and_corruption(panel_servers: PanelServ
     expect(send).to_be_disabled()
     reload_render(page, render, plan, job_id)
     expect(delivery.get_by_text('Entrega local verificada', exact=True)).to_be_visible()
+    expect(delivery.get_by_text('Arquivo: master.mp4', exact=False)).to_be_visible()
+    delivery.get_by_text('Detalhes técnicos da entrega', exact=True).click()
     expect(delivery.get_by_text(record['deliveredAt'] + ' (UTC)', exact=True)).to_be_visible()
     assert receipt.read_bytes() == original
     assert immutable == {path: file_sha(path) for path in immutable}

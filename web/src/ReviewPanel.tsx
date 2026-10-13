@@ -75,16 +75,22 @@ function ReviewFlow({target}:{target:ReviewTarget}){
     <video aria-label="Master final" controls preload="metadata" style={{width:'100%',maxHeight:480,background:'#111'}} src={renderMediaUrl(target.campaignId,target.jobId,target.outputVariantId)}/>
     <button disabled={blocked} onClick={()=>{void qc();}}>Executar QC</button>
     <button disabled={busy||reading} onClick={()=>{void inspectRef.current();}}>Consultar QC e review</button>
-    {unknownQc&&<><p>Envio QC desconhecido: {unknownQc.executionId}. Consulte antes de nova execução.</p><button disabled={busy||reading||!absentQc} onClick={abandon}>Abandonar envio QC desconhecido</button></>}
-    {state?.runs.map(run=><p key={run.jobId}>Execução QC {run.request.executionId}: {run.status==='queued'?'QC na fila':statusLabel(run.status)}
+    {unknownQc&&<><p>Envio de QC sem confirmação. Consulte antes de nova execução.</p>
+      <details><summary>Detalhes técnicos do envio</summary><p>{unknownQc.executionId}</p></details>
+      <button disabled={busy||reading||!absentQc} onClick={abandon}>Abandonar envio QC desconhecido</button></>}
+    {state?.runs.map(run=><div key={run.jobId}><p>{run.status==='queued'?'QC na fila':`QC: ${statusLabel(run.status)}`}
       {run.result?.result.outputs[0].status==='error'?' · QC não concluído; repare os inputs/runtime antes de nova execução.':''}
-      {run.errorCode?' · '+new ApiError(run.errorCode).message:''}</p>)}
+      {run.errorCode?' · '+new ApiError(run.errorCode).message:''}</p>
+      <details><summary>Detalhes técnicos da execução</summary><p>{run.request.executionId}</p><p>Job: {run.jobId}</p></details></div>)}
     {qcPending&&<button disabled={busy||reading||workerUnknown} onClick={()=>{void startPending();}}>Iniciar QC pendente</button>}
     {(qcPending||workerUnknown)&&<button disabled={busy||reading} onClick={()=>{void consultWorker();}}>Consultar worker QC</button>}
     {!!state?.reports.length&&<label>Relatório QC<select aria-label="Relatório QC" value={selected} disabled={busy||!!pendingReview||!!state.review} onChange={e=>{setSelected(e.target.value);setWatched(false);}}>
-      <option value="">Selecione um QC</option>{state.reports.map(r=><option key={r.qcKey} value={r.qcKey}>{r.qcKey} · {r.status} · {r.policy.version} · {r.runtime.fingerprint}</option>)}
+      <option value="">Selecione um QC</option>{state.reports.map(r=><option key={r.qcKey} value={r.qcKey}>
+        Verificação {r.status==='passed'?'aprovada':'bloqueada'} · política {r.policy.version} · {r.qcKey.slice(0,4)}
+      </option>)}
     </select></label>}
     {report&&<><p>QC técnico: {report.status==='passed'?'Aprovado':'Bloqueado'}</p>
+      <details><summary>Detalhes técnicos do QC</summary><p>{report.qcKey}</p><p>Runtime: {report.runtime.fingerprint}</p></details>
       {report.checks.map(check=><div key={check.name}><p>{check.name}: {check.status}</p>{check.findings.map((f,index)=><p key={index}>{Object.hasOwn(findings,f.code)?findings[f.code]:'Verificação bloqueada; confira os inputs e o plano salvo.'}</p>)}</div>)}
       {report.audio&&<p>Volume: {report.audio.integratedLoudnessLufs??'não mensurável'} LUFS · Pico: {report.audio.truePeakDbtp??'não mensurável'} dBTP</p>}
       <p>Texto medido no layout do manifest, não nos frames gravados.</p></>}

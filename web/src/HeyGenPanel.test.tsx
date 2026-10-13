@@ -55,6 +55,33 @@ it('test_prepare_enqueues_wrapper_without_start', async () => {
   expect(screen.getByText(/Inicie heygen_assets explicitamente/)).toBeTruthy();
 });
 
+it('shows HeyGen progress without full asset and operation IDs in the normal view', async () => {
+  fakeApi(); await openPanel(); fireEvent.click(prepare());
+  await screen.findByText(/Uploads planejados: 2/);
+  const panel = document.querySelector('.heygen-panel')!;
+  const visible = [...panel.querySelectorAll('p')].filter(node => !node.closest('details')).map(node => node.textContent).join(' ');
+  for (const id of ['voice-one', 'wrapper-one', 'child-one']) expect(visible).not.toContain(id);
+  const technical = [...panel.querySelectorAll('details')].map(node => node.textContent).join(' ');
+  for (const id of ['voice-one', 'wrapper-one', 'child-one']) expect(technical).toContain(id);
+});
+it('inspects a persisted operation by its original job ID behind a short label', async () => {
+  const api = fakeApi(); api.data['/jobs'] = {items: [child, {...child, jobId: 'wrapper-one', jobType: 'api.local.operation'}]};
+  await openPanel();
+  const select = screen.getByLabelText('Inspecionar operação HeyGen') as HTMLSelectElement;
+  expect(select.options[1].value).toBe('wrapper-one');
+  expect(select.options[1].textContent).not.toContain('wrapper-one');
+});
+it('shows a readable operation error while keeping its code in technical details', async () => {
+  const api = fakeApi(); api.setWrapper({jobId: 'wrapper-one', campaignId: 'campaign-one', operation: 'heygen_assets',
+    status: 'failed', errorCode: 'artifact_invalid', result: null});
+  await openPanel(); fireEvent.click(prepare());
+  await screen.findByText(/Artefato armazenado inválido/);
+  const panel = document.querySelector('.heygen-panel')!;
+  const visible = [...panel.querySelectorAll('p')].filter(node => !node.closest('details')).map(node => node.textContent).join(' ');
+  expect(visible).not.toContain('artifact_invalid');
+  expect([...panel.querySelectorAll('details')].map(node => node.textContent).join(' ')).toContain('artifact_invalid');
+});
+
 it.each(['failed', 'blocked'])('test_assets_child_failure_is_not_completion (%s)', async failure => {
   const api = fakeApi(); api.data['/jobs'] = {items: [{...child, status: failure}]}; await openPanel(); fireEvent.click(prepare());
   expect(await screen.findByText(failure === 'failed' ? 'Upload falhou; consulte o Job filho.' : 'Upload bloqueado; consulte o Job filho.')).toBeTruthy();
@@ -176,6 +203,18 @@ it('test_submit_uses_confirmed_plan_config_and_separate_request_id', async () =>
   expect(api.calls[1].body.requestId).not.toBe(api.calls[0].body.requestId);
   expect(api.calls.some(call => call.path.endsWith('/worker/start'))).toBe(false);
 });
+it('shows a reserved video by scene while retaining render and job IDs in technical details', async () => {
+  fakePlanApi(); await planBatch(); confirmPaid(); fireEvent.click(submitButton());
+  await screen.findByText(/Reservas aceitas/);
+  const panel = document.querySelector('.heygen-panel')!;
+  const visible = [...panel.querySelectorAll('p')].filter(node => !node.closest('details')).map(node => node.textContent).join(' ');
+  expect(visible).not.toContain('render-one');
+  expect(visible).not.toContain('video-job');
+  expect(visible).toContain('Room');
+  const technical = [...panel.querySelectorAll('details')].map(node => node.textContent).join(' ');
+  expect(technical).toContain('render-one');
+  expect(technical).toContain('video-job');
+});
 it.each(['type', 'scene'])('test_submit_rejects_contradictory_child_job (%s)', async mismatch => {
   const api = fakePlanApi(planResult, false);
   api.data['/jobs'] = {items: [{...child, jobId: 'video-job', jobType: mismatch === 'type' ? 'heygen.asset.upload' : 'heygen.video.generate',
@@ -272,6 +311,12 @@ function fakeReconcileApi(known = false, returned?: unknown) {
 }
 const reconcileButton = () => screen.getByRole('button', {name: 'Reconciliar render HeyGen'});
 async function selectReconcile() {await openPanel(); fireEvent.change(screen.getByLabelText('Render para reconciliação'), {target: {value: 'render-one'}});}
+it('selects a blocked HeyGen video by context while keeping the render ID as its value', async () => {
+  fakeReconcileApi(); await openPanel();
+  const select = screen.getByLabelText('Render para reconciliação') as HTMLSelectElement;
+  expect(select.options[1].value).toBe('render-one');
+  expect(select.options[1].textContent).not.toContain('render-one');
+});
 it('test_invalid_later_reconcile_read_blocks_another_command', async () => {
   const api = fakeReconcileApi(); await selectReconcile(); fireEvent.click(reconcileButton());
   await screen.findByText(/Job retornado: recovery-job/);
@@ -305,6 +350,15 @@ it('test_no_id_reconciliation_does_not_assume_no_dispatch', async () => {
 it('test_reconciliation_observes_recovery_job_without_start', async () => {
   fakeReconcileApi(); await selectReconcile(); fireEvent.click(reconcileButton());
   expect(await screen.findByText(/Job retornado: recovery-job/)).toBeTruthy(); expect(screen.getByText(/Retomada ainda não comprovada/)).toBeTruthy();
+});
+it('keeps reconciliation IDs in technical details after a result is returned', async () => {
+  fakeReconcileApi(); await selectReconcile(); fireEvent.click(reconcileButton());
+  await screen.findByText('Reconciliação recebida; consulte o render e o Job atual.');
+  const panel = document.querySelector('.heygen-panel')!;
+  const visible = [...panel.querySelectorAll('p')].filter(node => !node.closest('details')).map(node => node.textContent).join(' ');
+  for (const id of ['render-one', 'recovery-job', 'reconcile-job']) expect(visible).not.toContain(id);
+  const technical = [...panel.querySelectorAll('details')].map(node => node.textContent).join(' ');
+  for (const id of ['render-one', 'recovery-job', 'reconcile-job']) expect(technical).toContain(id);
 });
 it('test_same_job_recovery_requires_new_reads_and_resumed_states', async () => {
   const api = fakeReconcileApi(false, reservation); await selectReconcile(); fireEvent.click(reconcileButton());
@@ -401,7 +455,7 @@ it.each([{...reservation, sceneVariantId: 'foreign'}, {...reservation, imageCand
 
 it('test_accepted_queued_wrapper_does_not_allow_duplicate_intent', async () => {
   const api = fakeApi(); api.setWrapper({jobId: 'wrapper-one', campaignId: 'campaign-one', operation: 'heygen_assets', status: 'queued', result: null, errorCode: null});
-  await openPanel(); fireEvent.click(prepare()); await screen.findByText(/Operação: wrapper-one · queued/);
+  await openPanel(); fireEvent.click(prepare()); await screen.findByText('Preparação HeyGen: Na fila');
   expect((prepare() as HTMLButtonElement).disabled).toBe(true); fireEvent.click(prepare()); expect(api.calls).toHaveLength(1);
 });
 

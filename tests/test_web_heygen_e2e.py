@@ -183,6 +183,7 @@ def test_lost_heygen_response_does_not_repost(panel_servers: PanelServers, panel
                 if job.job_type == 'api.local.operation' and panel_servers.app.state.commands.jobs.get_job(job.job_id).input.get('operation') == 'heygen_assets']
     assert len(posts) == 1 and len(wrappers) == 1
     assert panel_servers.provider.events == []
+    panel_page.get_by_text('Detalhes técnicos da operação', exact=True).click()
     expect(panel_page.get_by_text('Intenção:', exact=False)).to_be_visible()
     assert panel_page.get_by_text('Operação:', exact=False).count() == 0
 

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ApiError, campaignPath, post, read } from './api';
+import { ApiError, campaignPath, post, read, statusLabel } from './api';
 import type { CampaignDetail, CampaignStatus, Items, JobSummary, SceneImages, VoiceSummary } from './api';
 import { HEYGEN_DEFAULT_CONFIG, heygenOperationView, heygenSubmission } from './heygenApi';
 import type { HeyGenAssetsResult, HeyGenOperationKind, HeyGenOperationView, HeyGenPlanResult, HeyGenSubmitResult, HeyGenRenderView } from './heygenApi';
@@ -109,7 +109,8 @@ function HeyGenForms({campaignId, detail, status, images, voices, jobs, renders}
     <p>Todas as cenas; imagens e WAV aprovados. OAuth usa a conexão existente da CLI.</p>
     {!fresh && <p role="alert">Dados desatualizados ou indisponíveis. Atualize antes de agir.</p>}
     {!eligible && <p>É necessária uma voz aprovada e uma imagem aprovada por cena.</p>}
-    {approved.length === 1 && <p>Áudio aprovado: {approved[0].voiceMasterId} · copy v{approved[0].copyMasterVersion}</p>}
+    {approved.length === 1 && <><p>Áudio principal aprovado · roteiro v{approved[0].copyMasterVersion}</p>
+      <details><summary>Detalhes técnicos do áudio</summary><p>{approved[0].voiceMasterId}</p></details></>}
     <button disabled={actionBlocked} onClick={() => void command('heygen_assets')}>Preparar assets HeyGen</button>
     <h4>Planejamento e geração</h4><p>Defaults: imagem · 9:16 · 1080p · MP4 · cover · medium. O plano é informativo; o backend recalcula na submissão.</p>
     <label>Limite total de renders reservados da campanha <input inputMode="numeric" value={cap} onChange={event => setCap(event.target.value)} /></label>
@@ -122,15 +123,20 @@ function HeyGenForms({campaignId, detail, status, images, voices, jobs, renders}
     <button disabled={actionBlocked || !planUsable || !paid || !actor.trim() || plan!.reservedCount + plan!.newCount > capNumber}
       onClick={() => void command('heygen_video_submit')}>Enfileirar geração HeyGen</button>
     {submitted && <div><p>Reservas aceitas; não significa MP4 concluído. Inicie heygen_videos explicitamente para os Jobs de vídeo da campanha.</p>
-      {submitted.renders.map(render => <p key={render.renderId}>Reserva: {render.renderId} · Job: {render.jobId}</p>)}</div>}
+      {submitted.renders.map(render => <div key={render.renderId}>
+        <p>Vídeo reservado · {detail.data?.sceneVariants.find(scene => scene.sceneVariantId === render.sceneVariantId)?.location || 'Cena'} · {render.renderId.slice(-4)}</p>
+        <details><summary>Detalhes técnicos do vídeo</summary><p>Reserva: {render.renderId}</p><p>Job: {render.jobId}</p></details>
+      </div>)}</div>}
     {submissionPending && <p>Jobs de vídeo ainda não comprovados por leitura atual; submissão preservada sem reenvio.</p>}
-    <p role="status">{notice}</p>{requestId && <p>Intenção: {requestId}</p>}
-    {wrapper && <p>Operação: {wrapper.jobId} · {operation.data?.status ?? 'Aguardando leitura'}</p>}
+    <p role="status">{notice}</p>{requestId && <details><summary>Detalhes técnicos da operação</summary><p>Intenção: {requestId}</p>
+      {wrapper && <p>Operação: {wrapper.jobId}</p>}</details>}
+    {wrapper && <p>Preparação HeyGen: {operation.data ? statusLabel(operation.data.status) : 'Aguardando leitura'}</p>}
     {operation.error && <p role="alert">Leitura da operação indisponível; fatos anteriores preservados.</p>}
-    {operation.data?.errorCode && <p>Erro da operação: {operation.data.errorCode}</p>}
+    {operation.data?.errorCode && <><p role="status">{new ApiError(operation.data.errorCode).message}</p>
+      <details><summary>Detalhes técnicos do erro</summary><p>{operation.data.errorCode}</p></details></>}
     {assets && <div><p>Uploads planejados: {assets.uploadCount} · reuso: {assets.reusedCount}</p>
       {assets.jobId === null ? <p>Nenhum upload novo enfileirado. Planeje os vídeos para revalidar os assets remotos.</p>
-        : <><p>Job de upload: {assets.jobId}</p>
+        : <><p>Upload de assets enfileirado.</p><details><summary>Detalhes técnicos do upload</summary><p>Job: {assets.jobId}</p></details>
           {!child || jobs.error ? <p>Job filho ainda não comprovado por leitura atual.</p>
             : child.status === 'failed' ? <p>Upload falhou; consulte o Job filho.</p>
               : child.status === 'blocked' ? <p>Upload bloqueado; consulte o Job filho.</p>
@@ -138,18 +144,19 @@ function HeyGenForms({campaignId, detail, status, images, voices, jobs, renders}
                   : <p>Inicie heygen_assets explicitamente para processar o Job de upload.</p>}</>}
     </div>}
     <label>Inspecionar operação HeyGen <select value={inspect} onChange={event => setInspect(event.target.value)}>
-      <option value="">Selecione um Job</option>{jobs.data?.items.filter(job => job.jobType === 'api.local.operation').map(job => <option key={job.jobId} value={job.jobId}>{job.jobId}</option>)}
+      <option value="">Selecione uma operação</option>{jobs.data?.items.filter(job => job.jobType === 'api.local.operation').map(job =>
+        <option key={job.jobId} value={job.jobId}>Operação local · {statusLabel(job.status)} · {job.jobId.slice(-4)}</option>)}
     </select></label>
     <label>Tipo da operação inspecionada <select value={inspectKind} onChange={event => setInspectKind(event.target.value as HeyGenOperationKind)}>
       <option value="heygen_assets">Assets</option><option value="heygen_video_plan">Plano</option><option value="heygen_video_submit">Submissão</option><option value="heygen_reconcile">Reconciliação</option>
     </select></label>
     <button disabled={!inspect || !fresh || busy} onClick={() => {setWrapper({jobId: inspect, kind: inspectKind}); setNotice('Inspeção não comprova identidade ou autoria da intenção.');}}>Inspecionar Job HeyGen</button>
     {unknown && <button disabled={busy} onClick={() => {setUnknown(false); setNotice('Intenção encerrada sem reenvio. Verifique os Jobs antes de criar outra ação.');}}>Encerrar intenção desconhecida sem reenviar</button>}
-    <HeyGenReconcileForm campaignId={campaignId} jobs={jobs} renders={renders} />
+    <HeyGenReconcileForm campaignId={campaignId} detail={detail} jobs={jobs} renders={renders} />
   </div>;
 }
 
-function HeyGenReconcileForm({campaignId, jobs, renders}: Pick<HeyGenPanelProps, 'campaignId' | 'jobs' | 'renders'>) {
+function HeyGenReconcileForm({campaignId, detail, jobs, renders}: Pick<HeyGenPanelProps, 'campaignId' | 'detail' | 'jobs' | 'renders'>) {
   const [selected, setSelected] = useState(''), [video, setVideo] = useState(''), [binding, setBinding] = useState(false);
   const [busy, setBusy] = useState(false), [unknown, setUnknown] = useState(false), [notice, setNotice] = useState('');
   const [intentId, setIntentId] = useState('');
@@ -212,7 +219,9 @@ function HeyGenReconcileForm({campaignId, jobs, renders}: Pick<HeyGenPanelProps,
       && ['queued', 'running', 'retry_scheduled', 'completed'].includes(job.status));
   return <div><h4>Reconciliação</h4><p>Selecione explicitamente um render cujo Job esteja blocked. Não há resume ou start automático.</p>
     <label>Render para reconciliação <select value={selected} disabled={busy || unknown || awaiting} onChange={event => {setSelected(event.target.value); setVideo(''); setBinding(false);}}>
-      <option value="">Selecione um render</option>{candidates.map(render => <option key={render.renderId} value={render.renderId}>{render.renderId}</option>)}
+      <option value="">Selecione um vídeo</option>{candidates.map(render => <option key={render.renderId} value={render.renderId}>
+        Vídeo · {detail.data?.sceneVariants.find(scene => scene.sceneVariantId === render.sceneVariantId)?.location || 'Cena'} · {render.renderId.slice(-4)}
+      </option>)}
     </select></label>
     <label>ID exato do vídeo HeyGen <input value={render?.remoteVideoId ?? video} readOnly={!!render?.remoteVideoId} disabled={busy || unknown || awaiting}
       onChange={event => {setVideo(event.target.value); setBinding(false);}} /></label>
@@ -220,11 +229,16 @@ function HeyGenReconcileForm({campaignId, jobs, renders}: Pick<HeyGenPanelProps,
       onChange={event => setBinding(event.target.checked)} />Confirmo o vínculo manual deste ID exato com o render selecionado.</label>}
     <p>Somente o backend pode provar ausência de dispatch. Sem ID ele pode recusar a retomada; não pressupomos que nenhuma chamada ocorreu.</p>
     <button disabled={blocked} onClick={() => void reconcile()}>Reconciliar render HeyGen</button>
-    <p role="status">{notice}</p>{intentId && <p>Intenção de reconciliação: {intentId}</p>}
-    {wrapper && <p>Wrapper de reconciliação: {wrapper.jobId} · {operation.data?.status ?? 'Aguardando leitura'}</p>}
+    <p role="status">{notice}</p>{wrapper && <p>Reconciliação: {operation.data ? statusLabel(operation.data.status) : 'Aguardando leitura'}</p>}
+    {(intentId || wrapper || accepted) && <details><summary>Detalhes técnicos da reconciliação</summary>
+      {intentId && <p>Intenção de reconciliação: {intentId}</p>}
+      {wrapper && <p>Wrapper de reconciliação: {wrapper.jobId}</p>}
+      {accepted && <p>Render retornado: {accepted.renderId} · Job retornado: {accepted.jobId}</p>}
+    </details>}
     {operation.error && <p role="alert">Leitura da reconciliação indisponível; preserve o draft e inspecione o Job.</p>}
-    {operation.data?.errorCode && <p>Erro de reconciliação: {operation.data.errorCode}</p>}
-    {accepted && <><p>Render retornado: {accepted.renderId} · Job retornado: {accepted.jobId}</p>
+    {operation.data?.errorCode && <><p role="status">{new ApiError(operation.data.errorCode).message}</p>
+      <details><summary>Detalhes técnicos do erro</summary><p>{operation.data.errorCode}</p></details></>}
+    {accepted && <><p>Vídeo em reconciliação · {detail.data?.sceneVariants.find(scene => scene.sceneVariantId === accepted.expected.sceneVariantId)?.location || 'Cena'}</p>
       <p>{recovered ? 'Retomada comprovada por render e Job atuais; inicie heygen_videos explicitamente se estiver na fila.' : 'Retomada ainda não comprovada por leitura atual de render e Job.'}</p></>}
     {unknown && <button disabled={busy} onClick={() => {setUnknown(false); setNotice('Intenção de reconciliação encerrada sem reenvio. Inspecione os Jobs antes de outra ação.');}}>Encerrar reconciliação desconhecida sem reenviar</button>}
   </div>;

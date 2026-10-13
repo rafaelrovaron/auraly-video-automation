@@ -33,7 +33,9 @@ function DeliveryFlow({target,review}:{target:ReviewTarget;review:HumanReviewRec
     <p>Destino padrão: work/deliveries. Configure AURALY_DELIVERY_ROOT antes de iniciar a API para usar outra pasta.</p>
     <button disabled={!ready||busy||reading||!!record} onClick={()=>{void send();}}>Entregar master aprovado</button>
     <button disabled={busy||reading} onClick={()=>{void inspect();}}>Consultar entrega</button>
-    {record&&<><p>Entrega local verificada</p><p>{record.path}</p><p>SHA-256: {record.masterSha256}</p><p>{record.deliveredAt} (UTC)</p><p>Recibo original, somente leitura.</p></>}
+    {record&&<><p>Entrega local verificada</p><p>Arquivo: {record.path.split(/[\\/]/).at(-1)} · {new Date(record.deliveredAt).toLocaleString('pt-BR')}</p>
+      <details><summary>Detalhes técnicos da entrega</summary><p>{record.path}</p><p>SHA-256: {record.masterSha256}</p><p>{record.deliveredAt} (UTC)</p></details>
+      <p>Recibo original, somente leitura.</p></>}
     {notice&&<p role="status">{notice}</p>}
   </section>;
 }

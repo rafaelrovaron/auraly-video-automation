@@ -56,6 +56,13 @@ it('lost POST reconciles only exact execution identity',async()=>{
   vi.mocked(listRenders).mockResolvedValueOnce({items:[queued]});fireEvent.click(screen.getByRole('button',{name:'Consultar execuções'}));
   await waitFor(()=>expect(getRender).toHaveBeenCalled());expect(submitRender).toHaveBeenCalledOnce();expect(startRenderWorker).not.toHaveBeenCalled();
 });
+it('keeps an uncertain render execution ID in technical details',async()=>{
+  vi.mocked(submitRender).mockRejectedValueOnce(new ApiError('command_unknown'));
+  render(<RenderPanel campaignId={plan.campaignId} plan={plan}/>);
+  fireEvent.click(screen.getByRole('button',{name:'Renderizar'}));
+  await screen.findByText(/Resultado do comando desconhecido/);
+  expect(screen.getByText(body.executionId).closest('details')?.querySelector('summary')?.textContent).toBe('Detalhes técnicos do envio');
+});
 it('shows partial outcomes, safe media links and explicit new execution',async()=>{
   vi.mocked(getRender).mockResolvedValue(completed);
   render(<RenderPanel campaignId={plan.campaignId} plan={plan}/>);fireEvent.click(screen.getByRole('button',{name:'Renderizar'}));

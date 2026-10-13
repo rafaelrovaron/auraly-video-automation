@@ -102,7 +102,8 @@ function RenderFlow({campaignId,plan}:Props){
     <label>Execução de render<select aria-label="Execução de render" value={job?.jobId??''} disabled={sending||!!pending} onChange={e=>choose(e.target.value)}>
       <option value="">Selecione</option>{runs.map(v=><option key={v.jobId} value={v.jobId}>Render {statusLabel(v.status).toLocaleLowerCase()} · {v.jobId.slice(0,8)}</option>)}
     </select></label>
-    {pending&&<p>Execução enviada: {pending.executionId}. Consulte antes de decidir outra ação; nenhum reenvio automático.</p>}
+    {pending&&<><p>Envio do render sem confirmação. Consulte antes de decidir outra ação; nenhum reenvio automático.</p>
+      <details><summary>Detalhes técnicos do envio</summary><p>{pending.executionId}</p></details></>}
     {(pending||job&&monitor&&active(job))&&<button disabled={sending||!!pending&&!pendingConsulted} onClick={abandon}>Abandonar acompanhamento do render</button>}
     {job&&<><p>Render: {statusLabel(job.status)}</p><details><summary>Detalhes técnicos</summary><p>{job.jobId}</p></details>
       {job.status==='queued'&&<button disabled={sending||workerUnknown} onClick={()=>{void startPending();}}>Iniciar render pendente</button>}

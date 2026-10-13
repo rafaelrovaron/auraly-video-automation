@@ -29,6 +29,28 @@ beforeEach(()=>{
   vi.spyOn(crypto,'randomUUID').mockReturnValue(executionId);vi.spyOn(window,'confirm').mockReturnValue(true);
 });
 async function mount(state=empty){vi.mocked(getReviewState).mockResolvedValue(state);const view=render(<ReviewPanel target={target}/>);await waitFor(()=>expect(screen.getByRole('button',{name:'Consultar QC e review'}).hasAttribute('disabled')).toBe(false));return view;}
+it('labels QC reports by result and keeps hashes in technical details',async()=>{
+  await mount(ready);
+  const select=screen.getByLabelText('Relatório QC') as HTMLSelectElement;
+  expect(select.options[1].value).toBe(report.qcKey);
+  expect(select.options[1].textContent).not.toContain(report.qcKey);
+  expect(select.options[1].textContent).not.toContain(report.runtime.fingerprint);
+  expect(screen.getByText(report.qcKey).closest('details')?.querySelector('summary')?.textContent).toBe('Detalhes técnicos do QC');
+});
+it('shows QC execution status without the full execution ID',async()=>{
+  await mount(queued);
+  const section=screen.getByRole('region',{name:'QC e review variant-a'});
+  const visible=[...section.querySelectorAll('p')].filter(node=>!node.closest('details')).map(node=>node.textContent).join(' ');
+  expect(visible).toContain('QC na fila');
+  expect(visible).not.toContain(executionId);
+  expect(screen.getByText(executionId).closest('details')?.querySelector('summary')?.textContent).toBe('Detalhes técnicos da execução');
+});
+it('keeps an uncertain QC request ID available without showing it in the normal view',async()=>{
+  await mount();vi.mocked(submitQc).mockRejectedValueOnce(new ApiError('command_unknown'));
+  fireEvent.click(screen.getByRole('button',{name:'Executar QC'}));
+  await screen.findByText(/Resultado do comando desconhecido/);
+  expect(screen.getByText(executionId).closest('details')?.querySelector('summary')?.textContent).toBe('Detalhes técnicos do envio');
+});
 it('mounts delivery only for a definitive approved review',async()=>{
   const approved=record({...context,qcKey:report.qcKey,decision:'approved',reviewedBy:'Tester',comment:null,watchedAndListened:true});
   const view=await mount({...ready,review:approved});expect(screen.getByText('Approved delivery controls')).toBeTruthy();view.unmount();

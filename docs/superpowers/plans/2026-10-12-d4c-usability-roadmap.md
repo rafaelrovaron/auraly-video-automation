@@ -1,7 +1,7 @@
 # D4C — Plano de melhoria da experiência do painel
 
 **Data:** 2026-10-12
-**Status:** `PLANNED`. Planejamento solicitado pelo usuário; nenhuma alteração de produto implementada neste documento.
+**Status:** `IN_PROGRESS`. D4C.1 implementado; D4C.2 em execução na branch `feat/d4c2-human-labels`; D4C.3–4 planejados. Gate completo e validação móvel pendentes.
 **Objetivo:** operar uma campanha sem interpretar hashes, memorizar IDs ou procurar ações em uma página extensa, tanto no desktop quanto no celular.
 **Execução:** incremental e nativa, reutilizando React, FastAPI e os serviços existentes. Cada slice terá tarefas pequenas, testes proporcionais e revisão conforme o workflow do repositório.
 
@@ -129,4 +129,4 @@ Arquivos principais: `styles.css`, componentes ajustados nos slices anteriores, 
 
 Rafael consegue localizar cada etapa, entender a pendência, configurar três headlines sobre um vídeo existente, gerar/revisar/entregar um resultado e consultar progresso no celular sem interpretar hashes, copiar IDs entre telas ou perder rascunhos ao navegar. Confirmação humana de usabilidade é distinta de testes determinísticos. A/B não regenera voz/imagem/HeyGen; aprovações permanecem explícitas; falhas e respostas desconhecidas não causam repetição automática.
 
-Este documento é o plano de execução por slices solicitado para o roadmap. Não representa redesign implementado, aprovação visual de telas ainda inexistentes ou autorização para executar novas gerações pagas. O primeiro entregável de desenvolvimento é D4C.1.
+Este documento é o plano de execução por slices solicitado para o roadmap. Os checkpoints implementados não equivalem à aprovação visual do conjunto nem autorizam novas gerações pagas. A validação integral de D4C permanece pendente.

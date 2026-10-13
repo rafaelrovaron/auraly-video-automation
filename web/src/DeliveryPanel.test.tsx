@@ -14,6 +14,17 @@ const send=()=>screen.getByRole('button',{name:'Entregar master aprovado'}) as H
 const consult=()=>fireEvent.click(screen.getByRole('button',{name:'Consultar entrega'}));
 beforeEach(()=>{vi.mocked(getDelivery).mockResolvedValue({request,record:null});vi.mocked(submitDelivery).mockResolvedValue(record);});
 async function mount(){const view=render(<DeliveryPanel target={target} review={review}/>);await waitFor(()=>expect(send().disabled).toBe(false));return view;}
+it('shows a readable delivered file while retaining path and hash in technical details',async()=>{
+  vi.mocked(getDelivery).mockResolvedValue({request,record});
+  render(<DeliveryPanel target={target} review={review}/>);
+  await screen.findByText('Entrega local verificada');
+  const section=screen.getByRole('region',{name:'Entrega local variant-a'});
+  const visible=[...section.querySelectorAll('p')].filter(node=>!node.closest('details')).map(node=>node.textContent).join(' ');
+  expect(visible).toContain('master.mp4');
+  expect(visible).not.toContain(record.path);
+  expect(visible).not.toContain(record.masterSha256);
+  expect(screen.getByText(record.path).closest('details')?.querySelector('summary')?.textContent).toBe('Detalhes técnicos da entrega');
+});
 it('never sends automatically; explicit double click sends once; reload original read-only receipt',async()=>{
   const view=await mount();expect(submitDelivery).not.toHaveBeenCalled();expect(screen.getByText(/não é upload/)).toBeTruthy();
   fireEvent.click(send());fireEvent.click(send());await screen.findByText('Entrega local verificada');expect(submitDelivery).toHaveBeenCalledOnce();expect(send().disabled).toBe(true);
