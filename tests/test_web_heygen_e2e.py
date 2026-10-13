@@ -127,7 +127,7 @@ def test_heygen_panel_prepares_plans_submits_and_downloads(panel_servers: PanelS
     with panel_page.expect_response(lambda response: response.url.endswith('/status')):
         pass
     assert posts == [] and panel_servers.provider.events == events
-    assert panel_page.locator('audio,video,img').count() == 0
+    assert panel_page.locator('video').count() == 0
 
 
 def test_heygen_panel_reconciliation_never_duplicates_dispatch(

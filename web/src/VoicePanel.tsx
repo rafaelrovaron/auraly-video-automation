@@ -126,7 +126,7 @@ function VoiceForms({campaignId, detail, voices, jobs}: Props) {
       if (!alive.current) return;
       if (!voiceSubmission(result) || result.operation !== 'voice_generate' || result.campaignId !== campaignId) throw new ApiError('command_unknown');
       setSelectedJob(result.jobId); setAcceptedVoice(result.voiceMasterId!); clearForm('generation');
-      setNotice('Job na fila. Inicie voice_generate explicitamente; isso não aprova o áudio.');
+      setNotice('Geração de voz na fila. Inicie o processamento pendente explicitamente; isso não aprova o áudio.');
     } catch (error) {
       if (!alive.current) return;
       const failure = error instanceof ApiError ? error : new ApiError('command_unknown');
@@ -273,7 +273,7 @@ function VoiceOperationMonitor({campaignId, jobId, kind, voiceId, onChange, onCo
     {operation.data && <><p>Operação de voz: {statusLabel(operation.data.status)}</p>
       {operation.data.errorCode && <p>{new ApiError(operation.data.errorCode).message}</p>}
       <details><summary>Detalhes técnicos da operação</summary><p>Operação: {jobId} · {operation.data.operation}</p><p>Erro: {operation.data.errorCode ?? 'Não disponível'}</p></details></>}
-    {!result && !operation.error && <p>Fase 1: executar operação local (local_operations)</p>}
+    {!result && !operation.error && <p>Fase 1: inicie o processamento local pendente.</p>}
     {result?.operation === 'voice_import' && <><p>Fase 2: processar voz importada</p><p>Áudio importado recebido.
       {operation.error ? ' Contexto da operação desatualizado; último resultado válido preservado.' : ' Inicie voice_import explicitamente.'}</p>
       <details><summary>Detalhes técnicos do áudio importado</summary><p>Voice Master importado: {result.voiceMasterId}</p></details>

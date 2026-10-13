@@ -48,6 +48,7 @@ def headlines(servers: PanelServers, panel: Locator) -> None:
     group.get_by_label('Vídeo · Headline · enabled · Modo', exact=True).select_option('replace')
     group.get_by_label('Vídeo · Headline · enabled', exact=True).check()
     group.get_by_label('Vídeo · Headline · font · Modo', exact=True).select_option('replace')
+    group.get_by_text('Vídeo · Headline · font · Referência avançada', exact=True).click()
     group.get_by_label('Vídeo · Headline · font · Caminho', exact=True).fill('render-font.ttf')
     group.get_by_label('Vídeo · Headline · font · SHA-256', exact=True).fill(file_sha(font))
     for key in ['a', 'b', 'c']:

@@ -55,10 +55,10 @@ def test_generate_voice_from_new_campaign_without_auto_start(
         panel_page.get_by_label(label, exact=True).fill(value)
     panel_page.get_by_label('Autorizo o gasto desta geração', exact=True).check()
     panel_page.get_by_role('button', name='Enfileirar geração de voz', exact=True).click()
-    expect(panel_page.get_by_text('voice.generate · queued', exact=True)).to_be_visible()
+    expect(panel_page.get_by_text('Geração de voz: Na fila', exact=True)).to_be_visible()
     assert panel_speech_provider.calls == []
     start_kind(panel_page, 'voice_generate')
-    expect(panel_page.get_by_text('voice.generate · completed', exact=True)).to_be_visible(timeout=30000)
+    expect(panel_page.get_by_text('Geração de voz: Concluído', exact=True)).to_be_visible(timeout=30000)
     assert len(panel_speech_provider.calls) == 1
     assert panel_speech_provider.calls[0]['text'] == 'Hook\n\nBody\n\nCTA'
     voice = commands.voices.list(campaign_id=campaign_id)[0]
@@ -87,14 +87,14 @@ def test_import_voice_two_workers_then_review_preserves_source(
     panel_page.get_by_label('Caminho relativo do áudio', exact=True).fill('voice-source.wav')
     panel_page.get_by_label('Confirmo o arquivo e a versão da copy', exact=True).check()
     panel_page.get_by_role('button', name='Enfileirar importação de voz', exact=True).click()
-    expect(panel_page.get_by_text('Fase 1: executar operação local (local_operations)', exact=True)).to_be_visible()
+    expect(panel_page.get_by_text('Fase 1: inicie o processamento local pendente.', exact=True)).to_be_visible()
     assert panel_servers.app.state.commands.voices.list(campaign_id=campaign_id) == []
     start_kind(panel_page, 'local_operations')
-    expect(panel_page.get_by_text('voice.import · queued', exact=True)).to_be_visible(timeout=15000)
+    expect(panel_page.get_by_text('Processamento do áudio importado: Na fila', exact=True)).to_be_visible(timeout=15000)
     voice = panel_servers.app.state.commands.voices.list(campaign_id=campaign_id)[0]
     assert voice.status == 'pending'
     start_kind(panel_page, 'voice_import')
-    expect(panel_page.get_by_text('voice.import · completed', exact=True)).to_be_visible(timeout=30000)
+    expect(panel_page.get_by_text('Processamento do áudio importado: Concluído', exact=True)).to_be_visible(timeout=30000)
     panel_page.get_by_role('combobox', name='Voice Master para revisar', exact=True).select_option(voice.voice_master_id)
     expect(panel_page.get_by_text('Áudio principal · copy v1 · geração 1 · Aguardando revisão', exact=True)).to_be_visible(timeout=15000)
     panel_page.get_by_label('Responsável pela revisão de voz', exact=True).fill('tester')

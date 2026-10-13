@@ -61,7 +61,7 @@ it('test_generation_pins_copy_and_requires_fresh_budget_and_confirmation', async
   const calls = fakeApi(); render(<VoicePanel {...props()} />); await fillGenerate();
   expect((generate() as HTMLButtonElement).disabled).toBe(true); fireEvent.click(screen.getByLabelText('Autorizo o gasto desta geração'));
   fireEvent.click(generate()); fireEvent.click(generate());
-  await screen.findByText(/Job na fila.*voice_generate/);
+  await screen.findByText(/Geração de voz na fila.*processamento pendente/);
   expect(calls).toHaveLength(1);
   expect(calls[0].body).toEqual({campaignId: 'campaign-one', copyMasterVersion: 1, voiceId: 'voice-test', modelId: 'model-test',
     voiceSettings: {}, outputFormat: 'mp3_44100_128', transcriptMatchThreshold: 0.97, paidRequestApproved: true, paidRequestApprovedBy: 'tester', approvedBudgetCents: 500});
@@ -93,7 +93,7 @@ it('test_lost_generation_response_never_matches_by_copy_or_provider', async () =
   render(<VoicePanel {...props()} />); await fillGenerate(); fireEvent.click(screen.getByLabelText('Autorizo o gasto desta geração')); fireEvent.click(generate());
   await screen.findByText(/command_unknown/); expect((generate() as HTMLButtonElement).disabled).toBe(true);
   fireEvent.click(generate()); expect(calls).toHaveLength(1);
-  expect(screen.queryByText(/Job na fila/)).toBeNull();
+  expect(screen.queryByText(/Geração de voz na fila/)).toBeNull();
 });
 
 it('test_budget_commit_with_lost_response_requires_later_get', async () => {
@@ -121,7 +121,7 @@ it('test_late_generation_does_not_mutate_other_campaign', async () => {
   await waitFor(() => expect(finish).toBeTypeOf('function'));
   view.unmount(); render(<VoicePanel {...props()} campaignId="campaign-two" detail={state({...campaign, campaignId: 'campaign-two'})} />);
   await act(async () => finish(Response.json({operation: 'voice_generate', campaignId: 'campaign-one', jobId: 'job-one', voiceMasterId: 'voice-one'})));
-  expect(screen.queryByText(/Job na fila/)).toBeNull();
+  expect(screen.queryByText(/Geração de voz na fila/)).toBeNull();
 });
 
 it('test_stale_or_incomplete_voice_dto_keeps_last_good_data', async () => {
@@ -297,7 +297,7 @@ it('test_stale_completed_wrapper_preserves_child_snapshot_and_phase', async () =
   fireEvent.click(screen.getByRole('button', {name: 'Consultar operação de voz'})); await screen.findByText(/internal_error/);
   expect(screen.getByText('Processamento do áudio importado: Falhou')).not.toBeNull();
   expect(screen.getByText('child-one').closest('details')?.querySelector('summary')?.textContent).toBe('Detalhes técnicos da tarefa');
-  expect(screen.queryByText('Fase 1: executar operação local (local_operations)')).toBeNull();
+  expect(screen.queryByText('Fase 1: inicie o processamento local pendente.')).toBeNull();
   expect(screen.queryByText(/Inicie voice_import explicitamente/)).toBeNull();
 });
 
@@ -337,7 +337,7 @@ it.each(['generation', 'import', 'review', 'budget'])('test_%s_submission_preser
   } else {
     fireEvent.change(screen.getByLabelText('Motivo da revisão de voz'), {target: {value: 'Unsubmitted review draft'}});
     if (section === 'generation') {
-      fireEvent.click(screen.getByLabelText('Autorizo o gasto desta geração')); fireEvent.click(generate()); await screen.findByText(/Job na fila/);
+      fireEvent.click(screen.getByLabelText('Autorizo o gasto desta geração')); fireEvent.click(generate()); await screen.findByText(/Geração de voz na fila/);
     } else if (section === 'import') {
       fireEvent.click(importButton()); await screen.findByText(/Importação enfileirada/);
     } else {

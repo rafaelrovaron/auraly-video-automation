@@ -30,8 +30,10 @@ def test_profiles_create_version_and_reload(panel_servers: PanelServers, panel_p
     original = path.read_bytes()
     panel_page.get_by_role('button', name='Criar nova versão', exact=True).click()
     panel_page.get_by_label('Headline · Cor (RGB/RGBA)', exact=True).fill('#FFFFFF80')
+    panel_page.get_by_text('Headline · Fonte: referência avançada', exact=True).click()
     panel_page.get_by_label('Headline · Fonte: caminho relativo', exact=True).fill('fonts/local.ttf')
     panel_page.get_by_label('Headline · Fonte: SHA-256', exact=True).fill('a' * 64)
+    panel_page.get_by_text('Música · Asset: referência avançada', exact=True).click()
     panel_page.get_by_label('Música · Asset: caminho relativo', exact=True).fill('music/local.wav')
     panel_page.get_by_label('Música · Asset: SHA-256', exact=True).fill('b' * 64)
     panel_page.get_by_label('Música · Volume (dB)', exact=True).fill('0')
@@ -120,6 +122,7 @@ def test_profiles_narrow_width(panel_servers: PanelServers, panel_page: Page, wi
     panel_page.get_by_role('button', name='Criar nova versão', exact=True).focus()
     panel_page.keyboard.press('Enter')
     panel_page.get_by_label('Nome do profile', exact=True).fill('Long name ' * 20)
+    panel_page.get_by_text('Headline · Fonte: referência avançada', exact=True).click()
     panel_page.get_by_label('Headline · Fonte: caminho relativo', exact=True).fill('fonts/' + 'a' * 150 + '.ttf')
     assert panel_page.evaluate('document.documentElement.scrollWidth <= window.innerWidth'), panel_page.evaluate(
         'Array.from(document.querySelectorAll("select,input,button")).filter(el => el.getBoundingClientRect().right > innerWidth).map(el => ({tag:el.tagName,label:el.closest("label")?.textContent}))'

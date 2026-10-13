@@ -81,6 +81,7 @@ def preview_headline(servers: PanelServers, panel: Locator) -> None:
     group.get_by_label('Vídeo · Headline · enabled · Modo', exact=True).select_option('replace')
     group.get_by_label('Vídeo · Headline · enabled', exact=True).check()
     group.get_by_label('Vídeo · Headline · font · Modo', exact=True).select_option('replace')
+    group.get_by_text('Vídeo · Headline · font · Referência avançada', exact=True).click()
     group.get_by_label('Vídeo · Headline · font · Caminho', exact=True).fill('preview-font.ttf')
     group.get_by_label('Vídeo · Headline · font · SHA-256', exact=True).fill(file_sha(font))
 
@@ -204,6 +205,7 @@ def test_caption_timing_missing_is_pending(panel_servers: PanelServers, panel_pa
     panel.get_by_label('Vídeo · Legendas · enabled · Modo', exact=True).select_option('replace')
     panel.get_by_label('Vídeo · Legendas · enabled', exact=True).check()
     panel.get_by_label('Vídeo · Legendas · font · Modo', exact=True).select_option('replace')
+    panel.get_by_text('Vídeo · Legendas · font · Referência avançada', exact=True).click()
     panel.get_by_label('Vídeo · Legendas · font · Caminho', exact=True).fill('font.ttf')
     panel.get_by_label('Vídeo · Legendas · font · SHA-256', exact=True).fill(file_sha(font))
     validate(panel_page, panel)
