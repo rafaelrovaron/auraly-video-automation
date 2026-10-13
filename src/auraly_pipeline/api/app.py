@@ -170,12 +170,15 @@ def create_app(settings: ApiSettings) -> FastAPI:
     def voices(campaignId: CampaignId, queries: Queries) -> Items[VoiceSummary]:
         return Items(items=queries.list_voices(campaignId))
 
-    @app.get('/api/v1/campaigns/{campaignId}/images/{imageId}/media/{sourceSha256}', response_class=Response)
+    @app.get('/api/v1/campaigns/{campaignId}/images/{imageId}/media/{sourceSha256}', response_class=Response,
+             responses={200: {'content': {mime: {'schema': {'type': 'string', 'format': 'binary'}}
+                                         for mime in ('image/png', 'image/jpeg', 'image/webp')}}})
     def image_media(campaignId: CampaignId, imageId: EditId, sourceSha256: PlanHash, queries: Queries) -> Response:
         content, media_type = queries.get_image_media(campaignId, imageId, sourceSha256)
         return Response(content, media_type=media_type, headers={'Cache-Control': 'no-store'})
 
-    @app.get('/api/v1/campaigns/{campaignId}/voices/{voiceId}/media/{processedSha256}', response_class=Response)
+    @app.get('/api/v1/campaigns/{campaignId}/voices/{voiceId}/media/{processedSha256}', response_class=Response,
+             responses={200: {'content': {'audio/wav': {'schema': {'type': 'string', 'format': 'binary'}}}}})
     def voice_media(campaignId: CampaignId, voiceId: EditId, processedSha256: PlanHash, queries: Queries) -> Response:
         return Response(queries.get_voice_media(campaignId, voiceId, processedSha256), media_type='audio/wav',
                         headers={'Cache-Control': 'no-store'})

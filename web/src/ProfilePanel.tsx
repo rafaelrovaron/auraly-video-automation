@@ -48,7 +48,7 @@ export function ProfilePanel() {
   }
   function create() {
     if(!discard())return;reset();setView(null);setSelected('');
-    setDraft({initial:newProfile('','',new Date().toISOString()),creating:true,key:++draftKey.current});
+    setDraft({initial:newProfile(`style-${crypto.randomUUID().slice(0,8)}`,'',new Date().toISOString()),creating:true,key:++draftKey.current});
   }
   function version() {
     if(!view||!discard())return;reset();

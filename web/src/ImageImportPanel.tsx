@@ -119,7 +119,7 @@ export function ImageImportPanel({ campaignId, detail, images, jobs }: Props) {
   const blocked = busy || Boolean(intent) || !connected;
   return <section aria-label="Importação manual de imagens">
     <h3>Batch manual de imagens</h3>
-    <p>Prepare a pasta, copie seus arquivos pelo Explorer, associe cada cena e salve. Não há monitoramento automático da pasta nem upload no navegador.</p>
+    <p>Prepare a pasta, copie seus arquivos pelo Explorer, associe cada cena e salve. Não há monitoramento automático da pasta nem upload no navegador. No celular, este painel controla a máquina que executa o Auraly; o caminho não acessa arquivos do telefone.</p>
     {!connected && <p role="alert">Dados indisponíveis ou desatualizados. Atualize antes de enviar comandos.</p>}
     <label>Pasta de importação (relativa ao work root)<input value={output} disabled={busy || Boolean(intent?.jobId === null)} onChange={event => edit(() => setOutput(event.target.value))} placeholder="imports/campanha" /></label>
     <button disabled={blocked || !relativeImagePath(normalize(output))} onClick={() => void submit('image_prepare', '/images/import/prepare', { outputPath: normalize(output) })}>Preparar pasta</button>

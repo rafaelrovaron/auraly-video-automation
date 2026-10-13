@@ -35,6 +35,17 @@ it('loads local assets for a new style without requiring a typed hash',async()=>
   await screen.findByText('Versão publicada e confirmada.');
   expect(s.stored.get('brand/1')?.profile.defaults.headline.font).toEqual({path:'assets/fonts/Brand.ttf',sha256:'b'.repeat(64)});
 });
+it('creates a style from its name with a stable generated technical ID', async () => {
+  const s=server(); render(<ProfilePanel/>);
+  fireEvent.click(await screen.findByRole('button',{name:'Novo profile'}));
+  const id=screen.getByLabelText('ID do profile') as HTMLInputElement;
+  expect(id.value).toMatch(/^style-[a-f0-9]{8}$/);
+  expect(id.closest('details')?.open).toBe(false);
+  fireEvent.change(screen.getByLabelText('Nome do profile'),{target:{value:'Orgânico'}});
+  fireEvent.click(screen.getByRole('button',{name:'Salvar versão'}));
+  await screen.findByText('Versão publicada e confirmada.');
+  expect(s.stored.get(`${id.value}/1`)?.profile.name).toBe('Orgânico');
+});
 async function select(key='plain/1') {
   await screen.findByRole('option',{name:/Plain · v1/});
   fireEvent.change(screen.getByLabelText('Consultar profile e versão'),{target:{value:key}});

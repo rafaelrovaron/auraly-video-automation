@@ -124,8 +124,11 @@ export function ProfileForm({initial,creating,readOnly,disabled,assets=[],onSubm
     <p>Música exige aceitação por edição; timing das legendas não é definido neste profile.</p>
     {error&&<p role="alert" id={errorId}>{error}</p>}
     <fieldset disabled={readOnly||disabled}><legend>Identidade</legend>
-      <label>ID do profile<input name="profileId" defaultValue={initial.profileId} readOnly={!creating} required/></label>
       <label>Nome do profile<input name="name" defaultValue={initial.name} required/></label>
+      <details><summary>Código técnico do estilo</summary>
+        <label>ID do profile<input name="profileId" defaultValue={initial.profileId} readOnly={!creating} required/></label>
+        <p>Gerado automaticamente. Altere apenas se precisar de um código específico.</p>
+      </details>
       <p>Versão: {initial.version} · Data: {initial.createdAt}</p>
     </fieldset>
     <fieldset disabled={readOnly||disabled}><legend>Output</legend>

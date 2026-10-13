@@ -47,7 +47,7 @@ def test_all_spec_get_routes_and_openapi(tmp_path: Path, mp4: bytes) -> None:
         assert client.get("/api/v1/editing/profiles/plain/1").status_code == 200
         assert client.get("/docs").status_code == 200
         schema = client.get("/openapi.json").json()
-        assert sum("get" in path for path in schema["paths"].values()) == 22
+        assert sum("get" in path for path in schema["paths"].values()) == 25
         for name, path in schema["paths"].items():
             if "get" not in path:
                 continue
@@ -57,6 +57,11 @@ def test_all_spec_get_routes_and_openapi(tmp_path: Path, mp4: bytes) -> None:
                 assert content == {'image/png': {'schema': {'type': 'string', 'format': 'binary'}}}
             elif name.endswith('/outputs/{outputVariantId}/media'):
                 assert content == {'video/mp4': {'schema': {'type': 'string', 'format': 'binary'}}}
+            elif name.endswith('/images/{imageId}/media/{sourceSha256}'):
+                assert set(content) == {'image/png', 'image/jpeg', 'image/webp'}
+                assert all(value == {'schema': {'type': 'string', 'format': 'binary'}} for value in content.values())
+            elif name.endswith('/voices/{voiceId}/media/{processedSha256}'):
+                assert content == {'audio/wav': {'schema': {'type': 'string', 'format': 'binary'}}}
             else:
                 assert content["application/json"]["schema"]
 

@@ -15,6 +15,7 @@ pytest_plugins = ['tests.test_heygen_video_media']
 def create_profile(servers: PanelServers, page: Page, profile_id: str = 'ui-test') -> None:
     page.goto(servers.ui_url + '#/profiles')
     page.get_by_role('button', name='Novo profile', exact=True).click()
+    page.get_by_text('Código técnico do estilo', exact=True).click()
     page.get_by_label('ID do profile', exact=True).fill(profile_id)
     page.get_by_label('Nome do profile', exact=True).fill('Local profile')
     page.get_by_role('button', name='Salvar versão', exact=True).click()
@@ -67,6 +68,7 @@ def test_saved_profile_with_lost_response(panel_servers: PanelServers, panel_pag
     panel_page.route('**/api/v1/editing/profiles', lose_response)
     panel_page.goto(panel_servers.ui_url + '#/profiles')
     panel_page.get_by_role('button', name='Novo profile', exact=True).click()
+    panel_page.get_by_text('Código técnico do estilo', exact=True).click()
     panel_page.get_by_label('ID do profile', exact=True).fill('lost-response')
     panel_page.get_by_label('Nome do profile', exact=True).fill('Local profile')
     panel_page.get_by_role('button', name='Salvar versão', exact=True).click()
