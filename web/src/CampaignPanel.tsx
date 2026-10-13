@@ -112,7 +112,7 @@ export function CampaignDetailPanel({ campaignId, stage }: { campaignId: string;
   const refresh = () => { detail.refresh(); status.refresh(); jobs.refresh(); worker.refresh(); images.refresh(); voices.refresh(); renders.refresh(); };
   const workerConnected = Boolean(status.data && jobs.data && worker.data && !status.error && !jobs.error && !worker.error);
   const stageWorkerKind: Record<CampaignStage, WorkerKind> = {overview: 'local_operations', script: 'local_operations', images: 'local_operations',
-    voice: 'voice_generate', videos: 'heygen_videos', editing: 'editing_render', finalization: 'local_operations'};
+    voice: 'voice_generate', videos: 'local_operations', editing: 'local_operations', finalization: 'local_operations'};
   return <>
     <a href="#/campaigns">← Campanhas</a><div className="section-heading"><h1>{detail.data?.displayName || campaignId}</h1><button onClick={refresh}>Atualizar</button></div>
     {stage && <>
@@ -214,6 +214,8 @@ export function CampaignDetailPanel({ campaignId, stage }: { campaignId: string;
     </section>}
     {stage && stage !== 'overview' && <section aria-label="Processamento desta etapa"><h2>Processamento desta etapa</h2>
       <p>Escolha o tipo de tarefa desta etapa e consulte o andamento. Iniciar pode processar outras tarefas já na fila desta campanha; nada começa só por abrir a etapa.</p>
+      {stage === 'videos' && <p>Primeiro processe as operações locais de preparação; depois selecione upload de assets HeyGen e vídeos HeyGen conforme as tarefas aparecerem.</p>}
+      {stage === 'editing' && <p>Primeiro processe as operações locais de validação e salvamento; depois selecione renderizar planos salvos na finalização.</p>}
       <WorkerControls key={stage} campaignId={campaignId} initialKind={stageWorkerKind[stage]} worker={worker} connected={workerConnected}
         onRefresh={() => { status.refresh(); jobs.refresh(); }} />
     </section>}

@@ -102,9 +102,18 @@ it('places processing controls beside the video stage without starting them on n
   const calls = fakeApi();
   render(<CampaignDetailPanel campaignId="campaign-one" stage="videos" />);
   const section = await screen.findByRole('region', { name: 'Processamento desta etapa' });
-  expect((within(section).getByLabelText('Tipo de processamento') as HTMLSelectElement).value).toBe('heygen_videos');
+  expect((within(section).getByLabelText('Tipo de processamento') as HTMLSelectElement).value).toBe('local_operations');
+  expect(within(section).getByText(/depois.*assets HeyGen.*vídeos HeyGen/i)).toBeTruthy();
   expect(within(section).getByRole('button', { name: 'Iniciar processamento pendente' })).toBeTruthy();
   expect(calls.every(call => call.method === 'GET')).toBe(true);
+});
+
+it('suggests local processing first for editing validation and saved plans', async () => {
+  fakeApi();
+  render(<CampaignDetailPanel campaignId="campaign-one" stage="editing" />);
+  const section = await screen.findByRole('region', { name: 'Processamento desta etapa' });
+  expect((within(section).getByLabelText('Tipo de processamento') as HTMLSelectElement).value).toBe('local_operations');
+  expect(within(section).getByText(/depois.*renderizar planos salvos/i)).toBeTruthy();
 });
 
 it('shows real metadata, nulls and renderer pending without players or POST', async () => {
