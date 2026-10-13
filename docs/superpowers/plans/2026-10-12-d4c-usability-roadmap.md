@@ -1,7 +1,7 @@
 # D4C — Plano de melhoria da experiência do painel
 
 **Data:** 2026-10-12
-**Status:** `IN_PROGRESS`. D4C.1–3 implementados na branch `feat/d4c2-human-labels`; D4C.4 em validação. Gate completo e inspeção Safari/iPhone pendentes.
+**Status:** `IN_PROGRESS`. D4C.1–3 `IMPLEMENTED`, `LOCAL_VERIFIED` na branch `feat/d4c2-human-labels`; D4C.4 tem gate Windows `19/19` aprovado e aguarda inspeção Safari/iPhone e aceite visual.
 **Objetivo:** operar uma campanha sem interpretar hashes, memorizar IDs ou procurar ações em uma página extensa, tanto no desktop quanto no celular.
 **Execução:** incremental e nativa, reutilizando React, FastAPI e os serviços existentes. Cada slice terá tarefas pequenas, testes proporcionais e revisão conforme o workflow do repositório.
 
@@ -119,10 +119,10 @@ Arquivos principais: formulários de imagem/voz/HeyGen/profiles/overrides, `Work
 Arquivos principais: `styles.css`, componentes ajustados nos slices anteriores, testes React existentes e `tests/test_web_*_e2e.py`; adicionar cobertura de navegação/usabilidade concentrada, sem duplicar toda a suíte para cada viewport.
 
 - [ ] Uniformizar densidade, hierarquia, botões, espaçamento, mensagens e estados vazios em todas as etapas, incluindo estilos globais (alvos de toque e largura mínima ajustados; inspeção visual pendente).
-- [ ] Verificar 320, 390, 768 e 1440 px com nomes longos e dados reais/sintéticos representativos; nenhuma rolagem horizontal da página. Testar teclado, foco, zoom e erro de rede.
+- [x] Verificar 320, 390, 768 e 1440 px com dados sintéticos representativos; nenhuma rolagem horizontal da página. Testes de teclado, foco e falha de rede existentes passaram. Zoom manual permanece para a inspeção visual.
 - [ ] Executar fluxo local com provider fake: campanha → importação → voz → vídeos → edição A/B → finalização → aprovação → entrega, preservando os contratos e guardas atuais.
 - [ ] Fazer inspeção visual em navegador e teste manual no Safari/iPhone via endereço remoto disponível; registrar separadamente teste real e viewport emulada, sem alegar equivalência.
-- [ ] Rodar testes focados, `npm --prefix web run test`, `npm --prefix web run build` e gate completo `uv run python scripts/verify.py full` antes de marcar o Goal `LOCAL_VERIFIED`. Coordenar portas dos E2E com os serviços locais para evitar colisões conhecidas.
+- [x] Rodar testes focados, `npm --prefix web run test`, `npm --prefix web run build` e gate completo `uv run python scripts/verify.py full`: Windows `19/19`, 2.129 Python aprovados, 30 pulados, 459 web. Portas dos E2E coordenadas e serviços antigos restaurados após a execução.
 - [ ] Registrar evidências e atualizar docs de operação; retomar D6 depois da validação de usabilidade.
 
 ## 8. Critério de aceitação do conjunto

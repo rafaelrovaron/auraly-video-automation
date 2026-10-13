@@ -31,7 +31,7 @@ apresentação contextual de campanhas/cenas/variantes e detalhes técnicos reco
 Voz, HeyGen, QC, render e entrega agora priorizam estado e ação legíveis, preservando IDs
 originais nos payloads e detalhes. Verificação focada: 448 testes frontend e build
 passaram; E2E alterados passaram em execução separada. Outros painéis e validação
-integrada/mobile seguem pendentes; D4C ainda não é `LOCAL_VERIFIED`.
+integrada/mobile foram executadas depois; a evidência consolidada está abaixo.
 
 Checkpoint D4C.3 (branch, sem merge/push): catálogo local limitado a fontes, músicas e
 arquivos de timing; seleção por nome mantém path/SHA resolvidos e revalidados. Imagens
@@ -39,9 +39,14 @@ e WAV processado têm prévia por endpoints de mídia vinculados à campanha e a
 expor caminho de disco como URL. Processamento fica junto à etapa, nunca inicia por
 navegação, e confirma explicitamente o tipo e o alcance da fila. Criar um estilo gera
 o código técnico uma vez e o recolhe. A importação manual permanece na máquina do
-Auraly, sem upload do celular. Testes focados de API e 457 testes web passaram;
-nenhuma chamada paga foi feita. D4C.4 recebeu alvos de toque e cobertura E2E para
-320/390/768/1440 px, mas o gate completo e Safari/iPhone real ainda não passaram.
+Auraly, sem upload do celular. Nenhuma chamada paga foi feita. D4C.4 recebeu alvos
+de toque e cobertura E2E para 320/390/768/1440 px. O gate Windows final passou
+`19/19` em 2026-10-13: 2.129 testes Python aprovados, 30 pulados, 459 testes web,
+build/tipagem/schema/auditorias/whitespace. A auditoria no nível `high` passou,
+mas apontou 5 vulnerabilidades moderadas na cadeia Hyperframes/onnxruntime.
+Inspeção manual em Safari/iPhone e aceite visual do Rafael seguem pendentes;
+não houve merge/push nem teste pago novo. O painel restaurado em 5173/8000 ainda
+roda o checkout anterior `d5b3-delivery`, não esta branch D4C.
 
 D5B.3 e o ajuste de host remoto foram integrados/enviados a main no merge `c8c3cab`.
 O resultado de CI desse merge não foi reconsultado neste planejamento; os checkpoints
