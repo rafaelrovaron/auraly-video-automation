@@ -1,7 +1,11 @@
 import { useCallback, useEffect, useRef } from 'react';
+import { campaignStages } from './campaignStages';
 
 function sameCampaign(from: string, to: string): boolean {
-  const campaign = (hash: string) => /^#\/campaigns\/([a-z0-9]+(?:-[a-z0-9]+)*)(?:\/[^/]+)?$/.exec(hash)?.[1];
+  const campaign = (hash: string) => {
+    const match = /^#\/campaigns\/([a-z0-9]+(?:-[a-z0-9]+)*)(?:\/([^/]+))?$/.exec(hash);
+    return match && (!match[2] || campaignStages.some(([stage]) => stage === match[2])) ? match[1] : undefined;
+  };
   const current = campaign(from);
   return current !== undefined && current === campaign(to);
 }

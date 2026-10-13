@@ -46,3 +46,13 @@ it('keeps a campaign draft through stage navigation and guards leaving the campa
   expect(window.location.hash).toBe('#/campaigns/campaign-one/finalization');
   expect(confirm).toHaveBeenCalledTimes(1);
 });
+
+it('guards a dirty draft when a same-campaign hash names an invalid stage',()=>{
+  window.history.replaceState(null,'','#/campaigns/campaign-one/editing');
+  const confirm=vi.spyOn(window,'confirm').mockReturnValue(false);
+  render(<Draft/>);
+  window.history.replaceState(null,'','#/campaigns/campaign-one/not-a-stage');
+  fireEvent(window,new HashChangeEvent('hashchange'));
+  expect(window.location.hash).toBe('#/campaigns/campaign-one/editing');
+  expect(confirm).toHaveBeenCalledOnce();
+});
