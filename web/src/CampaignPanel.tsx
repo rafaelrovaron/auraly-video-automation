@@ -39,8 +39,16 @@ function TechnicalDetails({ entries }: { entries: [string, ReactNode][] }) {
 
 function fileName(path: string): string { return path.split(/[\\/]/).at(-1) || path; }
 
+function taskLabel(type: string): string {
+  return ({'api.local.operation': 'Operação local', 'voice.generate': 'Geração de voz', 'voice.import': 'Importação de voz',
+    'heygen.asset.upload': 'Envio de assets HeyGen', 'heygen.video.generate': 'Geração de vídeo',
+    'editing.render': 'Vídeo final'} as Record<string, string>)[type] ?? 'Tarefa';
+}
+
 function ErrorCode({ code }: { code: string | null }) {
-  return code ? <p role="status">Erro: {code}. {/oauth|auth|credential|account/i.test(code) && 'Conecte o HeyGen pelo fluxo OAuth existente da CLI.'}</p> : null;
+  return code ? <><p role="status">{/oauth|auth|credential|account/i.test(code)
+    ? 'Conecte o HeyGen pelo fluxo OAuth existente da CLI.' : 'Esta tarefa precisa de atenção. Consulte os detalhes técnicos.'}</p>
+    <details><summary>Detalhes técnicos do erro</summary><p>{code}</p></details></> : null;
 }
 
 export function CampaignList() {
@@ -202,10 +210,11 @@ export function CampaignDetailPanel({ campaignId, stage }: { campaignId: string;
     </section>}
     <div hidden={!!stage && stage !== 'overview'}>
     <Section title="Jobs" state={jobs}>
-      {jobs.data?.items.map(job => <article key={job.jobId}><button onClick={() => setSelectedJob(job.jobId)}>Ver Job {job.jobId}</button>
-        <p>{job.jobType} · {statusLabel(job.status)} · Tentativas {job.attemptCount}/{job.maxAttempts}</p>
-        <p>Próxima tentativa: {job.nextRetryAt ?? 'Não agendada'}</p><ErrorCode code={job.lastErrorCode} /></article>)}
-      {jobs.data?.items.length === 0 && <p>Nenhum Job.</p>}
+      {jobs.data?.items.map(job => <article key={job.jobId}><button onClick={() => setSelectedJob(job.jobId)}>Ver tarefa · {taskLabel(job.jobType)} · {statusLabel(job.status)} · {job.jobId.slice(-4)}</button>
+        <p>Tentativas {job.attemptCount}/{job.maxAttempts}</p>
+        <p>Próxima tentativa: {job.nextRetryAt ? new Date(job.nextRetryAt).toLocaleString('pt-BR') : 'Não agendada'}</p>
+        <ErrorCode code={job.lastErrorCode} /><TechnicalDetails entries={[["ID", job.jobId], ["Tipo", job.jobType]]} /></article>)}
+      {jobs.data?.items.length === 0 && <p>Nenhuma tarefa.</p>}
       {selectedJob && <JobDetail key={selectedJob} campaignId={campaignId} jobId={selectedJob} />}
     </Section>
     <Section title="Worker" state={worker}>
@@ -227,10 +236,11 @@ export function JobDetail({ campaignId, jobId }: { campaignId: string; jobId: st
     campaignPath(campaignId, `/jobs/${encodeURIComponent(jobId)}`), signal, value => jobSummary(value) && object(value) && value.jobId === jobId), 2000);
   return <section aria-label="Detalhe do Job"><h3>Detalhe do Job</h3><Updated state={job} />
     {job.data && <><Facts entries={[
-      ['ID', job.data.jobId], ['Tipo', job.data.jobType], ['Status', statusLabel(job.data.status)], ['Retry safety', job.data.retrySafety],
+      ['Tarefa', taskLabel(job.data.jobType)], ['Estado', statusLabel(job.data.status)],
       ['Tentativas', `${job.data.attemptCount}/${job.data.maxAttempts}`], ['Enfileirado', job.data.queuedAt], ['Iniciado', job.data.startedAt],
       ['Concluído', job.data.completedAt], ['Próxima tentativa', job.data.nextRetryAt],
-    ]} /><ErrorCode code={job.data.lastErrorCode} />
+    ]} /><TechnicalDetails entries={[["ID", job.data.jobId], ["Tipo", job.data.jobType], ["Segurança de repetição", job.data.retrySafety]]} />
+      <ErrorCode code={job.data.lastErrorCode} />
       {job.data.jobType === 'api.local.operation' && <OperationDetail campaignId={campaignId} jobId={jobId} />}</>}
   </section>;
 }

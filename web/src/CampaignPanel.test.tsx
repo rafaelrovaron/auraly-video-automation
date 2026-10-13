@@ -175,10 +175,21 @@ it('rejects a malformed voice collection without crashing other sections', async
 it('shows unknown Job metadata without querying a local operation', async () => {
   const calls = fakeApi();
   render(<CampaignDetailPanel campaignId="campaign-one" />);
-  fireEvent.click(await screen.findByRole('button', { name: 'Ver Job job-one' }));
+  fireEvent.click(await screen.findByRole('button', { name: /Ver tarefa.*Na fila/ }));
   expect(await screen.findByText('unknown.type', { selector: 'dd' })).toBeTruthy();
   expect(calls.some(c => c.path.includes('/operations/'))).toBe(false);
   expect(screen.getAllByText(/CLI/).length).toBeGreaterThan(0);
+});
+
+it('labels a task by state and keeps its full identity in technical details', async () => {
+  fakeApi(); render(<CampaignDetailPanel campaignId="campaign-one" stage="overview" />);
+  const tasks = await screen.findByRole('region', {name: 'Jobs'});
+  const button = within(tasks).getByRole('button', {name: /Ver tarefa.*Na fila/});
+  expect(button.textContent).not.toContain('job-one');
+  expect(within(tasks).getByText('oauth_required').closest('details')?.open).toBe(false);
+  fireEvent.click(button);
+  const detailRegion = await screen.findByRole('region', {name: 'Detalhe do Job'});
+  expect(within(detailRegion).getByText('job-one', {selector: 'dd'}).closest('details')?.open).toBe(false);
 });
 
 it('refreshes assets when live counts change but not on unchanged polling', async () => {
@@ -205,7 +216,7 @@ it('displays safe operation counts and dry-run mode without arbitrary fields', a
     result: { operation: 'image_import', mode: 'dry_run', total: 1, created: 0, reused: 0, approved: 0, items: [], privateField: 'secret-sentinel' },
   } });
   render(<CampaignDetailPanel campaignId="campaign-one" />);
-  fireEvent.click(await screen.findByRole('button', { name: 'Ver Job job-one' }));
+  fireEvent.click(await screen.findByRole('button', { name: /Ver tarefa.*Concluído/ }));
   expect(await screen.findByText('dry_run')).toBeTruthy();
   expect(screen.queryByText('secret-sentinel')).toBeNull();
   expect(screen.getByText('created', { selector: 'dt' }).nextElementSibling?.textContent).toBe('0');
@@ -244,8 +255,8 @@ it('rejects invalid list entry fields rather than rendering an object', async ()
 
 it.each([
   ['Voice Masters', '/voices', {items: [{...voice, campaignId: 'campaign-two', voiceMasterId: 'foreign-voice'}]}, 'voice-one', 'foreign-voice'],
-  ['Jobs', '/jobs', {items: [{...job, campaignId: 'campaign-two', jobId: 'foreign-job'}]}, 'Ver Job job-one', 'Ver Job foreign-job'],
-  ['Jobs', '/jobs', {items: [{...job, campaignId: undefined, jobId: 'incomplete-job'}]}, 'Ver Job job-one', 'Ver Job incomplete-job'],
+  ['Jobs', '/jobs', {items: [{...job, campaignId: 'campaign-two', jobId: 'foreign-job'}]}, 'Ver tarefa · Tarefa · Na fila · -one', 'foreign-job'],
+  ['Jobs', '/jobs', {items: [{...job, campaignId: undefined, jobId: 'incomplete-job'}]}, 'Ver tarefa · Tarefa · Na fila · -one', 'incomplete-job'],
 ])('test_%s_context_guard_keeps_valid_snapshot_after_invalid_campaign_collection', async (title, suffix, invalid, previous, foreign) => {
   const overrides: Record<string, unknown> = {}; fakeApi(overrides);
   render(<CampaignDetailPanel campaignId="campaign-one" />); await screen.findByText('Copy hook');
@@ -263,7 +274,7 @@ it.each([
   const localJob = { ...job, jobType: 'api.local.operation' };
   fakeApi({ '/jobs': { items: [localJob] }, '/jobs/job-one': localJob, [path as string]: invalid });
   render(<CampaignDetailPanel campaignId="campaign-one" />);
-  fireEvent.click(await screen.findByRole('button', { name: 'Ver Job job-one' }));
+  fireEvent.click(await screen.findByRole('button', { name: /Ver tarefa.*Na fila/ }));
   expect(await screen.findByText(/invalid_response.*Seção indisponível/)).toBeTruthy();
   expect(screen.getByText('Copy hook')).toBeTruthy();
 });
