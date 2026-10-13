@@ -14,6 +14,15 @@ it('labels source videos by scene and styles by name while keeping IDs as option
   expect(first.value).toBe('render-one');
   expect(await screen.findByRole('option',{name:'Plain · v1'})).toBeTruthy();
 });
+it('distinguishes repeated style names in the editing selector',async()=>{
+  server();const original=globalThis.fetch;
+  const duplicate=structuredClone(PROFILE);duplicate.profile.profileId='other';
+  vi.stubGlobal('fetch',(path:string,init:RequestInit)=>path==='/api/v1/editing/profiles'
+    ? Promise.resolve(Response.json({items:[PROFILE,duplicate]})):original(path,init));
+  render(<EditingPanel campaignId="campaign-one" renders={renders}/>);
+  const choices=await screen.findAllByRole('option',{name:/Plain · v1/});
+  expect(choices.map(option=>option.textContent)).toEqual(['Plain · v1 · plain','Plain · v1 · other']);
+});
 type Call={request:EditBatchRequest;persist:boolean};
 function server(options:{trim?:boolean;lost?:boolean;queued?:boolean;failed?:boolean;getFail?:boolean;getDivergent?:boolean;wrongPersist?:boolean;saveHash?:boolean;wrongRender?:boolean;divergent?:boolean;postMalformed?:boolean;delay?:Promise<Response>}={}){
   const posts:Call[]=[];const saved:EditBatchPlan[]=[];let current:Call|null=null,queued=options.queued;
@@ -49,6 +58,15 @@ it('chooses caption timing by name and pins the full reference in the plan reque
   fireEvent.change(screen.getByLabelText('Timing de legendas: escolher arquivo'),{target:{value:'assets/timing/Captions.json'}});
   validate();await waitFor(()=>expect(s.posts).toHaveLength(1));
   expect(s.posts[0].request.timingRef).toEqual({path:'assets/timing/Captions.json',sha256:'d'.repeat(64)});
+});
+it('reports an unavailable asset catalog and lets the operator retry it',async()=>{
+  server();const original=globalThis.fetch;let fail=true;
+  vi.stubGlobal('fetch',(path:string,init:RequestInit)=>path==='/api/v1/editing/assets'&&fail
+    ? Promise.resolve(Response.json({error:{code:'storage_unavailable'}},{status:503})):original(path,init));
+  render(<EditingPanel campaignId="campaign-one" renders={renders}/>);
+  const retry=await screen.findByRole('button',{name:'Consultar arquivos'});
+  fail=false;fireEvent.click(retry);
+  expect(await screen.findByRole('option',{name:'Captions.json'})).toBeTruthy();
 });
 async function draft(){
   await screen.findByRole('option',{name:/Plain.*v1/});

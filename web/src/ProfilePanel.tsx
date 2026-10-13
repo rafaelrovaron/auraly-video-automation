@@ -4,6 +4,7 @@ import { ProfileForm } from './ProfileForm';
 import { listLocalAssets } from './assetApi';
 import { usePolling } from './usePolling';
 import { getProfile, listProfiles, newProfile, publishProfile, sameProfileContent, type EditProfile, type ProfileView } from './profileApi';
+import { profileOptionLabel } from './profileLabels';
 import { useUnsavedChanges } from './useUnsavedChanges';
 
 type Draft={initial:EditProfile; creating:boolean; baseVersion?:number; key:number};
@@ -114,7 +115,7 @@ export function ProfilePanel() {
     <label>Consultar profile e versão<select aria-label="Consultar profile e versão" value={selected} disabled={busy} onChange={e=>void select(e.target.value)}>
       <option value="">Selecione uma versão</option>
       {items.map(v=><option key={`${v.profile.profileId}/${v.profile.version}`} value={`${v.profile.profileId}/${v.profile.version}`}>
-        {v.profile.name} · v{v.profile.version}
+        {profileOptionLabel(v, items)}
       </option>)}
     </select></label>
     {loading&&<p role="status">Consultando versão…</p>}

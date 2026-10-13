@@ -57,6 +57,22 @@ it('uses the style name in the selector and folds its fingerprint',async()=>{
   await select();
   expect(screen.getByText('a'.repeat(64)).closest('details')?.open).toBe(false);
 });
+it('distinguishes published styles with the same name and version',async()=>{
+  const s=server();const duplicate=profileFixture();duplicate.profile.profileId='other';s.stored.set('other/1',duplicate);
+  render(<ProfilePanel/>);
+  const choices=await screen.findAllByRole('option',{name:/Plain · v1/});
+  expect(choices).toHaveLength(2);
+  expect(choices.map(option=>option.textContent)).toEqual(['Plain · v1 · plain','Plain · v1 · other']);
+});
+it('uses full style IDs only when duplicate short suffixes still collide',async()=>{
+  const s=server();s.stored.clear();
+  for(const profileId of ['first-abcdefgh','second-abcdefgh']){
+    const duplicate=profileFixture();duplicate.profile.profileId=profileId;s.stored.set(`${profileId}/1`,duplicate);
+  }
+  render(<ProfilePanel/>);
+  const choices=await screen.findAllByRole('option',{name:/Plain · v1/});
+  expect(choices.map(option=>option.textContent)).toEqual(['Plain · v1 · first-abcdefgh','Plain · v1 · second-abcdefgh']);
+});
 async function version() {
   await select(); fireEvent.click(screen.getByRole('button',{name:'Criar nova versão'}));
   fireEvent.change(screen.getByLabelText('Nome do profile'),{target:{value:'Changed'}});

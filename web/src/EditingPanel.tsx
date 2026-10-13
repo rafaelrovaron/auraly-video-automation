@@ -5,6 +5,7 @@ import type {HeyGenRenderView} from './heygenApi';
 import type {RemoteState} from './usePolling';
 import {getProfile,listProfiles} from './profileApi';
 import type {ProfileView} from './profileApi';
+import {profileOptionLabel} from './profileLabels';
 import {EditOverridesForm,newOverrideDraft,readOverrides} from './EditOverridesForm';
 import type {OverrideDraft,OverrideHints} from './EditOverridesForm';
 import {editAsset,editBatchRequest,editIdentifier,getEditOperation,getEditPlan,listEditPlans,planMatchesRequest,samePlan,submitEditPlan} from './editingApi';
@@ -183,6 +184,7 @@ function EditorialFlow({campaignId,renders,scenes,onRenderPlanChange}:Props){
     <p>Um MP4 por plano. Não gera voz, imagem ou HeyGen. Validação e publicação usam Jobs locais, sem render final.</p>
     <p>Rascunho somente em memória; reload pode perdê-lo. Inicie o worker local_operations manualmente quando houver Job na fila.</p>
     {listsLoading&&<p role="status">Carregando profiles e planos…</p>}{listError&&<p role="status">Profiles/planos indisponíveis: {listError}</p>}
+    {assets.error&&<p role="status">Arquivos locais indisponíveis; consulte novamente ou use a referência avançada. <button type="button" onClick={assets.refresh}>Consultar arquivos</button></p>}
     <form ref={form} noValidate onSubmit={e=>{e.preventDefault();void submit(false);}}>
       <fieldset disabled={busy}><legend>Fonte e configuração</legend>
         <label>MP4 HeyGen para edição<select aria-label="MP4 HeyGen para edição" name="renderId" value={renderId} onChange={e=>chooseRender(e.target.value)}>
@@ -191,7 +193,7 @@ function EditorialFlow({campaignId,renders,scenes,onRenderPlanChange}:Props){
           <details><summary>Detalhes técnicos do MP4</summary><p>ID: {selectedRender.renderId}</p>
             <p>Caminho: {selectedRender.source.path}</p><p>SHA-256: {selectedRender.source.sha256}</p></details></>}
         <label>Profile de edição<select aria-label="Profile de edição" name="profile" value={profileKey} onChange={e=>{void chooseProfile(e.target.value);}}>
-          <option value="">Selecione</option>{profiles.map(p=><option key={`${p.profile.profileId}/${p.profile.version}`} value={`${p.profile.profileId}/${p.profile.version}`}>{p.profile.name} · v{p.profile.version}</option>)}</select></label>
+          <option value="">Selecione</option>{profiles.map(p=><option key={`${p.profile.profileId}/${p.profile.version}`} value={`${p.profile.profileId}/${p.profile.version}`}>{profileOptionLabel(p,profiles)}</option>)}</select></label>
         {profileLoading&&<p role="status">Consultando profile…</p>}
         <details><summary>Código técnico da edição</summary><label>ID do vídeo editorial<input name="videoId" value={videoId} onChange={e=>{change();setVideoId(e.target.value);}}/></label></details>
         <label>Headline base<input name="headlineText" value={headline} onChange={e=>{change();setHeadline(e.target.value);}}/></label>
