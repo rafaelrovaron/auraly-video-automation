@@ -66,7 +66,17 @@ it('test_generation_pins_copy_and_requires_fresh_budget_and_confirmation', async
   expect(calls[0].body).toEqual({campaignId: 'campaign-one', copyMasterVersion: 1, voiceId: 'voice-test', modelId: 'model-test',
     voiceSettings: {}, outputFormat: 'mp3_44100_128', transcriptMatchThreshold: 0.97, paidRequestApproved: true, paidRequestApprovedBy: 'tester', approvedBudgetCents: 500});
   expect(calls[0].path).toBe('/api/v1/campaigns/campaign-one/voices/generate');
-  expect(await screen.findByText('voice.generate · queued')).not.toBeNull();
+  expect(await screen.findByText('Geração de voz: Na fila')).not.toBeNull();
+});
+
+it('presents a voice generation by status while preserving its job ID as the selector value', async () => {
+  fakeApi(); render(<VoicePanel {...props()} jobs={state({items: [job]})} />);
+  const select = screen.getByLabelText('Job de geração para inspecionar') as HTMLSelectElement;
+  expect(select.options[1].value).toBe('job-one');
+  expect(select.options[1].textContent).not.toContain('job-one');
+  fireEvent.change(select, {target: {value: 'job-one'}});
+  await screen.findByText('Geração de voz: Na fila');
+  expect(screen.getByText('job-one').closest('details')?.querySelector('summary')?.textContent).toBe('Detalhes técnicos da tarefa');
 });
 
 it('test_changed_inputs_clear_paid_confirmation', async () => {
@@ -145,16 +155,25 @@ const importButton = () => screen.getByRole('button', {name: 'Enfileirar importa
 it('test_import_enqueues_only_then_shows_wrapper_and_child', async () => {
   const calls = importApi(); wrapReads(); render(<VoicePanel {...props()} />); await fillImport();
   fireEvent.click(importButton()); fireEvent.click(importButton());
-  await screen.findByText('Fase 2: processar voz importada'); await screen.findByText('voice.import · queued');
+  await screen.findByText('Fase 2: processar voz importada'); await screen.findByText('Processamento do áudio importado: Na fila');
   expect(calls).toHaveLength(1); expect(calls[0].path).toBe('/api/v1/campaigns/campaign-one/voices/import');
   expect(calls[0].body).toEqual({operation: 'voice_import', campaignId: 'campaign-one', sourcePath: 'imports/voice.mp3',
     requestId: expect.any(String), request: {campaignId: 'campaign-one', copyMasterVersion: 1}});
   fireEvent.click(screen.getByRole('button', {name: 'Consultar operação de voz'})); expect(calls).toHaveLength(1);
   expect(screen.queryByText('Voz aprovada')).toBeNull();
 });
+it('keeps voice import and operation IDs behind technical details', async () => {
+  importApi(); wrapReads(); render(<VoicePanel {...props()} />); await fillImport(); fireEvent.click(importButton());
+  await screen.findByText('Processamento do áudio importado: Na fila');
+  const panel = screen.getByRole('region', {name: 'Operação de voz'});
+  const visible = [...panel.querySelectorAll('p')].filter(node => !node.closest('details')).map(node => node.textContent).join(' ');
+  for (const id of ['wrapper-one', 'child-one', 'voice-one']) expect(visible).not.toContain(id);
+  const technical = [...panel.querySelectorAll('details')].map(node => node.textContent).join(' ');
+  for (const id of ['wrapper-one', 'child-one', 'voice-one']) expect(technical).toContain(id);
+});
 it('test_completed_wrapper_with_failed_child_is_not_success', async () => {
   importApi(); wrapReads(wrapper, 'failed'); render(<VoicePanel {...props()} />); await fillImport(); fireEvent.click(importButton());
-  await screen.findByText('voice.import · failed'); expect(screen.queryByText('Voz aprovada')).toBeNull();
+  await screen.findByText('Processamento do áudio importado: Falhou'); expect(screen.queryByText('Voz aprovada')).toBeNull();
 });
 it('test_invalid_source_and_changed_copy_reset_confirmation', async () => {
   importApi(); render(<VoicePanel {...props()} />); await fillImport();
@@ -180,7 +199,7 @@ it('test_reload_observes_without_post', async () => {
   const calls = importApi(); wrapReads(); const p = {...props(), jobs: state({items: [{...job, jobId: 'wrapper-one', jobType: 'api.local.operation'}]})};
   const view = render(<VoicePanel {...p} />); view.unmount(); render(<VoicePanel {...p} />);
   fireEvent.change(screen.getByLabelText('Operação local de voz para inspecionar'), {target: {value: 'wrapper-one'}});
-  await screen.findByText('voice.import · queued'); expect(calls).toHaveLength(0);
+  await screen.findByText('Processamento do áudio importado: Na fila'); expect(calls).toHaveLength(0);
 });
 it('test_pending_navigation_warns_and_late_import_is_ignored', async () => {
   let finish!: (response: Response) => void; fakeApi(undefined, () => new Promise(resolve => {finish = resolve;}));
@@ -242,7 +261,7 @@ it('test_review_accepted_is_not_approval_until_worker_and_fresh_get', async () =
   fakeApi(undefined, async () => Response.json({operation: 'voice_review', campaignId: 'campaign-one', jobId: 'wrapper-one'}));
   wrapReads({...wrapper, operation: 'voice_review', status: 'queued', result: null}); render(<VoicePanel {...reviewProps()} />);
   await fillReview(); fireEvent.click(listen()); fireEvent.click(approveVoice());
-  await screen.findByText(/voice_review · queued/); expect(screen.queryByText(/Estado observado.*approved/)).toBeNull();
+  await screen.findByText('Operação de voz: Na fila'); expect(screen.queryByText(/Estado observado.*approved/)).toBeNull();
 });
 it('test_lost_review_response_observes_state_without_claiming_authorship', async () => {
   const calls = fakeApi(undefined, async () => Response.json({error: {code: 'internal_error'}}, {status: 503}));
@@ -266,10 +285,10 @@ it('test_stale_completed_wrapper_preserves_child_snapshot_and_phase', async () =
   vi.stubGlobal('fetch', async (path: string, options: RequestInit) => stale && path.endsWith('/operations/wrapper-one')
     ? Response.json({error: {code: 'internal_error'}}, {status: 503}) : base(path, options));
   render(<VoicePanel {...props()} />); await fillImport(); fireEvent.click(importButton());
-  await screen.findByText('voice.import · failed'); stale = true;
+  await screen.findByText('Processamento do áudio importado: Falhou'); stale = true;
   fireEvent.click(screen.getByRole('button', {name: 'Consultar operação de voz'})); await screen.findByText(/internal_error/);
-  expect(screen.getByText('voice.import · failed')).not.toBeNull();
-  expect(screen.getByText(/Job: child-one/)).not.toBeNull();
+  expect(screen.getByText('Processamento do áudio importado: Falhou')).not.toBeNull();
+  expect(screen.getByText('child-one').closest('details')?.querySelector('summary')?.textContent).toBe('Detalhes técnicos da tarefa');
   expect(screen.queryByText('Fase 1: executar operação local (local_operations)')).toBeNull();
   expect(screen.queryByText(/Inicie voice_import explicitamente/)).toBeNull();
 });

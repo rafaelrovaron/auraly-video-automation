@@ -217,19 +217,21 @@ function VoiceForms({campaignId, detail, voices, jobs}: Props) {
       <button disabled={blocked || !copy || !sourceValid(sourcePath) || !importConfirmed}>Enfileirar importação de voz</button>
     </fieldset></form>
     <p>Copie o MP3/WAV pelo Explorer para dentro do project root, por exemplo imports/voice.wav (máximo 100 MiB). Informe o caminho relativo; não há upload. O original é preservado e o WAV processado é outro arquivo. Importar não exige orçamento ElevenLabs.</p>
-    {requestId && <p>Request de importação: {requestId}</p>}
+    {requestId && <details><summary>Detalhes técnicos da importação</summary><p>Request de importação: {requestId}</p></details>}
     {notice && <p role="status">{notice}</p>}
     {unknown && <p>Intenção anterior preservada, sem reenvio. Inspecione Jobs e vozes persistidos; coincidência de versão/provider não prova identidade.</p>}
     <label>Job de geração para inspecionar <select value={selectedJob} disabled={!connected || busy} onChange={event => {setSelectedJob(event.target.value); setAcceptedVoice(null);}}>
-      <option value="">Selecione um Job</option>{selectedJob && !jobs.data?.items.some(item => item.jobId === selectedJob) && <option value={selectedJob}>{selectedJob}</option>}
-      {jobs.data?.items.filter(item => item.campaignId === campaignId && item.jobType === 'voice.generate').map(item => <option key={item.jobId} value={item.jobId}>{item.jobId}</option>)}
+      <option value="">Selecione uma geração</option>{selectedJob && !jobs.data?.items.some(item => item.jobId === selectedJob) && <option value={selectedJob}>Geração selecionada · {selectedJob.slice(-4)}</option>}
+      {jobs.data?.items.filter(item => item.campaignId === campaignId && item.jobType === 'voice.generate').map(item =>
+        <option key={item.jobId} value={item.jobId}>Geração de voz · {statusLabel(item.status)} · {item.jobId.slice(-4)}</option>)}
     </select></label>
-    {acceptedVoice && <p>Voice Master aceito: {acceptedVoice}</p>}
+    {acceptedVoice && <><p>Áudio principal recebido para processamento.</p><details><summary>Detalhes técnicos do áudio</summary><p>Voice Master aceito: {acceptedVoice}</p></details></>}
     {selectedJob && <VoiceJobMonitor key={selectedJob} campaignId={campaignId} jobId={selectedJob} kind="voice.generate" onChange={voices.refresh} />}
     <label>Operação local de voz para inspecionar <select value={wrapper?.jobId ?? ''} disabled={!connected || busy}
       onChange={event => setWrapper(event.target.value ? {jobId: event.target.value, kind: null} : null)}>
-      <option value="">Selecione uma operação</option>{wrapper && !jobs.data?.items.some(item => item.jobId === wrapper.jobId) && <option value={wrapper.jobId}>{wrapper.jobId}</option>}
-      {jobs.data?.items.filter(item => item.campaignId === campaignId && item.jobType === 'api.local.operation').map(item => <option key={item.jobId} value={item.jobId}>{item.jobId}</option>)}
+      <option value="">Selecione uma operação</option>{wrapper && !jobs.data?.items.some(item => item.jobId === wrapper.jobId) && <option value={wrapper.jobId}>Operação selecionada · {wrapper.jobId.slice(-4)}</option>}
+      {jobs.data?.items.filter(item => item.campaignId === campaignId && item.jobType === 'api.local.operation').map(item =>
+        <option key={item.jobId} value={item.jobId}>Operação local · {statusLabel(item.status)} · {item.jobId.slice(-4)}</option>)}
     </select></label>
     <p>Inspecionar um Job conhecido não o associa a uma intenção cuja resposta foi perdida.</p>
     {wrapper && <VoiceOperationMonitor key={wrapper.jobId} campaignId={campaignId} jobId={wrapper.jobId} kind={wrapper.kind} voiceId={wrapper.voiceId}
@@ -267,12 +269,16 @@ function VoiceOperationMonitor({campaignId, jobId, kind, voiceId, onChange, onCo
   const result = operation.data?.status === 'completed' ? operation.data.result : null;
   return <div>
     {operation.error && <p role="alert">{operation.error.message} ({operation.error.code}). Dados desatualizados.</p>}
-    {operation.data && <><p>Operação {jobId}: {operation.data.operation} · {operation.data.status}</p><p>Erro: {operation.data.errorCode ?? 'Não disponível'}</p></>}
+    {operation.data && <><p>Operação de voz: {statusLabel(operation.data.status)}</p>
+      {operation.data.errorCode && <p>{new ApiError(operation.data.errorCode).message}</p>}
+      <details><summary>Detalhes técnicos da operação</summary><p>Operação: {jobId} · {operation.data.operation}</p><p>Erro: {operation.data.errorCode ?? 'Não disponível'}</p></details></>}
     {!result && !operation.error && <p>Fase 1: executar operação local (local_operations)</p>}
-    {result?.operation === 'voice_import' && <><p>Fase 2: processar voz importada</p><p>Voice Master importado: {result.voiceMasterId}.
+    {result?.operation === 'voice_import' && <><p>Fase 2: processar voz importada</p><p>Áudio importado recebido.
       {operation.error ? ' Contexto da operação desatualizado; último resultado válido preservado.' : ' Inicie voice_import explicitamente.'}</p>
+      <details><summary>Detalhes técnicos do áudio importado</summary><p>Voice Master importado: {result.voiceMasterId}</p></details>
       <VoiceJobMonitor key={result.jobId} campaignId={campaignId} jobId={result.jobId} kind="voice.import" onChange={onChange} /></>}
-    {result?.operation === 'voice_review' && <p>Review executado para {result.voiceMasterId}. Consulte a voz persistida; o resultado sozinho não confirma aprovação nem autoria.</p>}
+    {result?.operation === 'voice_review' && <><p>Revisão de voz executada. Consulte a voz persistida; o resultado sozinho não confirma aprovação nem autoria.</p>
+      <details><summary>Detalhes técnicos da revisão</summary><p>{result.voiceMasterId}</p></details></>}
     <button onClick={operation.refresh}>Consultar operação de voz</button>
   </div>;
 }
@@ -282,7 +288,9 @@ function VoiceJobMonitor({campaignId, jobId, kind, onChange}: {campaignId: strin
     value => jobSummary(value) && object(value) && value.jobId === jobId && value.campaignId === campaignId && value.jobType === kind), 2000);
   useEffect(() => { if (job.data && !job.error) onChange(); }, [job.data?.status, job.data?.completedAt, job.error, onChange]);
   return <div>{job.error && <p role="alert">{job.error.message} ({job.error.code}). Dados desatualizados.</p>}
-    {job.data && <><p>{job.data.jobType} · {job.data.status}</p><p>Job: {jobId} · Tentativas {job.data.attemptCount}/{job.data.maxAttempts}</p>
-      <p>Erro: {job.data.lastErrorCode ?? 'Não disponível'}</p></>}
+    {job.data && <><p>{kind === 'voice.generate' ? 'Geração de voz' : 'Processamento do áudio importado'}: {statusLabel(job.data.status)}</p>
+      <p>Tentativas {job.data.attemptCount}/{job.data.maxAttempts}</p>
+      {job.data.lastErrorCode && <p>{new ApiError(job.data.lastErrorCode).message}</p>}
+      <details><summary>Detalhes técnicos da tarefa</summary><p>{jobId}</p><p>{job.data.jobType}</p><p>Erro: {job.data.lastErrorCode ?? 'Não disponível'}</p></details></>}
     <button onClick={job.refresh}>Consultar Job de voz</button></div>;
 }

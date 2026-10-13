@@ -28,8 +28,8 @@ Ruff/mypy de produção e 41 E2E web passaram; gate completo de integração pen
 
 Checkpoint D4C.2 (branch, ainda sem merge/push): nome opcional de campanha persistido,
 apresentação contextual de campanhas/cenas/variantes e detalhes técnicos recolhidos.
-HeyGen, QC, render e entrega agora priorizam estado e ação legíveis, preservando IDs
-originais nos payloads e detalhes. Verificação focada: 446 testes frontend e build
+Voz, HeyGen, QC, render e entrega agora priorizam estado e ação legíveis, preservando IDs
+originais nos payloads e detalhes. Verificação focada: 448 testes frontend e build
 passaram; E2E alterados passaram em execução separada. Outros painéis e validação
 integrada/mobile seguem pendentes; D4C.2 não é `LOCAL_VERIFIED`.
 
