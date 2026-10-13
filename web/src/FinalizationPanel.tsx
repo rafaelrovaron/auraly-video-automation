@@ -13,6 +13,7 @@ export function FinalizationPanel({ campaignId, active, preferredPlan }: Props) 
   const [plan, setPlan] = useState<EditBatchPlan | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [renderBusy, setRenderBusy] = useState(false);
   const selection = useRef<AbortController | null>(null);
 
   useEffect(() => {
@@ -25,12 +26,13 @@ export function FinalizationPanel({ campaignId, active, preferredPlan }: Props) 
   }, [active, campaignId, preferredPlan?.planHash]);
 
   useEffect(() => {
-    if (preferredPlan) { selection.current?.abort(); setLoading(false); setSelected(identity(preferredPlan)); setPlan(preferredPlan); }
+    if (preferredPlan && !renderBusy) { selection.current?.abort(); setLoading(false); setSelected(identity(preferredPlan)); setPlan(preferredPlan); }
   }, [preferredPlan]);
 
   useEffect(() => () => selection.current?.abort(), []);
 
   const choose = async (key: string) => {
+    if (renderBusy) return;
     selection.current?.abort();
     setSelected(key); setPlan(null); setNotice(null); setLoading(false);
     const summary = summaries.find(item => identity(item) === key);
@@ -55,7 +57,7 @@ export function FinalizationPanel({ campaignId, active, preferredPlan }: Props) 
   return <>
     <p>Escolha uma configuração salva para gerar e revisar os vídeos finais.</p>
     <label>Plano salvo para finalizar
-      <select value={selected} onChange={event => { void choose(event.target.value); }}>
+      <select value={selected} disabled={renderBusy} onChange={event => { void choose(event.target.value); }}>
         <option value="">Selecione</option>
         {options.map(item => <option key={identity(item)} value={identity(item)}>
           {description(item)}{options.filter(other => description(other) === description(item)).length > 1 ? ` · ${item.planHash.slice(0, 8)}` : ''}
@@ -64,6 +66,6 @@ export function FinalizationPanel({ campaignId, active, preferredPlan }: Props) 
     </label>
     {loading && <p role="status">Consultando configuração salva…</p>}
     {notice && <p role="status">{notice}</p>}
-    <RenderPanel campaignId={campaignId} plan={plan} />
+    <RenderPanel campaignId={campaignId} plan={plan} onBusyChange={setRenderBusy} />
   </>;
 }

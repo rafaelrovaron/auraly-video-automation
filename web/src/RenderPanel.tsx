@@ -1,10 +1,10 @@
-import {useEffect,useRef,useState} from 'react';
+import {useCallback,useEffect,useRef,useState} from 'react';
 import {ApiError,readWorker,statusLabel} from './api';
 import type {EditBatchPlan} from './editingApi';
 import {getRender,listRenders,renderMediaUrl,startRenderWorker,submitRender} from './renderApi';
 import type {RenderJobRequest,RenderJobView,RenderOutput} from './renderApi';
 import {ReviewPanel} from './ReviewPanel';
-type Props={campaignId:string;plan:EditBatchPlan|null};
+type Props={campaignId:string;plan:EditBatchPlan|null;onBusyChange?:(busy:boolean)=>void};
 const active=(v:RenderJobView)=>['queued','running','retry_scheduled'].includes(v.status);
 const safe=(e:unknown)=>e instanceof ApiError?e:new ApiError('connection_lost');
 function failure(error:RenderOutput['error']):string{
@@ -28,12 +28,18 @@ function failure(error:RenderOutput['error']):string{
 export function RenderPanel(props:Props){
   return <RenderFlow key={`${props.campaignId}/${props.plan?.videoId}/${props.plan?.planHash}`} {...props}/>;
 }
-function RenderFlow({campaignId,plan}:Props){
+function RenderFlow({campaignId,plan,onBusyChange}:Props){
   const [runs,setRuns]=useState<RenderJobView[]>([]),[job,setJob]=useState<RenderJobView|null>(null);
   const [pending,setPending]=useState<RenderJobRequest|null>(null),[sending,setSending]=useState(false),[listing,setListing]=useState(false);
   const [notice,setNotice]=useState<string|null>(null),[workerUnknown,setWorkerUnknown]=useState(false),[monitor,setMonitor]=useState(true),[readId,setReadId]=useState(0);
   const [pendingConsulted,setPendingConsulted]=useState(false);
+  const [reviewBusy,setReviewBusy]=useState<Record<string,boolean>>({});
   const alive=useRef(true),lock=useRef(false),listController=useRef<AbortController|null>(null),listVersion=useRef(0);
+  const childBusy=Object.values(reviewBusy).some(Boolean);
+  const onReviewBusyChange=useCallback((key:string,busy:boolean)=>{
+    setReviewBusy(previous=>previous[key]===busy?previous:{...previous,[key]:busy});
+  },[]);
+  useEffect(()=>{onBusyChange?.(Boolean(sending||pending||(monitor&&job&&active(job))||childBusy));},[sending,pending,monitor,job,childBusy,onBusyChange]);
   const current=(v:RenderJobRequest)=>!!plan&&v.campaignId===campaignId&&v.videoId===plan.videoId&&v.planHash===plan.planHash;
   useEffect(()=>{alive.current=true;return()=>{alive.current=false;listController.current?.abort();};},[]);
   const inspect=async()=>{
@@ -73,7 +79,7 @@ function RenderFlow({campaignId,plan}:Props){
   const startPending=async()=>{if(lock.current||workerUnknown)return;lock.current=true;setSending(true);
     try{await start();}finally{if(alive.current){lock.current=false;setSending(false);}}};
   const submit=async()=>{
-    if(!plan||plan.campaignId!==campaignId||lock.current||pending||(job&&active(job)))return;
+    if(!plan||plan.campaignId!==campaignId||lock.current||pending||childBusy||(job&&active(job)))return;
     lock.current=true;setSending(true);setNotice(null);setWorkerUnknown(false);
     const request:RenderJobRequest={schemaVersion:'1.0',campaignId,videoId:plan.videoId,planHash:plan.planHash,executionId:crypto.randomUUID()};
     setPending(request);setPendingConsulted(false);setJob(null);
@@ -84,7 +90,7 @@ function RenderFlow({campaignId,plan}:Props){
       if(!['command_unknown','invalid_response','connection_lost'].includes(error.code))setPending(null);}}
     finally{if(alive.current){lock.current=false;setSending(false);}}
   };
-  const choose=(id:string)=>{if(pending||sending)return;const chosen=runs.find(v=>v.jobId===id);setJob(chosen??null);setMonitor(true);setNotice(null);setWorkerUnknown(false);};
+  const choose=(id:string)=>{if(pending||sending||childBusy)return;const chosen=runs.find(v=>v.jobId===id);setJob(chosen??null);setMonitor(true);setNotice(null);setWorkerUnknown(false);};
   const abandon=()=>{
     if(sending||pending&&!pendingConsulted)return;
     if(pending&&!window.confirm('Abandonar envio desconhecido? Isto não cancela um Job que pode existir ou aparecer depois. Uma nova execução explícita pode duplicar trabalho.'))return;
@@ -96,10 +102,10 @@ function RenderFlow({campaignId,plan}:Props){
       <details><summary>Detalhes técnicos</summary><p>Vídeo: {plan.videoId}</p><p>Hash do plano: {plan.planHash}</p></details></>:<p>Salve ou consulte um plano confirmado para renderizar.</p>}
     <p>Usa somente o plano salvo, não o rascunho ou o preview. Processa sequencialmente as variantes; não gera voz, imagem ou HeyGen.</p>
     <p>Inicia editing_render para os Jobs deste tipo na campanha. Renderizado não significa aprovado ou entregue.</p>
-    <button disabled={!plan||plan.campaignId!==campaignId||sending||!!pending||!!job&&active(job)} onClick={()=>{void submit();}}>{job&&!active(job)?'Nova execução':'Renderizar'}</button>
+    <button disabled={!plan||plan.campaignId!==campaignId||sending||!!pending||childBusy||!!job&&active(job)} onClick={()=>{void submit();}}>{job&&!active(job)?'Nova execução':'Renderizar'}</button>
     <p>Podem ser reaproveitados masters válidos já existentes; nova execução não garante nova codificação.</p>
     <button disabled={!plan||listing} onClick={()=>{void inspect();}}>Consultar execuções</button>
-    <label>Execução de render<select aria-label="Execução de render" value={job?.jobId??''} disabled={sending||!!pending} onChange={e=>choose(e.target.value)}>
+    <label>Execução de render<select aria-label="Execução de render" value={job?.jobId??''} disabled={sending||!!pending||childBusy} onChange={e=>choose(e.target.value)}>
       <option value="">Selecione</option>{runs.map(v=><option key={v.jobId} value={v.jobId}>Render {statusLabel(v.status).toLocaleLowerCase()} · {v.jobId.slice(0,8)}</option>)}
     </select></label>
     {pending&&<><p>Envio do render sem confirmação. Consulte antes de decidir outra ação; nenhum reenvio automático.</p>
@@ -116,7 +122,7 @@ function RenderFlow({campaignId,plan}:Props){
           <a href={renderMediaUrl(campaignId,job.jobId,o.outputVariantId)} target="_blank" rel="noreferrer">Abrir MP4</a> · {' '}
           <a href={renderMediaUrl(campaignId,job.jobId,o.outputVariantId,true)}>Baixar MP4</a></p>}
         {o.status!=='failed'&&<ReviewPanel target={{schemaVersion:'1.0',campaignId,jobId:job.jobId,
-          videoId:job.videoId,planHash:job.planHash,outputVariantId:o.outputVariantId,renderKey:o.renderKey}}/>}
+          videoId:job.videoId,planHash:job.planHash,outputVariantId:o.outputVariantId,renderKey:o.renderKey}} onBusyChange={onReviewBusyChange}/>}
       </article>)}
     </>}
     {notice&&<p role="status">{notice}</p>}

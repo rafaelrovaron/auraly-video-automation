@@ -8,8 +8,9 @@ const active=(status:string)=>['queued','running','retry_scheduled'].includes(st
 const safe=(e:unknown)=>e instanceof ApiError?e:new ApiError('connection_lost');
 const uncertain=(e:ApiError)=>['command_unknown','invalid_response','connection_lost','operation_conflict'].includes(e.code);
 const findings:Record<string,string>={audio_silent:'Áudio silencioso.',audio_loudness_unmeasurable:'Volume não mensurável.',audio_low_loudness:'Volume baixo.',audio_peak_risk:'Risco de clipping.',artifact_invalid:'Artefato inválido.',runtime_unavailable:'Runtime indisponível.',audio_measurement_failed:'Falha na medição de áudio.'};
-export function ReviewPanel({target}:{target:ReviewTarget}){return <ReviewFlow key={JSON.stringify(target)} target={target}/>;}
-function ReviewFlow({target}:{target:ReviewTarget}){
+type Props={target:ReviewTarget;onBusyChange?:(key:string,busy:boolean)=>void};
+export function ReviewPanel(props:Props){return <ReviewFlow key={JSON.stringify(props.target)} {...props}/>;}
+function ReviewFlow({target,onBusyChange}:Props){
   const [state,setState]=useState<FinalReviewState|null>(null),[selected,setSelected]=useState(''),[notice,setNotice]=useState<string|null>(null);
   const [busy,setBusy]=useState(false),[reading,setReading]=useState(false),[unknownQc,setUnknownQc]=useState<EditQcOperation|null>(null),[absentQc,setAbsentQc]=useState(false);
   const [pendingReview,setPendingReview]=useState<HumanReviewRequest|null>(null),[retryReview,setRetryReview]=useState(false),[workerUnknown,setWorkerUnknown]=useState(false);
@@ -18,6 +19,8 @@ function ReviewFlow({target}:{target:ReviewTarget}){
   const reportSet=useRef('');
   const timer=useRef<ReturnType<typeof setTimeout>|undefined>(undefined),inspectRef=useRef<(recoverQc?:boolean)=>Promise<void>>(async()=>{});
   const qcPending=state?.runs.some(run=>active(run.status))??false;
+  useEffect(()=>{onBusyChange?.(target.outputVariantId,Boolean(busy||unknownQc||pendingReview||qcPending||workerUnknown));},
+    [busy,unknownQc,pendingReview,qcPending,workerUnknown,onBusyChange,target.outputVariantId]);
   const report=state?.reports.find(item=>item.qcKey===selected);
   const blocked=!state||busy||reading||qcPending||!!unknownQc||!!pendingReview||!!state.review;
   const inspect=async(recoverQc=true)=>{

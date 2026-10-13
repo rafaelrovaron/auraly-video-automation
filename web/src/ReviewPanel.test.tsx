@@ -90,6 +90,15 @@ it('lost_review_response_recovers_original_or_retries_frozen_request',async()=>{
   fireEvent.click(screen.getByRole('button',{name:'Reenviar a mesma decisão'}));await screen.findByText('Decisão definitiva: Aprovado');
   expect(vi.mocked(submitReview).mock.calls[1][1]).toEqual(frozen);expect(window.confirm).toHaveBeenCalledOnce();
 });
+it('reports a pending human decision to the parent before plan switching',async()=>{
+  vi.mocked(getReviewState).mockResolvedValue(ready);
+  vi.mocked(submitReview).mockImplementationOnce(()=>new Promise(()=>{}));
+  const changes:boolean[]=[];
+  render(<ReviewPanel target={target} onBusyChange={(_key,busy)=>changes.push(busy)}/>);
+  await screen.findByRole('button',{name:'Aprovar master'});
+  fill();fireEvent.click(screen.getByRole('button',{name:'Aprovar master'}));
+  expect(changes.at(-1)).toBe(true);
+});
 it('another_client_decision_is_readonly',async()=>{
   await mount(ready);fill();vi.mocked(submitReview).mockRejectedValueOnce(new ApiError('operation_conflict',409));
   fireEvent.click(screen.getByRole('button',{name:'Aprovar master'}));await screen.findByText(/Consulte a decisão/);
