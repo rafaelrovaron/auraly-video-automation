@@ -54,8 +54,8 @@ def start_local_worker(page: Page, kind: str | None = None) -> None:
         else:
             page.get_by_role('link', name='Visão geral', exact=True).click()
     if kind is not None:
-        page.get_by_role('combobox', name='Tipo de worker', exact=True).select_option(kind)
-    start = page.get_by_role('button', name='Iniciar worker', exact=True)
+        page.get_by_role('combobox', name='Tipo de processamento', exact=True).select_option(kind)
+    start = page.get_by_role('button', name='Iniciar processamento pendente', exact=True)
     expect(start).to_be_enabled(timeout=15000)
     start.click()
     page.get_by_role('button', name='Confirmar início', exact=True).click()

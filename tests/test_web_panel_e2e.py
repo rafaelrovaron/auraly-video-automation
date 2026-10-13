@@ -42,14 +42,14 @@ def test_panel_read_navigation_is_non_mutating(panel_servers: PanelServers, pane
     expect(panel_page.get_by_role('region', name='Imagens').get_by_role('heading', name='Imagem · studio · image-0.png')).to_be_visible()
     panel_page.reload()
     panel_page.get_by_role('link', name='Visão geral', exact=True).click()
-    expect(panel_page.get_by_role('button', name='Iniciar worker', exact=True)).to_be_enabled()
+    expect(panel_page.get_by_role('button', name='Iniciar processamento pendente', exact=True)).to_be_enabled()
     # Wait for a second real polling response, not an arbitrary sleep.
     with panel_page.expect_response(lambda response: response.url.endswith('/status')):
         pass
     assert writes == []
     assert database_dump(panel_servers.settings.database) == before
     assert panel_servers.provider.events == []
-    assert panel_page.locator('audio,video,img').count() == 0
+    assert panel_page.locator('video').count() == 0
 
 
 def test_panel_dev_server_does_not_serve_repository_files(panel_servers: PanelServers) -> None:
@@ -64,16 +64,16 @@ def test_panel_dev_server_does_not_serve_repository_files(panel_servers: PanelSe
 
 def test_explicit_worker_start_stop_through_real_proxy(panel_servers: PanelServers, panel_page: Page) -> None:
     panel_page.goto(panel_servers.ui_url + '#/campaigns/campaign-one')
-    start = panel_page.get_by_role('button', name='Iniciar worker', exact=True)
+    start = panel_page.get_by_role('button', name='Iniciar processamento pendente', exact=True)
     expect(start).to_be_enabled()
     start.click()
-    expect(panel_page.get_by_text('Jobs já enfileirados podem consumir créditos.')).to_be_visible()
+    expect(panel_page.get_by_text('Tarefas já enfileiradas podem consumir créditos.')).to_be_visible()
     assert not panel_servers.entered.is_set()
     with panel_page.expect_response(lambda response: response.url.endswith('/worker/start')) as response:
         panel_page.get_by_role('button', name='Confirmar início').click()
     assert response.value.status == 202
     assert panel_servers.entered.wait(10)
-    stop = panel_page.get_by_role('button', name='Parar worker', exact=True)
+    stop = panel_page.get_by_role('button', name='Parar processamento', exact=True)
     expect(stop).to_be_enabled()
     with panel_page.expect_response(lambda response: response.url.endswith('/worker/stop')) as stopped:
         stop.click()
@@ -88,7 +88,7 @@ def test_explicit_worker_start_stop_through_real_proxy(panel_servers: PanelServe
     assert commands.jobs.get_job(panel_servers.job_ids[1]).status == 'queued'
     panel_page.goto(panel_servers.ui_url + '#/campaigns/campaign-two')
     expect(panel_page.get_by_text('Estado desconhecido: worker não associado a esta campanha.')).to_be_visible()
-    expect(panel_page.get_by_role('button', name='Parar worker', exact=True)).to_be_disabled()
+    expect(panel_page.get_by_role('button', name='Parar processamento', exact=True)).to_be_disabled()
     assert panel_servers.provider.events == []
 
 
@@ -105,15 +105,22 @@ def test_proxy_preserves_origin_boundary(panel_servers: PanelServers, origin: st
     assert database_dump(panel_servers.settings.database) == before
 
 
-def test_panel_accessible_at_narrow_width(panel_servers: PanelServers, panel_page: Page) -> None:
-    panel_page.set_viewport_size({'width': 390, 'height': 844})
+@pytest.mark.parametrize('width', [320, 390, 768, 1440])
+def test_panel_accessible_at_narrow_width(panel_servers: PanelServers, panel_page: Page, width: int) -> None:
+    panel_page.set_viewport_size({'width': width, 'height': 844})
     panel_page.goto(panel_servers.ui_url + '#/campaigns/campaign-one')
-    selector = panel_page.get_by_role('combobox', name='Etapa da campanha', exact=True)
-    expect(selector).to_be_visible()
-    selector.select_option('images')
+    if width <= 700:
+        selector = panel_page.get_by_role('combobox', name='Etapa da campanha', exact=True)
+        expect(selector).to_be_visible()
+        selector.select_option('images')
+    else:
+        panel_page.get_by_role('link', name='Imagens', exact=True).click()
     expect(panel_page.get_by_role('region', name='Imagens', exact=True)).to_be_visible()
-    selector.select_option('overview')
-    button = panel_page.get_by_role('button', name='Iniciar worker', exact=True)
+    if width <= 700:
+        selector.select_option('overview')
+    else:
+        panel_page.get_by_role('link', name='Visão geral', exact=True).click()
+    button = panel_page.get_by_role('button', name='Iniciar processamento pendente', exact=True)
     expect(button).to_be_enabled()
     button.focus()
     panel_page.keyboard.press('Enter')

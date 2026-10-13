@@ -233,7 +233,7 @@ def test_lost_save_response_never_reposts(panel_servers: PanelServers, panel_pag
     expect(panel.get_by_text('Resultado editorial desconhecido. Nenhum POST será reenviado.', exact=True)).to_be_visible()
     start_kind(panel_page, 'local_operations')
     panel_page.get_by_role('link', name='Visão geral', exact=True).click()
-    expect(panel_page.get_by_role('button', name='Iniciar worker', exact=True)).to_be_enabled(timeout=15000)
+    expect(panel_page.get_by_role('button', name='Iniciar processamento pendente', exact=True)).to_be_enabled(timeout=15000)
     panel_page.get_by_role('link', name='Edição', exact=True).click()
     panel.get_by_role('button', name='Consultar plano enviado', exact=True).click()
     expect(panel.get_by_text('Resultado editorial desconhecido. Artefato encontrado; isto não confirma autoria do POST perdido.', exact=True)).to_be_visible()
