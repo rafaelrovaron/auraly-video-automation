@@ -5,11 +5,12 @@
 Este documento é a ordem operacional dos próximos Goals. O PRD define o produto; este roadmap
 define como chegar a ele sem transformar cada Goal em um projeto grande demais.
 
-**Prioridade atual (2026-10-12): D4C — Usabilidade, etapas e mobile**, antes de concluir
+**Prioridade atual (2026-10-13): D4C — Usabilidade, etapas e mobile**, antes de concluir
 o piloto D6. O feedback de uso apontou excesso de IDs/hashes, página extensa e dificuldade
 de operação no celular. [Plano de execução por slices](superpowers/plans/2026-10-12-d4c-usability-roadmap.md).
-D4C.1 está implementado e D4C.2 está em execução na branch `feat/d4c2-human-labels`.
-D4C.3–4 seguem `PLANNED`. Ainda não houve merge, push ou nova verificação de provider.
+D4C.1–3 estão implementados na branch `feat/d4c2-human-labels`; D4C.4 está em validação.
+Testes focados e suíte web passaram; gate completo e inspeção móvel real ainda pendentes.
+Ainda não houve merge, push ou nova verificação de provider.
 
 ## 1. Regra de execução
 
@@ -82,9 +83,9 @@ D5B.2A Human Review backend/CLI              IMPLEMENTED, LOCAL_VERIFIED (Window
 D5B.2B QC / Human Review API/UI              IMPLEMENTED, LOCAL_VERIFIED (Windows; main)
 D5B.3 Approved Master Delivery              IMPLEMENTED, LOCAL_VERIFIED (Windows; main)
 D4C.1 Campaign Stage Navigation             IMPLEMENTED (branch; gate completo pendente)
-D4C.2 Human-readable Names & Details        IN_PROGRESS (branch; gate completo pendente)
-D4C.3 Guided Operations & Asset Selection   PLANNED
-D4C.4 Mobile Usability Verification         PLANNED
+D4C.2 Human-readable Names & Details        IMPLEMENTED (branch; gate completo pendente)
+D4C.3 Guided Operations & Asset Selection   IMPLEMENTED (branch; gate completo pendente)
+D4C.4 Mobile Usability Verification         IN_PROGRESS (gate/inspeção pendentes)
 D6  End-to-End Personal Pilot
 ```
 

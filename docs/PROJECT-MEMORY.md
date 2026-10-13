@@ -11,7 +11,7 @@ do produto planejado para impedir que roadmap seja confundido com capacidade exi
 Feedback explícito de Rafael: UI/UX pouco amigável, muitos hashes/IDs expostos,
 necessidade de separar etapas em abas e funcionar bem no celular. O próximo recorte
 planejado passa a ser D4C, antes de concluir D6. D4C.1 foi implementado na branch
-`feat/d4c2-human-labels`; D4C.2 está em execução e D4C.3–4 seguem planejados.
+`feat/d4c2-human-labels`; D4C.2–3 foram implementados na branch e D4C.4 está em validação.
 
 Direção: nomes/contexto legíveis, dados técnicos recolhidos, navegação por etapa,
 formulários guiados e mobile desde o primeiro slice. Preservar IDs/contratos,
@@ -31,7 +31,17 @@ apresentação contextual de campanhas/cenas/variantes e detalhes técnicos reco
 Voz, HeyGen, QC, render e entrega agora priorizam estado e ação legíveis, preservando IDs
 originais nos payloads e detalhes. Verificação focada: 448 testes frontend e build
 passaram; E2E alterados passaram em execução separada. Outros painéis e validação
-integrada/mobile seguem pendentes; D4C.2 não é `LOCAL_VERIFIED`.
+integrada/mobile seguem pendentes; D4C ainda não é `LOCAL_VERIFIED`.
+
+Checkpoint D4C.3 (branch, sem merge/push): catálogo local limitado a fontes, músicas e
+arquivos de timing; seleção por nome mantém path/SHA resolvidos e revalidados. Imagens
+e WAV processado têm prévia por endpoints de mídia vinculados à campanha e ao SHA, sem
+expor caminho de disco como URL. Processamento fica junto à etapa, nunca inicia por
+navegação, e confirma explicitamente o tipo e o alcance da fila. Criar um estilo gera
+o código técnico uma vez e o recolhe. A importação manual permanece na máquina do
+Auraly, sem upload do celular. Testes focados de API e 457 testes web passaram;
+nenhuma chamada paga foi feita. D4C.4 recebeu alvos de toque e cobertura E2E para
+320/390/768/1440 px, mas o gate completo e Safari/iPhone real ainda não passaram.
 
 D5B.3 e o ajuste de host remoto foram integrados/enviados a main no merge `c8c3cab`.
 O resultado de CI desse merge não foi reconsultado neste planejamento; os checkpoints

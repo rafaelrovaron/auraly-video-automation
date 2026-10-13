@@ -1,7 +1,7 @@
 # D4C — Plano de melhoria da experiência do painel
 
 **Data:** 2026-10-12
-**Status:** `IN_PROGRESS`. D4C.1 implementado; D4C.2 em execução na branch `feat/d4c2-human-labels`; D4C.3–4 planejados. Gate completo e validação móvel pendentes.
+**Status:** `IN_PROGRESS`. D4C.1–3 implementados na branch `feat/d4c2-human-labels`; D4C.4 em validação. Gate completo e inspeção Safari/iPhone pendentes.
 **Objetivo:** operar uma campanha sem interpretar hashes, memorizar IDs ou procurar ações em uma página extensa, tanto no desktop quanto no celular.
 **Execução:** incremental e nativa, reutilizando React, FastAPI e os serviços existentes. Cada slice terá tarefas pequenas, testes proporcionais e revisão conforme o workflow do repositório.
 
@@ -90,35 +90,35 @@ SHA-256, IDs integrais, códigos de erro, caminhos técnicos e recibos continuam
 
 Arquivos principais: `web/src/App.tsx`, `CampaignPanel.tsx`, `EditingPanel.tsx`, `RenderPanel.tsx`, `useUnsavedChanges.ts`, `styles.css`. Criar shell de campanha/etapas e contexto de sessão apenas para estado compartilhado necessário.
 
-- [ ] Introduzir rotas/abas e seletor móvel; extrair Finalização do formulário de edição, mantendo seleção explícita do plano salvo.
-- [ ] Preservar rascunhos e alvo selecionado na sessão da campanha. Manter a coordenação de requests/polling e evitar duplicação de submits quando painéis mudarem.
-- [ ] Testar link antigo, link direto, refresh, Back/Forward, etapa inválida, troca de campanha, rascunho entre abas e nenhuma mutação disparada por navegação.
-- [ ] Entregar navegação funcional a 320/390 px e desktop, com um único conteúdo de etapa visível e acessível por vez.
+- [x] Introduzir rotas/abas e seletor móvel; extrair Finalização do formulário de edição, mantendo seleção explícita do plano salvo.
+- [x] Preservar rascunhos e alvo selecionado na sessão da campanha. Manter a coordenação de requests/polling e evitar duplicação de submits quando painéis mudarem.
+- [x] Testar link antigo, link direto, refresh, Back/Forward, etapa inválida, troca de campanha, rascunho entre abas e nenhuma mutação disparada por navegação.
+- [x] Entregar navegação funcional a 320/390 px e desktop, com um único conteúdo de etapa visível e acessível por vez (testes focados; gate completo pendente).
 
 ### D4C.2 — Nomes legíveis e informações técnicas secundárias
 
 Arquivos principais: `CampaignPanel.tsx`, `CampaignForms.tsx`, `VoicePanel.tsx`, `HeyGenPanel.tsx`, `ProfilePanel.tsx`, `EditingPanel.tsx`, `RenderPanel.tsx`, `ReviewPanel.tsx`, `DeliveryPanel.tsx`, DTOs/serviços de campanha se necessários. Criar helpers pequenos de apresentação compartilhada.
 
-- [ ] Aplicar vocabulário, nomes existentes e detalhes técnicos recolhidos; adicionar nome persistido de campanha e códigos gerados sem substituir IDs existentes.
-- [ ] Atualizar cards, cabeçalhos, selects e mensagens de operação. Exibir datas/duração/tamanho em formato humano quando úteis.
-- [ ] Testar registros antigos, nomes iguais/longos, nomes ausentes, reload, identificação inequívoca e payloads com os IDs originais.
-- [ ] Saída: usuário escolhe campanha, cena, voz, estilo e variante pelo contexto; hashes não aparecem na visão principal.
+- [x] Aplicar vocabulário, nomes existentes e detalhes técnicos recolhidos; adicionar nome persistido de campanha e códigos gerados sem substituir IDs existentes.
+- [x] Atualizar cards, cabeçalhos, selects e mensagens de operação. Exibir datas/duração/tamanho em formato humano quando úteis.
+- [x] Testar registros antigos, nomes iguais/longos, nomes ausentes, reload, identificação inequívoca e payloads com os IDs originais (testes focados).
+- [x] Saída: usuário escolhe campanha, cena, voz, estilo e variante pelo contexto; hashes não aparecem na visão principal.
 
 ### D4C.3 — Operação guiada e seleção de assets
 
 Arquivos principais: formulários de imagem/voz/HeyGen/profiles/overrides, `WorkerControls.tsx`, `api.ts`, `profileApi.ts` e módulos FastAPI de assets/mídia a acrescentar somente conforme a necessidade descrita acima.
 
-- [ ] Trocar path/hash manual no caminho comum por seleção de asset autorizado com referência resolvida pelo backend; manter opção avançada compatível.
-- [ ] Aproximar iniciar/consultar processamento da ação da etapa, melhorar validação e estados de falha parcial/conexão perdida e explicitar arquivos na máquina local.
-- [ ] Exibir prévias de imagem/áudio via acesso validado, reutilizando infraestrutura disponível.
-- [ ] Testar asset ausente/alterado, seleção inválida, campos obrigatórios, bloqueios reais, resposta perdida e reuso A/B sem nova chamada de provider.
-- [ ] Saída: fluxo comum sem digitação de SHA-256 e sem necessidade de descobrir o nome interno de um worker.
+- [x] Trocar path/hash manual no caminho comum por seleção de asset autorizado com referência resolvida pelo backend; manter opção avançada compatível.
+- [x] Aproximar iniciar/consultar processamento da ação da etapa, manter bloqueios de falha/conexão e explicitar arquivos na máquina local.
+- [x] Exibir prévias de imagem/áudio via acesso validado, reutilizando infraestrutura disponível.
+- [ ] Testar integração completa de asset ausente/alterado, resposta perdida e reuso A/B sem nova chamada de provider; testes focados passaram.
+- [x] Saída: fluxo comum sem digitação de SHA-256 e sem necessidade de descobrir o nome interno de um worker.
 
 ### D4C.4 — Consistência visual, validação móvel e fechamento
 
 Arquivos principais: `styles.css`, componentes ajustados nos slices anteriores, testes React existentes e `tests/test_web_*_e2e.py`; adicionar cobertura de navegação/usabilidade concentrada, sem duplicar toda a suíte para cada viewport.
 
-- [ ] Uniformizar densidade, hierarquia, botões, espaçamento, mensagens e estados vazios em todas as etapas, incluindo estilos globais.
+- [ ] Uniformizar densidade, hierarquia, botões, espaçamento, mensagens e estados vazios em todas as etapas, incluindo estilos globais (alvos de toque e largura mínima ajustados; inspeção visual pendente).
 - [ ] Verificar 320, 390, 768 e 1440 px com nomes longos e dados reais/sintéticos representativos; nenhuma rolagem horizontal da página. Testar teclado, foco, zoom e erro de rede.
 - [ ] Executar fluxo local com provider fake: campanha → importação → voz → vídeos → edição A/B → finalização → aprovação → entrega, preservando os contratos e guardas atuais.
 - [ ] Fazer inspeção visual em navegador e teste manual no Safari/iPhone via endereço remoto disponível; registrar separadamente teste real e viewport emulada, sem alegar equivalência.

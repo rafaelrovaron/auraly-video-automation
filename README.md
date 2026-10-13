@@ -515,6 +515,15 @@ na sessão; ao sair da campanha ou recarregar, alterações não salvas ainda ex
 As portas 8000/5173 são fixas nesta etapa. O proxy preserva Host/Origin loopback;
 não é necessário habilitar CORS nem expor a API na rede.
 
+Em Imagens, prepare a pasta pelo painel e copie os arquivos para a máquina que executa
+o Auraly; a pasta não é monitorada automaticamente. Acesso pelo celular controla essa
+máquina, mas não faz upload dos arquivos do telefone. O painel exibe miniaturas das
+imagens e permite ouvir o WAV processado antes da aprovação explícita. Para edição,
+coloque fontes em `assets/fonts`, músicas em `assets/music` e timing em `assets/timing`
+sob o project root para selecioná-los por nome; referências manuais permanecem em
+opções avançadas. Iniciar processamento junto a uma etapa pode capturar outras tarefas
+elegíveis do mesmo tipo na campanha e nunca acontece apenas por navegar.
+
 O painel mostra metadados, status, pendências, erros e Jobs; não serve arquivos de mídia,
 thumbnails ou players. Leituras não executam providers. Start exige confirmação e pode
 consumir créditos se houver Jobs pagos já aprovados na fila. Stop impede novas claims e
