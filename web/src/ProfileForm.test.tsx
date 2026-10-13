@@ -32,6 +32,15 @@ it('rejects_partial_asset_reference',()=>{
   const {onSubmit}=form(); fill('Headline · Fonte: caminho relativo','fonts/plain.ttf'); save();
   expect(onSubmit).not.toHaveBeenCalled();
 });
+it('selects a local font by name and submits its exact path and digest',()=>{
+  const onSubmit=vi.fn();
+  render(<ProfileForm initial={profileFixture().profile} creating readOnly={false} disabled={false}
+    assets={[{kind:'font',name:'Brand.ttf',path:'assets/fonts/Brand.ttf',sha256:'b'.repeat(64)}]}
+    onSubmit={onSubmit} onDirtyChange={()=>{}}/>);
+  fireEvent.change(screen.getByLabelText('Headline · Fonte: escolher arquivo'),{target:{value:'assets/fonts/Brand.ttf'}});
+  save();
+  expect(onSubmit.mock.calls[0][0].defaults.headline.font).toEqual({path:'assets/fonts/Brand.ttf',sha256:'b'.repeat(64)});
+});
 it.each([['Headline · X (0–1)','1.1'],['Headline · Margem esquerda (0–1)','0.95'],
   ['Enquadramento · Escala (1–1.25)','1.3'],['Headline · Início (s)','-1'],['Música · Fade-in (s)','-1']])('rejects limits %s',(label,value)=>{
   const {onSubmit}=form(); fill(label,value); save(); expect(onSubmit).not.toHaveBeenCalled();

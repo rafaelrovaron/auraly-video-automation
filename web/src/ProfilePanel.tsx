@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { ApiError } from './api';
 import { ProfileForm } from './ProfileForm';
+import { listLocalAssets } from './assetApi';
+import { usePolling } from './usePolling';
 import { getProfile, listProfiles, newProfile, publishProfile, sameProfileContent, type EditProfile, type ProfileView } from './profileApi';
 import { useUnsavedChanges } from './useUnsavedChanges';
 
@@ -8,6 +10,7 @@ type Draft={initial:EditProfile; creating:boolean; baseVersion?:number; key:numb
 type Submission={profile:EditProfile; baseVersion?:number; state:'unknown'|'absent'|'conflict'};
 const message=(e:unknown)=>e instanceof ApiError?`${e.message} (${e.code})`:'A operação local falhou com segurança.';
 export function ProfilePanel() {
+  const assets=usePolling('editing-assets',listLocalAssets,null);
   const [items,setItems]=useState<ProfileView[]>([]),[listLoading,setListLoading]=useState(true);
   const [listError,setListError]=useState(''),[error,setError]=useState(''),[notice,setNotice]=useState('');
   const [selected,setSelected]=useState(''),[view,setView]=useState<ProfileView|null>(null);
@@ -106,6 +109,7 @@ export function ProfilePanel() {
       <button onClick={create} disabled={busy}>Novo profile</button></div>
     {listLoading&&<p role="status">Carregando profiles…</p>}
     {listError&&<p role="alert">{listError} {items.length>0?'Lista desatualizada.':'Lista indisponível.'}</p>}
+    {assets.error&&<p role="status">Arquivos locais indisponíveis; use a referência avançada ou consulte novamente. <button onClick={assets.refresh}>Consultar arquivos</button></p>}
     {!listLoading&&!listError&&items.length===0&&<p>Nenhum profile publicado.</p>}
     <label>Consultar profile e versão<select aria-label="Consultar profile e versão" value={selected} disabled={busy} onChange={e=>void select(e.target.value)}>
       <option value="">Selecione uma versão</option>
@@ -124,12 +128,12 @@ export function ProfilePanel() {
     </div>}
     {draft?<><h2>Rascunho · v{draft.initial.version}</h2>
       <button disabled={busy} onClick={()=>{if(discard()){reset();setDraft(null);}}}>Descartar rascunho</button>
-      <ProfileForm key={draft.key} initial={draft.initial} creating={draft.creating} readOnly={false}
+      <ProfileForm key={draft.key} initial={draft.initial} creating={draft.creating} readOnly={false} assets={assets.data?.items??[]}
         disabled={busy||submission!==null} onSubmit={p=>void save(p)} onDirtyChange={setDirty}/></>:
       view&&<><p>Versão publicada · {view.profile.name} · v{view.profile.version}</p>
         <details><summary>Detalhes técnicos</summary><p>ID: {view.profile.profileId}</p><p>SHA-256: <code>{view.profileHash}</code></p></details>
         <button disabled={busy} onClick={version}>Criar nova versão</button>
-        <ProfileForm key={`${view.profile.profileId}/${view.profile.version}`} initial={view.profile} creating={false}
+        <ProfileForm key={`${view.profile.profileId}/${view.profile.version}`} initial={view.profile} creating={false} assets={assets.data?.items??[]}
           readOnly={true} disabled={false} onSubmit={()=>{}} onDirtyChange={()=>{}}/></>}
   </section>;
 }

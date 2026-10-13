@@ -7,7 +7,8 @@ import {PROFILE} from './profileTestSupport';
 const hints={...PROFILE.profile.defaults,headline:{...PROFILE.profile.defaults.headline,text:'Base'}};
 function Harness({disabled=false}:{disabled?:boolean}){
   const [draft,setDraft]=useState(newOverrideDraft());
-  return <><EditOverridesForm draft={draft} inherited={hints} label="Camada" disabled={disabled} onChange={setDraft}/>
+  return <><EditOverridesForm draft={draft} inherited={hints} label="Camada" disabled={disabled}
+    assets={[{kind:'music',name:'Calm.wav',path:'assets/music/Calm.wav',sha256:'c'.repeat(64)}]} onChange={setDraft}/>
     <output data-testid="result">{JSON.stringify(readOverrides(draft))}</output></>;
 }
 const result=()=>JSON.parse(screen.getByTestId('result').textContent!);
@@ -44,6 +45,12 @@ it('rejects partial assets and unsupported clear',()=>{
   const draft=newOverrideDraft();draft.music.asset={mode:'replace',value:{path:'music/a.wav',sha256:''}};
   expect(readOverrides(draft).invalidField).toBe('music.asset');
   draft.music.asset.mode='inherit';draft.music.loop.mode='clear';expect(readOverrides(draft).invalidField).toBe('music.loop');
+});
+it('selects music by name while keeping the full reference in the override payload',()=>{
+  render(<Harness/>);
+  fireEvent.change(screen.getByLabelText('Camada · Música · asset · Modo'),{target:{value:'replace'}});
+  fireEvent.change(screen.getByLabelText('Camada · Música · asset · Escolher arquivo'),{target:{value:'assets/music/Calm.wav'}});
+  expect(result().overrides.music.asset).toEqual({path:'assets/music/Calm.wav',sha256:'c'.repeat(64)});
 });
 it('has accessible disabled controls and no nested form',()=>{
   const {container}=render(<Harness disabled/>);

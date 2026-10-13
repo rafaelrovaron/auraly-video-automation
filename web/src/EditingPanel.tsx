@@ -12,6 +12,8 @@ import type {EditBatchPlan,EditBatchRequest,EditOverrides,PlanSummary} from './e
 import {useUnsavedChanges} from './useUnsavedChanges';
 import {EditPreview,previewSettings} from './EditPreview';
 import {RenderPanel} from './RenderPanel';
+import {listLocalAssets} from './assetApi';
+import {usePolling} from './usePolling';
 
 type Props={campaignId:string;renders:RemoteState<Items<HeyGenRenderView>>;scenes?:SceneVariant[];onRenderPlanChange?:(plan:EditBatchPlan|null)=>void};
 type Variant={row:number;key:string;label:string;draft:OverrideDraft};
@@ -31,6 +33,7 @@ function PlanDetails({plan}:{plan:EditBatchPlan}){
 }
 export function EditingPanel(props:Props){return <EditorialFlow key={props.campaignId} {...props}/>;}
 function EditorialFlow({campaignId,renders,scenes,onRenderPlanChange}:Props){
+  const assets=usePolling('editing-assets',listLocalAssets,null);
   const [profiles,setProfiles]=useState<ProfileView[]>([]),[plans,setPlans]=useState<PlanSummary[]>([]);
   const [listError,setListError]=useState<string|null>(null),[listsLoading,setListsLoading]=useState(true);
   const [renderId,setRenderId]=useState(''),[profileKey,setProfileKey]=useState(''),[profile,setProfile]=useState<ProfileView|null>(null);
@@ -194,18 +197,24 @@ function EditorialFlow({campaignId,renders,scenes,onRenderPlanChange}:Props){
         <label>Headline base<input name="headlineText" value={headline} onChange={e=>{change();setHeadline(e.target.value);}}/></label>
         <label>Limite de saídas<input name="maxOutputs" type="number" value={maxOutputs} onChange={e=>{change();setMaxOutputs(e.target.value);}}/></label>
         <label>Aceito o uso da música nesta edição<input type="checkbox" checked={musicAccepted} onChange={e=>{change();setMusicAccepted(e.target.checked);}}/></label>
-        <details><summary>Timing de legendas existente</summary>
+        <label>Timing de legendas: escolher arquivo<select aria-label="Timing de legendas: escolher arquivo"
+          value={assets.data?.items.find(asset=>asset.kind==='timing'&&asset.path===timingPath&&asset.sha256===timingHash)?.path??''}
+          onChange={e=>{const asset=assets.data?.items.find(item=>item.kind==='timing'&&item.path===e.target.value);
+            change();setTimingPath(asset?.path??'');setTimingHash(asset?.sha256??'');}}>
+          <option value="">Nenhum timing selecionado</option>{assets.data?.items.filter(asset=>asset.kind==='timing').map(asset=><option key={asset.path} value={asset.path}>{asset.name}</option>)}
+        </select></label>
+        <details><summary>Timing de legendas · referência avançada</summary>
           <label>Timing: caminho relativo ao project root<input name="timingPath" value={timingPath} onChange={e=>{change();setTimingPath(e.target.value);}}/></label>
           <label>Timing: SHA-256<input name="timingHash" value={timingHash} onChange={e=>{change();setTimingHash(e.target.value);}}/></label>
-        </details><p>Fontes/música/timing por path/hash explícitos. Sem timing, captions habilitadas ficam pendentes; não há editor de texto de legendas.</p>
+        </details><p>Arquivos no computador que executa a API: assets/fonts, assets/music e assets/timing. No celular, esta seleção não lê arquivos do telefone. Sem timing, legendas habilitadas ficam pendentes.</p>
       </fieldset>
       {hints&&cHints&&vHints&&<>
-        <EditOverridesForm label="Campanha" draft={campaign} inherited={hints} disabled={busy} onChange={(d,f)=>overrideChange(()=>setCampaign(d),f)}/>
-        <EditOverridesForm label="Vídeo" draft={video} inherited={cHints} disabled={busy} onChange={(d,f)=>overrideChange(()=>setVideo(d),f)}/>
+        <EditOverridesForm label="Campanha" draft={campaign} inherited={hints} disabled={busy} assets={assets.data?.items??[]} onChange={(d,f)=>overrideChange(()=>setCampaign(d),f)}/>
+        <EditOverridesForm label="Vídeo" draft={video} inherited={cHints} disabled={busy} assets={assets.data?.items??[]} onChange={(d,f)=>overrideChange(()=>setVideo(d),f)}/>
         {variants.map(variant=><fieldset key={variant.row} disabled={busy}><legend>Variante {variant.key}</legend>
           <label>Key da variante {variant.key}<input name={`variant.${variant.row}.key`} value={variant.key} onChange={e=>{change();setVariants(old=>old.map(v=>v.row===variant.row?{...v,key:e.target.value}:v));}}/></label>
           <label>Nome da variante {variant.key}<input name={`variant.${variant.row}.label`} value={variant.label} onChange={e=>{change();setVariants(old=>old.map(v=>v.row===variant.row?{...v,label:e.target.value}:v));}}/></label>
-          <EditOverridesForm label={`Variante ${variant.key}`} draft={variant.draft} inherited={vHints} disabled={busy} onChange={(d,f)=>overrideChange(()=>setVariants(old=>old.map(v=>v.row===variant.row?{...v,draft:d}:v)),f)}/>
+          <EditOverridesForm label={`Variante ${variant.key}`} draft={variant.draft} inherited={vHints} disabled={busy} assets={assets.data?.items??[]} onChange={(d,f)=>overrideChange(()=>setVariants(old=>old.map(v=>v.row===variant.row?{...v,draft:d}:v)),f)}/>
           <button type="button" disabled={variants.length===1} onClick={()=>{change();setVariants(old=>old.filter(v=>v.row!==variant.row));if(variant.draft.music.asset.mode!=='inherit')setMusicAccepted(false);}}>Remover variante {variant.key}</button>
         </fieldset>)}
         <button type="button" disabled={busy} onClick={()=>{change();const row=nextRow.current++;let n=1;let key='b';while(variants.some(v=>v.key===key)){n++;key=n<26?String.fromCharCode(97+n):`v${n}`;}

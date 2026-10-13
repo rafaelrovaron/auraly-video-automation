@@ -21,6 +21,7 @@ from auraly_pipeline.api.contracts import (
     ProfileView, QueryError, RenderSummary, SceneImages, VoiceSummary,
 )
 from auraly_pipeline.api.queries import ApiQueries
+from auraly_pipeline.api.asset_catalog import LocalAsset, list_local_assets
 from auraly_pipeline.campaigns.domain import CampaignBudgetView
 from auraly_pipeline.campaigns.persistence import create_readonly_sqlite_engine, create_existing_sqlite_engine, validate_api_database
 from auraly_pipeline.api.commands import ApiCommands
@@ -190,6 +191,10 @@ def create_app(settings: ApiSettings) -> FastAPI:
     @app.get("/api/v1/editing/profiles")
     def profiles(queries: Queries) -> Items[ProfileView]:
         return Items(items=queries.list_profiles())
+
+    @app.get("/api/v1/editing/assets")
+    def editing_assets() -> Items[LocalAsset]:
+        return Items(items=list_local_assets(settings.project_root))
 
     @app.get("/api/v1/editing/profiles/{profileId}/{version}")
     def profile(profileId: EditId, version: Version, queries: Queries) -> ProfileView:

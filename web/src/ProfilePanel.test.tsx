@@ -9,6 +9,7 @@ function server(mode='ok') {
   const stored=new Map<string,ProfileView>([['plain/1',profileFixture()]]),posts:string[]=[];
   let queryMode='ok';
   vi.stubGlobal('fetch',async(path:string,opts:RequestInit)=>{
+    if(path==='/api/v1/editing/assets')return Response.json({items:[{kind:'font',name:'Brand.ttf',path:'assets/fonts/Brand.ttf',sha256:'b'.repeat(64)}]});
     const key=path.slice(root.length+1);
     if(opts.method==='POST') {
       posts.push(path); const profile=JSON.parse(opts.body as string);
@@ -23,6 +24,17 @@ function server(mode='ok') {
   });
   return {stored,posts,setQueryMode:(v:string)=>{queryMode=v;}};
 }
+it('loads local assets for a new style without requiring a typed hash',async()=>{
+  const s=server();render(<ProfilePanel/>);
+  fireEvent.click(await screen.findByRole('button',{name:'Novo profile'}));
+  await waitFor(()=>expect((screen.getByLabelText('Headline · Fonte: escolher arquivo') as HTMLSelectElement).options).toHaveLength(2));
+  fireEvent.change(screen.getByLabelText('ID do profile'),{target:{value:'brand'}});
+  fireEvent.change(screen.getByLabelText('Nome do profile'),{target:{value:'Brand'}});
+  fireEvent.change(screen.getByLabelText('Headline · Fonte: escolher arquivo'),{target:{value:'assets/fonts/Brand.ttf'}});
+  fireEvent.click(screen.getByRole('button',{name:'Salvar versão'}));
+  await screen.findByText('Versão publicada e confirmada.');
+  expect(s.stored.get('brand/1')?.profile.defaults.headline.font).toEqual({path:'assets/fonts/Brand.ttf',sha256:'b'.repeat(64)});
+});
 async function select(key='plain/1') {
   await screen.findByRole('option',{name:/Plain · v1/});
   fireEvent.change(screen.getByLabelText('Consultar profile e versão'),{target:{value:key}});

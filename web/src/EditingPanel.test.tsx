@@ -26,6 +26,7 @@ function server(options:{trim?:boolean;lost?:boolean;queued?:boolean;failed?:boo
       return Response.json({jobId:'edit-job',campaignId:options.postMalformed?'other':'campaign-one',operation:'edit_plan'});
     }
     if(path==='/api/v1/editing/profiles')return Response.json({items:[PROFILE]});
+    if(path==='/api/v1/editing/assets')return Response.json({items:[{kind:'timing',name:'Captions.json',path:'assets/timing/Captions.json',sha256:'d'.repeat(64)}]});
     if(path==='/api/v1/editing/profiles/plain/1')return Response.json(PROFILE);
     if(path.endsWith('/operations/edit-job')){
       if(options.delay)return options.delay;
@@ -42,6 +43,13 @@ function server(options:{trim?:boolean;lost?:boolean;queued?:boolean;failed?:boo
   });
   return {posts,saved,complete:()=>{queued=false;}};
 }
+it('chooses caption timing by name and pins the full reference in the plan request',async()=>{
+  const s=server();render(<EditingPanel campaignId="campaign-one" renders={renders}/>);await draft();
+  await screen.findByRole('option',{name:'Captions.json'});
+  fireEvent.change(screen.getByLabelText('Timing de legendas: escolher arquivo'),{target:{value:'assets/timing/Captions.json'}});
+  validate();await waitFor(()=>expect(s.posts).toHaveLength(1));
+  expect(s.posts[0].request.timingRef).toEqual({path:'assets/timing/Captions.json',sha256:'d'.repeat(64)});
+});
 async function draft(){
   await screen.findByRole('option',{name:/Plain.*v1/});
   fireEvent.change(screen.getByLabelText('MP4 HeyGen para edição'),{target:{value:'render-one'}});

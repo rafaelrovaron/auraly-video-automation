@@ -2,6 +2,7 @@ import {editOverrides} from './editingApi';
 import type {EditOverrides} from './editingApi';
 import {newProfile} from './profileApi';
 import type {EditDefaults,HeadlineStyle} from './profileApi';
+import type {LocalAsset} from './assetApi';
 
 export type FieldDraft={mode:'inherit'|'replace'|'clear';value:string|boolean|{path:string;sha256:string}};
 export type OverrideDraft={[S in keyof EditOverrides]-?:{[F in keyof NonNullable<EditOverrides[S]>]-?:FieldDraft}};
@@ -41,21 +42,29 @@ export function readOverrides(draft:OverrideDraft):{overrides:EditOverrides|null
   }
   return {overrides:result as EditOverrides,invalidField:null};
 }
-export function EditOverridesForm({draft,inherited,disabled,label,onChange}:{draft:OverrideDraft;inherited:OverrideHints;disabled:boolean;label:string;
+export function EditOverridesForm({draft,inherited,disabled,label,assets=[],onChange}:{draft:OverrideDraft;inherited:OverrideHints;disabled:boolean;label:string;assets?:LocalAsset[];
   onChange:(draft:OverrideDraft,field:string)=>void}){
   const control=(section:Section,field:string,item:FieldDraft)=>{
     const name=`${section}.${field}`,caption=`${label} · ${names[section]} · ${field==='text'?'Texto':field}`;
     const hint=(inherited[section] as unknown as Record<string,unknown>)[field];
     const change=(next:FieldDraft)=>{const copy=structuredClone(draft);(copy[section] as Record<string,FieldDraft>)[field]=next;onChange(copy,name);};
     const numeric=typeof (defaults[section] as unknown as Record<string,unknown>)[field]==='number'||name==='headline.endSec'||name==='music.trimEndSec';
+    const ref=typeof item.value==='object'?item.value:null;
     return <div key={name} className="override-field">
       <label>{caption} · Modo<select aria-label={`${caption} · Modo`} value={item.mode} name={`${label}.${name}.mode`} onChange={e=>{
         const mode=e.target.value as FieldDraft['mode'];change({mode,value:mode==='replace'&&item.mode==='inherit'?raw(hint,name):item.value});
       }}><option value="inherit">Herdar</option><option value="replace">Substituir</option>{nullable.has(name)&&<option value="clear">Limpar</option>}</select></label>
-      <small>Herdado: {typeof hint==='object'?JSON.stringify(hint):String(hint??'Não definido')} (não validado)</small>
+      <small>Herdado: {hint&&typeof hint==='object'&&'path' in hint?String(hint.path).split('/').at(-1):String(hint??'Não definido')} (não validado)</small>
       {item.mode==='replace'&&(typeof item.value==='object'?<>
-        <label>{caption} · Caminho<input name={`${label}.${name}`} value={item.value.path} onChange={e=>change({...item,value:{...(item.value as {path:string;sha256:string}),path:e.target.value}})}/></label>
-        <label>{caption} · SHA-256<input name={`${label}.${name}.sha256`} value={item.value.sha256} onChange={e=>change({...item,value:{...(item.value as {path:string;sha256:string}),sha256:e.target.value}})}/></label>
+        <label>{caption} · Escolher arquivo<select aria-label={`${caption} · Escolher arquivo`}
+          value={assets.find(asset=>asset.path===ref?.path&&asset.sha256===ref?.sha256)?.path??''}
+          onChange={e=>{const asset=assets.find(value=>value.path===e.target.value);if(asset)change({...item,value:{path:asset.path,sha256:asset.sha256}});}}>
+          <option value="">Selecione um arquivo</option>{assets.filter(asset=>asset.kind===(name==='music.asset'?'music':'font')).map(asset=><option key={asset.path} value={asset.path}>{asset.name}</option>)}
+        </select></label>
+        <details><summary>{caption} · Referência avançada</summary>
+          <label>{caption} · Caminho<input name={`${label}.${name}`} value={ref?.path??''} onChange={e=>change({...item,value:{...(item.value as {path:string;sha256:string}),path:e.target.value}})}/></label>
+          <label>{caption} · SHA-256<input name={`${label}.${name}.sha256`} value={ref?.sha256??''} onChange={e=>change({...item,value:{...(item.value as {path:string;sha256:string}),sha256:e.target.value}})}/></label>
+        </details>
       </>:typeof item.value==='boolean'?<label>{caption}<input name={`${label}.${name}`} type="checkbox" checked={item.value} onChange={e=>change({...item,value:e.target.checked})}/></label>
         :choices[name]?<label>{caption}<select aria-label={caption} name={`${label}.${name}`} value={item.value} onChange={e=>change({...item,value:e.target.value})}>
           {choices[name].map(value=><option key={value}>{value}</option>)}</select></label>

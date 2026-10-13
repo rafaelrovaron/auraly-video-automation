@@ -1,10 +1,15 @@
 import { useId, useState } from 'react';
-import { editProfile, newProfile, type EditProfile, type TextStyle } from './profileApi';
+import { editProfile, newProfile, type EditProfile } from './profileApi';
+import type { LocalAsset } from './assetApi';
+import type { AssetRef } from './profileApi';
 
 type Props={initial:EditProfile; creating:boolean; readOnly:boolean; disabled:boolean;
-  onSubmit:(profile:EditProfile)=>void; onDirtyChange:(dirty:boolean)=>void};
-export function ProfileForm({initial,creating,readOnly,disabled,onSubmit,onDirtyChange}:Props) {
+  assets?:LocalAsset[]; onSubmit:(profile:EditProfile)=>void; onDirtyChange:(dirty:boolean)=>void};
+export function ProfileForm({initial,creating,readOnly,disabled,assets=[],onSubmit,onDirtyChange}:Props) {
   const [error,setError]=useState('');
+  const [refs,setRefs]=useState<Record<string,AssetRef|null>>({
+    'headline.font':initial.defaults.headline.font,'captions.font':initial.defaults.captions.font,'music.asset':initial.defaults.music.asset,
+  });
   const errorId=useId();
   const value=(section:keyof EditProfile['defaults'],key:string):unknown =>
     (initial.defaults[section] as unknown as Record<string,unknown>)[key];
@@ -22,9 +27,18 @@ export function ProfileForm({initial,creating,readOnly,disabled,onSubmit,onDirty
     </select></label>;
   }
   function asset(section:'headline'|'captions'|'music',key:'font'|'asset',prefix:string) {
-    const ref=key==='asset'?initial.defaults.music.asset:(initial.defaults[section as 'headline'|'captions'] as TextStyle).font;
-    return <><label>{prefix}: caminho relativo<input name={`${section}.${key}.path`} defaultValue={ref?.path??''}/></label>
-      <label>{prefix}: SHA-256<input name={`${section}.${key}.sha256`} defaultValue={ref?.sha256??''}/></label></>;
+    const name=`${section}.${key}`,ref=refs[name];
+    const choices=assets.filter(item=>item.kind===(key==='font'?'font':'music'));
+    const selected=choices.find(item=>item.path===ref?.path&&item.sha256===ref.sha256)?.path??'';
+    return <><label>{prefix}: escolher arquivo<select aria-label={`${prefix}: escolher arquivo`} value={selected} onChange={event=>{
+      const match=choices.find(item=>item.path===event.target.value);
+      setRefs(old=>({...old,[name]:match?{path:match.path,sha256:match.sha256}:null}));
+    }}><option value="">{ref?'Arquivo atual ou seleção manual':'Nenhum arquivo'}</option>
+      {choices.map(item=><option key={item.path} value={item.path}>{item.name}</option>)}</select></label>
+      <details><summary>{prefix}: referência avançada</summary>
+        <label>{prefix}: caminho relativo<input name={`${name}.path`} value={ref?.path??''} onChange={event=>setRefs(old=>({...old,[name]:{path:event.target.value,sha256:ref?.sha256??''}}))}/></label>
+        <label>{prefix}: SHA-256<input name={`${name}.sha256`} value={ref?.sha256??''} onChange={event=>setRefs(old=>({...old,[name]:{path:ref?.path??'',sha256:event.target.value}}))}/></label>
+      </details></>;
   }
   function textFields(section:'headline'|'captions',label:string) {
     const p=`${label} · `;
